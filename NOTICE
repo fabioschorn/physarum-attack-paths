@@ -1,0 +1,41 @@
+physarum-attack-paths
+Copyright 2026 Fabio Schorn
+
+This product includes software developed by Fabio Schorn
+and contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License").
+See LICENSE for full terms.
+
+---
+
+ACKNOWLEDGMENTS
+
+The mathematical foundation of this project is derived from the
+following published research, which is acknowledged with gratitude:
+
+  Tero, A., Kobayashi, R., Nakagaki, T. (2007).
+  "A mathematical model for adaptive transport network in path
+  finding by true slime mold."
+  Journal of Theoretical Biology, 244(4), 553-564.
+
+  Becchetti, L., Bonifaci, V., Dirnberger, M., Karrenbauer, A.,
+  Mehlhorn, K. (2013).
+  "Physarum can compute shortest paths: convergence proofs and
+  complexity bounds." ICALP.
+
+  Liu, Y., Gao, C., Zhang, Z., Lu, Y., Chen, S., Liang, M., Tao, L.
+  (2017). "An improved Physarum polycephalum algorithm for the
+  shortest path problem." Scientific World Journal.
+
+This software builds on the following open-source libraries.
+Each is licensed under its own terms; see the respective project
+for license details:
+
+  - aya              (eBPF, Apache-2.0 / MIT)
+  - quinn            (QUIC, Apache-2.0 / MIT)
+  - tokio            (async runtime, MIT)
+  - axum             (HTTP framework, MIT)
+  - petgraph         (graph data structures, Apache-2.0 / MIT)
+  - ed25519-dalek    (signatures, BSD-3-Clause)
+  - serde            (serialization, Apache-2.0 / MIT)
