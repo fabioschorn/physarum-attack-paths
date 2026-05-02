@@ -1,0 +1,26 @@
+[package]
+name        = "physarum-server"
+description = "Physarum attack-path coordinator server"
+
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[[bin]]
+name = "physarum-server"
+path = "src/main.rs"
+
+[dependencies]
+physarum-protocol = { path = "../physarum-protocol" }
+
+axum               = { workspace = true }
+tokio              = { workspace = true }
+serde              = { workspace = true }
+serde_json         = { workspace = true }
+chrono             = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap               = { workspace = true }

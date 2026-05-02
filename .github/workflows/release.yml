@@ -1,0 +1,148 @@
+name: Release
+
+# Disparado quando você faz:
+#   git tag v0.1.0
+#   git push --tags
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  BINARY_NAME: physarum-server
+
+jobs:
+  # ── Etapa 1: cria o rascunho da Release no GitHub ──────────────────────────
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version:    ${{ steps.get_version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release (draft)
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name:    ${{ github.ref_name }}
+          release_name: "physarum-attack-paths ${{ github.ref_name }}"
+          draft:        true
+          prerelease:   false
+          body: |
+            ## physarum-attack-paths ${{ github.ref_name }}
+
+            ### Download
+
+            | Plataforma    | Arquivo                                                              |
+            |---------------|----------------------------------------------------------------------|
+            | Linux x86_64  | `physarum-server-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz`  |
+            | Linux ARM64   | `physarum-server-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz` |
+
+            ### Instalação
+
+            ```bash
+            tar -xzf physarum-server-${{ github.ref_name }}-<target>.tar.gz
+            ./physarum-server --listen 0.0.0.0:8080
+            ```
+
+  # ── Etapa 2: build para cada plataforma em paralelo ───────────────────────
+  build-release:
+    name: Build (${{ matrix.target }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os:     ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+
+          # Linux ARM64 (cross-compilation via cross)
+          - os:     ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use_cross: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Instala `cross` para targets de cross-compilation (ex: Linux ARM64)
+      - name: Install cross
+        if: matrix.use_cross == true
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      # Build com cargo (nativo)
+      - name: Build (cargo)
+        if: matrix.use_cross != true
+        run: cargo build --release --locked --target ${{ matrix.target }} -p physarum-server
+
+      # Build com cross (cross-compilation)
+      - name: Build (cross)
+        if: matrix.use_cross == true
+        run: cross build --release --locked --target ${{ matrix.target }} -p physarum-server
+
+      # ── Empacotamento (.tar.gz) ───────────────────────────────────────────────
+      - name: Package
+        shell: bash
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          TARGET=${{ matrix.target }}
+          ASSET_NAME="${{ env.BINARY_NAME }}-${VERSION}-${TARGET}"
+          STAGING="${ASSET_NAME}"
+
+          mkdir -p "$STAGING"
+          cp "target/${TARGET}/release/${{ env.BINARY_NAME }}" "$STAGING/"
+          cp README.md LICENSE NOTICE "$STAGING/"
+
+          tar -czf "${STAGING}.tar.gz" "$STAGING"
+          echo "ASSET_PATH=${STAGING}.tar.gz" >> "$GITHUB_ENV"
+          echo "ASSET_NAME=${STAGING}.tar.gz" >> "$GITHUB_ENV"
+
+      # ── Upload do asset para a Release ───────────────────────────────────
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url:         ${{ needs.create-release.outputs.upload_url }}
+          asset_path:         ${{ env.ASSET_PATH }}
+          asset_name:         ${{ env.ASSET_NAME }}
+          asset_content_type: application/octet-stream
+
+  # ── Etapa 3: publica a Release (tira do modo draft) ───────────────────────
+  publish-release:
+    name: Publish Release
+    needs: [create-release, build-release]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Publish Release
+        uses: eregon/publish-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          release_id: ${{ needs.create-release.outputs.upload_url }}

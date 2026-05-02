@@ -1,9 +1,45 @@
-# Ignore all files and directories that match these patterns.
+# ── macOS ────────────────────────────────────────────────────────────────────
 .DS_Store
-Cargo.lock
-Cargo.toml
-doc
-doc/*
-others/*
-target
-target/*
+.AppleDouble
+.LSOverride
+
+# ── Windows ──────────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── Rust build output (generated — never commit) ──────────────────────────────
+target/
+
+# rustfmt backup files (created with --backup flag)
+**/*.rs.bk
+
+# Windows debug symbol files (generated during cross-compilation)
+*.pdb
+
+# ── Distribuição local (gerado por Utilities/dist-local.sh) ──────────────────
+dist/
+*.tar.gz
+*.zip
+
+# ── Editors — JetBrains ───────────────────────────────────────────────────────
+.idea/
+
+# ── Editors — VS Code ─────────────────────────────────────────────────────────
+# settings.json e launch.json são configurações pessoais, não do projeto.
+# extensions.json (recomendações de extensões) PODE ser commitado.
+.vscode/settings.json
+.vscode/launch.json
+
+# ── Editors — Vim / Emacs / genéricos ────────────────────────────────────────
+*.swp
+*.swo
+*~
+
+# ── Ambiente ──────────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Temporários locais (gerados por scripts internos, nunca commitados) ────────
+tmp/
