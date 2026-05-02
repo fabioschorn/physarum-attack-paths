@@ -5,7 +5,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
 [![Rust](https://img.shields.io/badge/rust-1.78%2B-orange.svg)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/platform-linux--ebpf-lightgrey.svg)](https://ebpf.io/)
+[![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](https://github.com/fabioschorn/physarum-attack-paths/releases)
+[![CI](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml/badge.svg)](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml)
 
 `physarum-attack-paths` is a distributed system for discovering, validating, and continuously refining cybersecurity attack paths across heterogeneous computing environments. It abstracts away from the static, scanner-centric view of the network and replaces it with a **living topology**: each host runs a lightweight Rust agent, and the system as a whole behaves like the slime mold *Physarum polycephalum* — strengthening the routes that carry real flow and pruning the routes that don't.
 
@@ -21,6 +22,7 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 - [Mathematical core](#mathematical-core)
 - [Repository layout](#repository-layout)
 - [Quick start](#quick-start)
+- [Development workflow](#development-workflow)
 - [Agent reference](#agent-reference)
 - [Coordinator reference](#coordinator-reference)
 - [Protocol](#protocol)
@@ -209,79 +211,77 @@ Thresholds are configurable. Drift is detected as `|layer_emergent(t) - layer_em
 
 ## Repository layout
 
+> Legend: `✔` implemented · `◌` planned
+
 ```
 physarum-attack-paths/
-├── Cargo.toml                       # workspace root
-├── README.md                        # this file
-├── LICENSE
+├── Cargo.toml                        # workspace root (resolver = "2", msrv 1.78)
+├── Cargo.lock                        # committed — binary project reproducibility
+├── README.md
+├── LICENSE                           # Apache 2.0
+├── NOTICE
+├── SECURITY.md
+│
 ├── crates/
-│   ├── physarum-protocol/           # shared wire types (no_std-friendly)
-│   │   ├── src/
-│   │   │   ├── lib.rs
-│   │   │   ├── probe.rs             # ProbeReport, SignedReport, ValidationEvent
-│   │   │   ├── pressure.rs          # PressureUpdate
-│   │   │   └── identity.rs          # AgentId, key fingerprints
-│   │   └── Cargo.toml
+│   ├── physarum-protocol/       ✔    # shared wire types across all crates
+│   │   └── src/lib.rs               # AgentInfo, RegisterRequest/Response,
+│   │                                # ProbeReport, GraphSnapshot, EdgeSnapshot
 │   │
-│   ├── physarum-ebpf/               # kernel-side program
-│   │   ├── src/main.rs              # tracepoint, flow map
-│   │   └── Cargo.toml               # aya-ebpf
+│   ├── physarum-server/         ✔    # Phase 0 HTTP coordinator (Axum 0.7 + Tokio)
+│   │   └── src/
+│   │       ├── main.rs              # CLI (--listen), router, Arc<AppState>
+│   │       ├── state.rs             # RwLock<HashMap<AgentId, AgentInfo>>
+│   │       └── routes/
+│   │           ├── health.rs        # GET  /health
+│   │           └── agents.rs        # POST /register · GET /agents
 │   │
-│   ├── physarum-graph/              # pure algorithmic core
-│   │   ├── src/
-│   │   │   ├── lib.rs
-│   │   │   ├── dynamics.rs          # D_ij update, saturation, decay
-│   │   │   ├── pressure.rs          # discrete Laplace solver
-│   │   │   ├── layer.rs             # emergent layer classification
-│   │   │   └── paths.rs             # Yen K-shortest over -log(D/L)
-│   │   ├── tests/
-│   │   │   ├── convergence.rs       # proptest: D_ij stays in [0,1]
-│   │   │   └── known_graphs.rs      # FIG.3 reference scenario
-│   │   └── Cargo.toml
+│   ├── physarum-graph/          ◌    # Phase 0 — pure algorithmic core
+│   │   └── src/
+│   │       ├── dynamics.rs          # D_ij update, saturation f(x)=x²/(1+x²), decay r
+│   │       ├── pressure.rs          # discrete Laplace solver
+│   │       ├── layer.rs             # emergent layer classification
+│   │       └── paths.rs             # Yen K-shortest over -log(D/L)
 │   │
-│   ├── physarum-agent/              # host agent binary
-│   │   ├── src/
-│   │   │   ├── main.rs              # tokio runtime, select! loop
-│   │   │   ├── identity.rs          # ed25519 keypair, attestation
-│   │   │   ├── ebpf.rs              # aya user-space loader
-│   │   │   ├── probes.rs            # send/recv signed probes (quinn)
-│   │   │   ├── gossip.rs            # pressure exchange
-│   │   │   ├── reporter.rs          # batched submission to coordinator
-│   │   │   └── neighbors.rs         # NeighborState, FlowCounter
-│   │   └── Cargo.toml
+│   ├── physarum-agent/          ◌    # Phase 1 — host agent binary
+│   │   └── src/
+│   │       ├── main.rs              # tokio runtime, select! loop
+│   │       ├── probes.rs            # peer probes with RTT measurement
+│   │       ├── reporter.rs          # batched submission to coordinator
+│   │       └── neighbors.rs         # NeighborState, FlowCounter
 │   │
-│   ├── physarum-coordinator/        # server-side
-│   │   ├── src/
-│   │   │   ├── main.rs              # axum router, tonic services
-│   │   │   ├── ingest.rs            # POST /reports, signature verify
-│   │   │   ├── registry.rs          # agent identity + attestation CA
-│   │   │   ├── update_loop.rs       # background Physarum tick
-│   │   │   ├── timeseries.rs        # ClickHouse writer
-│   │   │   ├── toon.rs              # serialize to TOON for upstream
-│   │   │   └── shards.rs            # consistent-hash sharding
-│   │   └── Cargo.toml
+│   ├── physarum-ebpf/           ◌    # Phase 2 — kernel-side eBPF program
+│   │   └── src/main.rs              # tracepoint, flow map (aya-ebpf)
 │   │
-│   └── physarum-cli/                # operational tooling
-│       ├── src/main.rs
-│       └── Cargo.toml
+│   ├── physarum-coordinator/    ◌    # Phase 3 — full coordinator with sharding
+│   │   └── src/
+│   │       ├── ingest.rs            # signed report ingestion
+│   │       ├── update_loop.rs       # background Physarum tick
+│   │       ├── timeseries.rs        # ClickHouse writer
+│   │       ├── toon.rs              # TOON serialization for upstream
+│   │       └── shards.rs            # consistent-hash sharding
+│   │
+│   └── physarum-cli/            ◌    # Phase 3 — operational tooling
+│       └── src/main.rs              # graph dump, topk paths, replay
 │
-├── deploy/
-│   ├── systemd/
-│   │   └── physarum-agent.service
-│   ├── helm/
-│   │   └── physarum/                # k8s deployment chart
-│   └── terraform/
-│       └── coordinator/             # IaC for coordinator infra
+├── Utilities/                        # developer tooling — never shipped in binaries
+│   ├── README.md                     # full script reference
+│   ├── check-env.sh                  # 12-point environment validation
+│   ├── build.sh                      # build / test / clippy automation
+│   ├── dist-local.sh                 # local packaging (mirrors GitHub Actions)
+│   └── git-scripts/
+│       ├── README.md                 # commit · checkpoint · release reference
+│       ├── commit.sh                 # Conventional Commits with quality gates
+│       ├── checkpoint.sh             # minor version bump + push (no tag)
+│       └── release.sh               # full release: bump → tag → CI → binaries
 │
-├── docs/
-│   ├── design.md                    # detailed design doc
-│   ├── threat-model.md              # STRIDE analysis
-│   ├── operations.md                # runbook
-│   └── math.md                      # formal derivation
+├── General-Docs/
+│   ├── PROTOTYPE_ROADMAP.md          # phased implementation plan
+│   └── README.md
 │
-└── examples/
-    ├── synthetic-topology/          # FIG.3 reference, 7 nodes
-    └── multi-cloud/                 # AWS+Azure+on-prem demo
+└── .github/
+    └── workflows/
+        ├── ci.yml                    # build + clippy (-D warnings) + test
+        └── release.yml               # Linux binary release (x86_64, aarch64)
 ```
 
 ---
@@ -292,31 +292,29 @@ physarum-attack-paths/
 
 ### Prerequisites
 
-- Rust 1.78 or later (stable channel, with `rustup`)
-- Linux kernel 5.15+ on agent hosts (for required eBPF features)
-- `bpf-linker` for compiling the kernel program
-- Coordinator: a host with at least 4 cores and 8 GB RAM for the prototype
+- Rust 1.78 or later (stable channel via `rustup`)
+- Linux x86_64 or ARM64 for production deployment
+- Linux kernel 5.15+ on agent hosts *(required for eBPF — Phase 2)*
+- `bpf-linker` for compiling the kernel program *(Phase 2)*
+- Coordinator: 4 cores and 8 GB RAM minimum *(full Phase 3 deployment)*
 
-### Build
+### Verify environment and build
 
 ```bash
-# clone the workspace
 git clone https://github.com/fabioschorn/physarum-attack-paths.git
 cd physarum-attack-paths
 
-# install bpf-linker for the eBPF crate
-cargo install bpf-linker
+# validate toolchain and project structure (recommended on first run)
+./Utilities/check-env.sh
 
-# build everything
-cargo build --release --workspace
+# build the Phase 0 coordinator
+./Utilities/build.sh --release
 ```
 
-Three binaries land in `target/release/`:
+The Phase 0 binary lands in `target/release/`:
 
 ```
-physarum-agent
-physarum-coordinator
-physarum-cli
+physarum-server    # HTTP coordinator: /health · /register · /agents
 ```
 
 ### Run the coordinator
@@ -348,6 +346,90 @@ The agent needs `CAP_BPF` and `CAP_NET_ADMIN`. The `systemd` unit in `deploy/sys
 ./target/release/physarum-cli graph dump --format toon > attack-paths.toon
 ./target/release/physarum-cli graph topk --target db-prod-01 --k 5
 ```
+
+---
+
+## Development workflow
+
+The `Utilities/` directory contains shell scripts that standardize every step of the
+development lifecycle — from setting up a new machine to publishing a production release.
+They enforce quality gates automatically so the main branch stays always green.
+
+### Verify your environment
+
+Before building for the first time on a new machine, run:
+
+```bash
+./Utilities/check-env.sh
+```
+
+Executes 12 checks: OS compatibility, Xcode CLT (macOS), C linker, curl, rustup,
+rustc ≥ 1.78, cargo, PATH, active toolchain, git, project structure, and workspace
+integrity. Each failure prints a concrete fix command.
+
+### Build
+
+```bash
+./Utilities/build.sh              # debug build + all workspace tests
+./Utilities/build.sh --release    # optimised release build + tests
+./Utilities/build.sh --check      # compile check only — no binary output
+./Utilities/build.sh --clippy     # full lint pass (warnings as errors)
+```
+
+### Local packaging
+
+Simulate what GitHub Actions does for the current platform:
+
+```bash
+./Utilities/dist-local.sh
+# → dist/physarum-server-<version>-<target>.tar.gz
+```
+
+### Git workflow
+
+Three scripts cover the full commit-to-release lifecycle:
+
+| Script | When to use |
+|--------|-------------|
+| `git-scripts/commit.sh` | Any code change — enforces Conventional Commits format |
+| `git-scripts/checkpoint.sh` | Development milestone — version bump + push, no tag |
+| `git-scripts/release.sh` | Official release — bump + tag + push → CI publishes binaries |
+
+```bash
+# Commit a change (interactive or via tmp/commit-msg.txt)
+./Utilities/git-scripts/commit.sh
+
+# Save a milestone without triggering a release
+./Utilities/git-scripts/checkpoint.sh          # minor bump (default)
+./Utilities/git-scripts/checkpoint.sh --patch  # patch bump
+
+# Publish an official release to GitHub Releases
+./Utilities/git-scripts/release.sh --minor
+```
+
+`commit.sh` supports a **file mode**: write the full commit message to
+`tmp/commit-msg.txt` before running the script. The file is read, displayed
+as a preview, and removed automatically after `git commit`.
+
+See [`Utilities/README.md`](./Utilities/README.md) and
+[`Utilities/git-scripts/README.md`](./Utilities/git-scripts/README.md) for the
+full parameter reference.
+
+### Continuous integration
+
+Every push and pull request triggers the CI pipeline
+(`.github/workflows/ci.yml`), which runs on `ubuntu-latest`:
+
+```
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo build --workspace
+cargo test --workspace
+```
+
+Merges to `main` that pass CI are safe to release. Tag a version with
+`release.sh` and GitHub Actions (`.github/workflows/release.yml`) will compile
+and publish `.tar.gz` archives for `x86_64` and `aarch64` Linux automatically.
 
 ---
 
@@ -549,14 +631,19 @@ Tracing via `tracing-opentelemetry` to any OTLP-compatible backend.
 
 - [x] Mathematical model documented
 - [x] Architecture defined
-- [ ] `physarum-protocol` crate
-- [ ] `physarum-graph` crate with property tests
+- [x] `physarum-protocol` crate — shared wire types (AgentInfo, ProbeReport, GraphSnapshot…)
+- [x] `physarum-server` crate — HTTP coordinator with `/health`, `/register`, `/agents`
+- [x] CI pipeline — build + clippy + test on every push (ubuntu-latest)
+- [x] Release pipeline — Linux binary distribution via GitHub Actions (x86_64, aarch64)
+- [x] Developer utilities — `check-env.sh`, `build.sh`, `dist-local.sh`, git automation scripts
+- [ ] `physarum-graph` crate — D_ij dynamics, pressure solver, emergent layers, property tests
 
 ### Phase 1 — Single-host prototype
 
-- [ ] Minimal agent (no eBPF, just probes)
-- [ ] Minimal coordinator (in-memory, no sharding)
-- [ ] FIG.3 reference scenario reproducible end-to-end
+- [ ] `physarum-agent` crate — peer registration, discovery loop, HTTP probes with RTT
+- [ ] `GET /peers/{agent_id}` endpoint in coordinator
+- [ ] `POST /report` endpoint — probe result ingestion and in-memory storage
+- [ ] FIG.3 reference scenario reproducible end-to-end (A → B → C lab validation)
 
 ### Phase 2 — eBPF integration
 
