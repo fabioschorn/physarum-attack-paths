@@ -121,9 +121,12 @@ if ! command -v gh &>/dev/null; then
     echo ""
     exit 1
 fi
-pass "GitHub CLI (gh) disponível: $(gh --version | head -1)"
+GH_VERSION=$(gh --version 2>/dev/null | head -1 || echo "desconhecida")
+pass "GitHub CLI (gh) disponível: ${GH_VERSION}"
 
-if ! gh auth status &>/dev/null 2>&1; then
+# Verifica autenticação via token — mais leve que `gh auth status`
+GH_TOKEN=$(gh auth token 2>/dev/null || true)
+if [[ -z "$GH_TOKEN" ]]; then
     fail "Não autenticado no GitHub CLI."
     echo ""
     echo -e "  Execute: ${CYAN}gh auth login${NC}"
