@@ -1,13 +1,14 @@
 # git-scripts
 
-Scripts de automação Git para o **Physarum Attack Paths**.  
-Padronizam commits, checkpoints de progresso e releases oficiais.
+Scripts de automação Git e GitHub para o **Physarum Attack Paths**.  
+Padronizam commits, checkpoints de progresso, releases oficiais e a consulta de Issues.
 
 ```
 git-scripts/
 ├── commit.sh       # Commit via arquivo pré-definido ou fluxo interativo
 ├── checkpoint.sh   # Bump de versão minor + commit + push (sem release)
-└── release.sh      # Release completo: bump + tag + push → GitHub Actions
+├── release.sh      # Release completo: bump + tag + push → GitHub Actions
+└── issues.sh       # Lista Issues abertos no GitHub para orientar o trabalho
 ```
 
 Execute sempre a partir da **raiz do projeto**.
@@ -17,13 +18,15 @@ Execute sempre a partir da **raiz do projeto**.
 ## Quando usar cada script
 
 ```
-Alteração pontual de código   →  commit.sh
-Salvar progresso (marco)      →  checkpoint.sh
-Publicar release com binários →  release.sh
+Verificar tarefas abertas       →  issues.sh
+Alteração pontual de código     →  commit.sh
+Salvar progresso (marco)        →  checkpoint.sh
+Publicar release com binários   →  release.sh
 ```
 
 | Script | Versão | Commit | Tag | Push | GitHub Actions |
 |--------|--------|--------|-----|------|----------------|
+| `issues.sh` | não altera | ✗ | ✗ | ✗ | ✗ (somente leitura) |
 | `commit.sh` | não altera | ✔ | ✗ | ✗ | ✗ |
 | `checkpoint.sh` | bump minor/patch | ✔ | ✗ | ✔ | ✗ |
 | `release.sh` | bump qualquer | ✔ | ✔ | ✔ | ✔ publica binários |
@@ -375,9 +378,89 @@ O workflow `.github/workflows/release.yml` é acionado e:
 
 ---
 
+## issues.sh
+
+Consulta os **Issues abertos no GitHub** para orientar o trabalho do engenheiro.  
+Operação somente leitura — não altera versão, não faz commit, não faz push.
+
+Requer o [GitHub CLI (`gh`)](https://cli.github.com/) instalado e autenticado (`gh auth login`).
+
+### Uso
+
+```bash
+./Utilities/git-scripts/issues.sh [FLAGS]
+```
+
+### Flags
+
+| Flag | Comportamento |
+|------|---------------|
+| _(sem flags)_ | Lista todos os Issues abertos (até 50) |
+| `--label <label>` | Filtra por label (ex: `bug`, `enhancement`) |
+| `--assignee <user>` | Filtra por responsável (`@me` para si mesmo) |
+| `--limit <n>` | Limita o número de Issues exibidos (padrão: 50) |
+| `--detail <n>` | Exibe detalhes completos do Issue número `<n>` |
+| `--help` | Exibe ajuda e sai |
+
+### Exemplos
+
+```bash
+# Todos os Issues abertos
+./Utilities/git-scripts/issues.sh
+
+# Somente bugs
+./Utilities/git-scripts/issues.sh --label bug
+
+# Issues atribuídos a você
+./Utilities/git-scripts/issues.sh --assignee @me
+
+# Detalhes completos do Issue #7
+./Utilities/git-scripts/issues.sh --detail 7
+```
+
+### Saída
+
+```
+╔══════════════════════════════════════════════════════╗
+║      Physarum Attack Paths — GitHub Issues           ║
+╚══════════════════════════════════════════════════════╝
+
+── Verificações
+
+  [✔] GitHub CLI (gh) disponível: gh version 2.x.x
+  [✔] Autenticado no GitHub
+  [✔] Repositório: fabioschorn/physarum-attack-paths
+
+── Buscando Issues abertos
+
+  Issue   Título                                                Labels              Aberto em
+  ────────────────────────────────────────────────────────────────────────────────────────────────
+  #12     implement physarum-agent crate                        enhancement         2025-05-01
+  #11     add GET /peers/{agent_id} to physarum-server          enhancement         2025-05-01
+  #10     fix panic on duplicate agent registration             bug                 2025-04-30
+  ...
+
+  12 Issue(s) aberto(s)
+```
+
+### Pré-requisito
+
+```bash
+# Instalar gh (macOS)
+brew install gh
+
+# Autenticar
+gh auth login
+```
+
+---
+
 ## Fluxo completo de desenvolvimento
 
 ```bash
+# 0. Verificar Issues abertos — o que trabalhar agora?
+./Utilities/git-scripts/issues.sh
+
 # 1. Verificar ambiente (máquina nova)
 ./Utilities/check-env.sh
 
