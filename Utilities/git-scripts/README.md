@@ -5,7 +5,7 @@ Padronizam commits, checkpoints de progresso e releases oficiais.
 
 ```
 git-scripts/
-├── commit.sh       # Commit interativo seguindo Conventional Commits
+├── commit.sh       # Commit via arquivo pré-definido ou fluxo interativo
 ├── checkpoint.sh   # Bump de versão minor + commit + push (sem release)
 └── release.sh      # Release completo: bump + tag + push → GitHub Actions
 ```
@@ -32,8 +32,15 @@ Publicar release com binários →  release.sh
 
 ## commit.sh
 
-Guia interativo para criar commits no padrão **Conventional Commits**.  
-Executa `cargo fmt` e `cargo test` antes de commitar.
+Cria commits no padrão **Conventional Commits** com verificações de qualidade automáticas
+(`cargo fmt` + `cargo test`). Suporta dois modos de operação:
+
+- **Modo arquivo** — lê a mensagem de `tmp/commit-msg.txt` (preferido para commits
+  elaborados escritos com precisão antes da execução)
+- **Modo interativo** — guia passo a passo pela seleção de tipo, escopo e descrição
+
+O modo arquivo tem prioridade: se `tmp/commit-msg.txt` existir, o fluxo interativo
+de composição da mensagem é completamente ignorado.
 
 ### Uso
 
@@ -45,27 +52,82 @@ Executa `cargo fmt` e `cargo test` antes de commitar.
 
 | Flag | Comportamento |
 |------|---------------|
-| _(sem flags)_ | Modo interativo completo com verificações de qualidade |
+| _(sem flags)_ | Modo arquivo (se `tmp/commit-msg.txt` existir) ou interativo |
 | `--no-verify` | Pula `cargo fmt` e `cargo test` (commits de emergência) |
 | `--help` | Exibe ajuda e sai |
 
-### Formato gerado
+---
+
+### Modo arquivo — `tmp/commit-msg.txt`
+
+Escreva a mensagem completa em `tmp/commit-msg.txt` antes de executar o script.  
+O diretório `tmp/` está no `.gitignore` — o arquivo **nunca é commitado**.  
+Após o commit, o arquivo é **removido automaticamente**.
+
+#### Formato do arquivo
 
 ```
-<tipo>(<escopo>): <descrição curta>
+<tipo>(<escopo>): <título em inglês, imperativo, sem ponto final>
 
-[corpo opcional]
+<parágrafo de contexto explicando o porquê da mudança>
+
+<seção 1 — ex: Crates>
+- item: descrição
+- item: descrição
+
+<seção 2 — ex: CI/CD>
+- item: descrição
 ```
 
-**Exemplos:**
+A primeira linha torna-se o título do commit (subject).  
+O restante torna-se o corpo (body), preservado integralmente via `git commit -F`.
+
+#### Exemplo de arquivo
+
 ```
-feat(agent): adiciona loop de probe com RTT
-fix: corrige panic no registro duplicado
-chore(ci): atualiza matrix de targets no release.yml
-docs(protocol): descreve campos do EdgeSnapshot
+feat(agent): implement peer registration and discovery loop
+
+Establishes the core agent lifecycle: on startup the agent registers
+itself with the coordinator and then fetches the peer list to begin
+the probe cycle.
+
+Registration
+- POST /register on startup with agent_id, address and probe_port
+- exponential back-off on transient coordinator failures
+
+Discovery
+- GET /peers/{agent_id} polled every --probe-interval seconds
+- peer list stored in Arc<RwLock<PeerMap>> for concurrent probe access
 ```
 
-### Tipos disponíveis
+#### Fluxo no modo arquivo
+
+```
+1. Verificações de qualidade
+   ├── cargo fmt --check  (oferece autocorreção se fora do padrão)
+   └── cargo test --workspace
+
+2. Exibe preview do tmp/commit-msg.txt
+
+3. Staging
+   ├── [S] git add -A  (todos os arquivos)
+   └── [n] staging manual em outro terminal
+
+4. Lista arquivos que serão commitados
+
+5. Confirmação final [S/n]
+   └── git commit -F tmp/commit-msg.txt
+       └── tmp/commit-msg.txt removido automaticamente
+```
+
+---
+
+### Modo interativo
+
+Ativado quando `tmp/commit-msg.txt` **não existe**.  
+Guia o usuário pela composição da mensagem passo a passo.
+
+#### Tipos disponíveis
 
 | # | Tipo | Quando usar |
 |---|------|-------------|
@@ -78,7 +140,23 @@ docs(protocol): descreve campos do EdgeSnapshot
 | 7 | `perf` | Melhoria de performance |
 | 8 | `style` | Formatação, ponto-e-vírgula (sem mudança de lógica) |
 
-### Fluxo interativo
+#### Formato gerado
+
+```
+<tipo>(<escopo>): <descrição curta>
+
+[corpo opcional]
+```
+
+**Exemplos:**
+```
+feat(agent): add peer probe loop with RTT measurement
+fix: resolve panic on duplicate agent registration
+chore(ci): restrict release targets to Linux only
+docs(protocol): document EdgeSnapshot conductivity fields
+```
+
+#### Fluxo interativo
 
 ```
 1. Verificação de qualidade
@@ -101,13 +179,13 @@ docs(protocol): descreve campos do EdgeSnapshot
 
 8. Lista de arquivos no staging
 
-9. Confirmação final → git commit
+9. Confirmação final → git commit -m
 ```
 
-### Verificações de qualidade
+### Verificações de qualidade (ambos os modos)
 
 - **`cargo fmt --check`**: detecta código fora do padrão de formatação.  
-  Se fora do padrão, oferece autocorreção com `cargo fmt`.
+  Se fora do padrão, oferece autocorreção automática com `cargo fmt`.
 - **`cargo test --workspace`**: executa todos os testes do workspace.  
   Se falharem, pergunta se deseja commitar mesmo assim.
 - Use `--no-verify` para pular ambas as verificações quando necessário.
@@ -199,7 +277,7 @@ chore: checkpoint v0.1.0
 ## release.sh
 
 Executa o **fluxo completo de release**:  
-bump de versão → commit → tag anotada → push → GitHub Actions publica binários para 5 plataformas.
+bump de versão → commit → tag anotada → push → GitHub Actions publica binários Linux.
 
 ### Uso
 
@@ -276,17 +354,14 @@ Etapa 5 — Execução
 O workflow `.github/workflows/release.yml` é acionado e:
 
 1. **Cria** um rascunho de Release no GitHub
-2. **Compila** em paralelo para 5 plataformas:
+2. **Compila** em paralelo para os targets Linux:
 
    | Plataforma | Runner | Método |
    |------------|--------|--------|
-   | macOS Apple Silicon (`aarch64-apple-darwin`) | `macos-latest` | `cargo build` |
-   | macOS Intel (`x86_64-apple-darwin`) | `macos-13` | `cargo build` |
-   | Linux x86_64 (`x86_64-unknown-linux-gnu`) | `ubuntu-latest` | `cargo build` |
-   | Linux ARM64 (`aarch64-unknown-linux-gnu`) | `ubuntu-latest` | `cross build` |
-   | Windows x86_64 (`x86_64-pc-windows-msvc`) | `windows-latest` | `cargo build` |
+   | Linux x86_64 (`x86_64-unknown-linux-gnu`) | `ubuntu-latest` | `cargo build --release --locked` |
+   | Linux ARM64 (`aarch64-unknown-linux-gnu`) | `ubuntu-latest` | `cross build --release --locked` |
 
-3. **Empacota**: `.tar.gz` (Unix) ou `.zip` (Windows), incluindo `README` + `LICENSE` + `NOTICE`
+3. **Empacota**: `.tar.gz` com binário + `README` + `LICENSE` + `NOTICE`
 4. **Publica** a Release (sai do modo draft)
 
 > Acompanhe o progresso em: `https://github.com/<owner>/physarum-attack-paths/actions`
@@ -303,18 +378,22 @@ O workflow `.github/workflows/release.yml` é acionado e:
 ## Fluxo completo de desenvolvimento
 
 ```bash
-# 1. Novo trabalho: verificar ambiente
+# 1. Verificar ambiente (máquina nova)
 ./Utilities/check-env.sh
 
 # 2. Desenvolver...
 
-# 3. Commitar alteração pontual
+# 3a. Commit simples (modo interativo)
 ./Utilities/git-scripts/commit.sh
+
+# 3b. Commit elaborado (modo arquivo — Claude escreve tmp/commit-msg.txt)
+./Utilities/git-scripts/commit.sh
+#     └── lê tmp/commit-msg.txt automaticamente e remove após commitar
 
 # 4. Marco de progresso (ex: passos 6-9 implementados)
 ./Utilities/git-scripts/checkpoint.sh
 
 # 5. Quando pronto para release oficial
 ./Utilities/git-scripts/release.sh --minor
-#    └── GitHub Actions compila e publica automaticamente
+#    └── GitHub Actions compila para Linux x86_64 e ARM64 e publica
 ```
