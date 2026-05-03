@@ -706,3 +706,130 @@ Make it production-grade.
 ```
 
 The first version should prove the living graph mechanism, not the final production architecture.
+
+---
+
+## 18. Tests executed so far
+
+This section records the concrete validation already performed during the prototype development.
+
+### Completed implementation checkpoints
+
+- **Issue #1 — Server-side graph loop:** completed.
+  - Added `GET /peers/:agent_id`.
+  - Added `POST /report`.
+  - Added `GET /graph`.
+  - Added in-memory directed edge storage.
+  - Added simplified `D_ij` reinforcement/decay update.
+
+- **Issue #2 — CI formatting fix:** completed.
+  - Investigated the CI failure after Issue #1.
+  - Confirmed the failure was caused by `rustfmt` drift, not by the Axum route syntax.
+  - Applied canonical `rustfmt` formatting.
+
+- **Issue #3 / PR #4 — Minimal `physarum-agent`:** completed and merged.
+  - Added `crates/physarum-agent`.
+  - Agent registers with the coordinator using `POST /register`.
+  - Agent exposes `GET /probe`.
+  - Agent fetches peers from `GET /peers/:agent_id`.
+  - Agent probes peer agents and measures RTT.
+  - Agent sends `ProbeReport` events to `POST /report`.
+
+### Validation commands reported for PR #4
+
+The PR validation reported:
+
+```bash
+cargo fmt --all
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+The reported test count after adding the agent was:
+
+```text
+21 tests total
+4 agent unit tests
+13 server tests
+4 protocol tests
+```
+
+### Manual A/B/C lab executed
+
+The local lab was executed with one coordinator and two agents:
+
+```bash
+# Terminal 1 — coordinator
+cargo run -p physarum-server -- --listen 127.0.0.1:8080
+
+# Terminal 2 — agent B
+cargo run -p physarum-agent -- \
+  --id agent-b \
+  --coordinator http://127.0.0.1:8080 \
+  --listen 127.0.0.1:9001 \
+  --advertise-address 127.0.0.1 \
+  --probe-interval-seconds 5
+
+# Terminal 3 — agent C
+cargo run -p physarum-agent -- \
+  --id agent-c \
+  --coordinator http://127.0.0.1:8080 \
+  --listen 127.0.0.1:9002 \
+  --advertise-address 127.0.0.1 \
+  --probe-interval-seconds 5
+```
+
+After the agents ran for multiple probe intervals, the coordinator graph was queried:
+
+```bash
+curl -s http://127.0.0.1:8080/graph | jq
+```
+
+Observed result:
+
+```json
+{
+  "nodes": [
+    "agent-b",
+    "agent-c"
+  ],
+  "edges": [
+    {
+      "source": "agent-b",
+      "target": "agent-c",
+      "probe_success": true,
+      "d_ij": 0.8327872000000001,
+      "last_seen": "2026-05-03T04:03:32.128919Z"
+    },
+    {
+      "source": "agent-c",
+      "target": "agent-b",
+      "probe_success": true,
+      "d_ij": 0.8327872000000001,
+      "last_seen": "2026-05-03T04:03:31.672877Z"
+    }
+  ]
+}
+```
+
+### Test conclusion
+
+The manual test validated the first real distributed prototype loop:
+
+```text
+A = physarum-server
+B = physarum-agent
+C = physarum-agent
+```
+
+The following behavior was confirmed:
+
+- `agent-b` and `agent-c` registered successfully with the coordinator.
+- Both agents appeared as graph nodes.
+- Bidirectional directed edges were created: `agent-b -> agent-c` and `agent-c -> agent-b`.
+- Both probes succeeded.
+- Both agents sent probe reports to the coordinator.
+- The coordinator updated `D_ij` above `0.0`.
+- The observed `D_ij` value converged close to the expected continuous-success equilibrium of approximately `5/6 ≈ 0.833`.
+
+This confirms that the core living graph mechanism is working at the local A/B/C prototype level.
