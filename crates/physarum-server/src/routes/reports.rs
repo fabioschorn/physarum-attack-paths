@@ -90,7 +90,10 @@ mod tests {
         let d0 = 0.5_f64;
         let d1 = update_conductivity(d0, false);
         let expected = (d0 * (1.0 - DECAY_RATE)).clamp(0.0, 1.0);
-        assert!((d1 - expected).abs() < 1e-12, "expected {expected}, got {d1}");
+        assert!(
+            (d1 - expected).abs() < 1e-12,
+            "expected {expected}, got {d1}"
+        );
     }
 
     #[test]
@@ -98,7 +101,10 @@ mod tests {
         // f(1) = 0.5  →  D(t+1) = 0 + 0.5·(1-0) - 0.1·0 = 0.5
         let d1 = update_conductivity(0.0, true);
         let expected = 0.5_f64;
-        assert!((d1 - expected).abs() < 1e-12, "expected {expected}, got {d1}");
+        assert!(
+            (d1 - expected).abs() < 1e-12,
+            "expected {expected}, got {d1}"
+        );
     }
 
     #[test]

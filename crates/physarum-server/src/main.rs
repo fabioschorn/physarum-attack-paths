@@ -118,7 +118,10 @@ mod tests {
 
         let edges = state.edges.read().await;
         let key = ("agent-b".to_string(), "agent-c".to_string());
-        assert!(edges.contains_key(&key), "edge agent-b -> agent-c not found");
+        assert!(
+            edges.contains_key(&key),
+            "edge agent-b -> agent-c not found"
+        );
     }
 
     #[tokio::test]
@@ -136,12 +139,10 @@ mod tests {
         let state = Arc::new(AppState::new());
         // Establish a positive D_ij via success first.
         send_report(state.clone(), "b", "c", true).await;
-        let d_after_success = state.edges.read().await
-            [&("b".to_string(), "c".to_string())].d_ij;
+        let d_after_success = state.edges.read().await[&("b".to_string(), "c".to_string())].d_ij;
 
         send_report(state.clone(), "b", "c", false).await;
-        let d_after_failure = state.edges.read().await
-            [&("b".to_string(), "c".to_string())].d_ij;
+        let d_after_failure = state.edges.read().await[&("b".to_string(), "c".to_string())].d_ij;
 
         assert!(
             d_after_failure < d_after_success,
