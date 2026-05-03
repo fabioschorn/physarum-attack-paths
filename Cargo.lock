@@ -580,10 +580,12 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "http-body-util",
  "physarum-protocol",
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
 ]

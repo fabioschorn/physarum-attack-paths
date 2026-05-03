@@ -66,6 +66,7 @@ clap           = { version = "4.5", features = ["derive", "env"] }
 # Testing
 proptest       = "1.5"
 criterion      = { version = "0.5", features = ["html_reports"] }
+http-body-util = "0.1"
 
 # Utility
 uuid           = { version = "1.10", features = ["v4", "serde"] }
