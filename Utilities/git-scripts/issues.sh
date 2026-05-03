@@ -179,7 +179,7 @@ ISSUES_JSON=$(gh issue list \
     --state open \
     --limit "$LIMIT" \
     --json number,title,labels,assignees,createdAt,url,body \
-    "${GH_ARGS[@]}" 2>/dev/null)
+    "${GH_ARGS[@]+"${GH_ARGS[@]}"}" 2>/dev/null)
 
 TOTAL=$(echo "$ISSUES_JSON" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
 
@@ -201,10 +201,10 @@ printf "  ${BOLD}%-6s  %-52s  %-18s  %-12s${NC}\n" "Issue" "Título" "Labels" "A
 printf "  %s\n" "$(printf '─%.0s' {1..92})"
 
 # ─── Exibe cada Issue ─────────────────────────────────────────────────────────
-echo "$ISSUES_JSON" | python3 - <<'PYEOF'
-import json, sys, os
+ISSUES_JSON="$ISSUES_JSON" python3 <<'PYEOF'
+import json, os
 
-data = json.load(sys.stdin)
+data = json.loads(os.environ['ISSUES_JSON'])
 
 CYAN    = '\033[0;36m'
 YELLOW  = '\033[1;33m'
