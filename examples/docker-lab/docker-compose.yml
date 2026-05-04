@@ -1,0 +1,54 @@
+services:
+  physarum-server:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command: ["physarum-server", "--listen", "0.0.0.0:8080"]
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  agent-b:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command:
+      - physarum-agent
+      - --id
+      - agent-b
+      - --coordinator
+      - http://physarum-server:8080
+      - --listen
+      - 0.0.0.0:9001
+      - --advertise-address
+      - agent-b
+      - --probe-interval-seconds
+      - "5"
+    depends_on:
+      physarum-server:
+        condition: service_healthy
+
+  agent-c:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command:
+      - physarum-agent
+      - --id
+      - agent-c
+      - --coordinator
+      - http://physarum-server:8080
+      - --listen
+      - 0.0.0.0:9002
+      - --advertise-address
+      - agent-c
+      - --probe-interval-seconds
+      - "5"
+    depends_on:
+      physarum-server:
+        condition: service_healthy
