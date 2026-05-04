@@ -2,7 +2,7 @@
 
 This document defines the prototype roadmap for `physarum-attack-paths`.
 
-The project started as a local A/B/C laboratory with one coordinator and two agents. It has now evolved into a working adaptive graph prototype with local execution, Docker reproducibility, stimulus-oriented reports, and a formal-methods track in progress.
+The project started as a local A/B/C laboratory with one coordinator and two agents. It has now evolved into a working adaptive graph prototype with local execution, Docker reproducibility, stimulus-oriented reports, a formal TLA+ edge model, and a clear path toward the first multi-hop path scoring endpoint.
 
 The guiding principle remains:
 
@@ -27,24 +27,25 @@ Phase 1A — Server-side graph loop
 Phase 1B — Minimal physarum-agent
 Phase 1C — Stimulus-oriented ProbeReport, Q_ij, q_ema, and D_ij
 Local A/B/C lab runbook
-Docker A/B/C lab
+Docker A/B/C lab (validated: 15 passed, 0 failed)
 Research/brainstorm notes for MCPM-inspired future path density
 AWS lab test-plan documentation
 WASM lab visual-simulation plan
+Initial TLA+ model for Q_ij, q_ema, and D_ij edge dynamics (formal/tla/)
+Root README aligned with current prototype state
+A/B/C/D lab topology design and path-readiness plan (this document)
 ```
 
-### In progress
+### In progress / planned next
 
 ```text
-Initial TLA+ model for Q_ij, q_ema, and D_ij edge dynamics
+Docker A/B/C/D lab (Issue #16)
+basic /paths endpoint (Issue #17)
 ```
 
 ### Planned, not started
 
 ```text
-A/B/C/D lab
-GET /paths
-basic path scoring
 AWS Terraform skeleton
 WASM visual simulator implementation
 TLA+ expansion beyond one edge
@@ -433,15 +434,15 @@ TLA+ = formal reasoning
 
 ## 7. Formal methods track
 
-The formal-methods track is starting with Issue #11.
+The initial TLA+ model was delivered by Issue #11 / PR #12.
 
-Planned path:
+Path:
 
 ```text
 formal/tla/
 ```
 
-Planned files:
+Files delivered:
 
 ```text
 formal/tla/README.md
@@ -449,36 +450,31 @@ formal/tla/PhysarumEdgeModel.tla
 formal/tla/PhysarumEdgeModel.cfg
 ```
 
-The first TLA+ model should represent one directed edge only:
-
-```text
-source -> target
-```
-
-The model should formalize the adaptive edge dynamics:
+The model represents one directed edge and formalizes the adaptive edge dynamics:
 
 ```text
 ProbeReport fields -> Q_ij -> q_ema -> D_ij
 ```
 
-Recommended simplification:
+Scaled integer arithmetic (SCALE = 1000) represents [0.0, 1.0] values for TLC model checking.
+
+Verified invariants:
 
 ```text
-SCALE = 1000
-1.0 = 1000
-0.3 = 300
-0.1 = 100
+TypeOK: q_ema ∈ 0..SCALE ∧ d_ij ∈ 0..SCALE
+Safety: QEmaBounded ∧ DijBounded (both stay in [0, SCALE] for all reachable states)
 ```
 
-Initial invariants:
+Status: completed. TLC finds no violations with SCALE=1000.
+
+Future formal methods work (not started):
 
 ```text
-0 <= Q_ij <= SCALE
-0 <= q_ema <= SCALE
-0 <= D_ij <= SCALE
+TLA+ expansion beyond one edge
+multi-agent concurrency model
+coordinator graph state
+path traversal properties
 ```
-
-This is not yet a full distributed-system specification. It is a formal model of the mathematical heart of the project.
 
 ---
 
@@ -598,57 +594,260 @@ runtime validation with 15 passed, 0 failed
 
 ---
 
-## 9. Current active issue
+## 9. Completed milestones (continued)
 
-### Issue #11 — initial TLA+ edge model
+### Issue #11 / PR #12 — initial TLA+ edge model
 
 Status:
 
 ```text
-open / in progress
+completed and merged
+```
+
+Delivered:
+
+```text
+formal/tla/PhysarumEdgeModel.tla
+formal/tla/PhysarumEdgeModel.cfg
+formal/tla/README.md
+TypeOK and Safety invariants verified by TLC (SCALE=1000)
+```
+
+### Issue #13 / PR #14 — root README refresh
+
+Status:
+
+```text
+completed and merged
+```
+
+Delivered:
+
+```text
+README.md aligned with current prototype state
+status table (implemented vs planned)
+correct quick start (Docker lab + local lab)
+updated repository layout
+future architecture clearly labeled as not implemented
+```
+
+### Issue #15 — A/B/C/D lab topology design
+
+Status:
+
+```text
+completed by this document
+```
+
+Delivered:
+
+```text
+A/B/C/D topology defined (roles, ports, Docker service names)
+expected graph behavior documented
+validation expectations for A/B/C/D defined
+future /paths contract described
+roadmap updated
+```
+
+## 10. Current active issues
+
+### Issue #16 — Docker A/B/C/D lab
+
+Status:
+
+```text
+next implementation step
+```
+
+Depends on:
+
+```text
+Issue #15 (this document)
 ```
 
 Goal:
 
 ```text
-formalize Q_ij, q_ema, and D_ij edge dynamics using TLA+
+extend Docker Compose lab to include agent-d
+validate B/C/D adaptive edges in Docker
 ```
 
-Scope:
+### Issue #17 — basic /paths endpoint
+
+Status:
 
 ```text
-one directed edge only
-scaled integer arithmetic
-boundedness invariants
-manual TLC run instructions
-no runtime Rust changes
+planned after Issue #16
+```
+
+Depends on:
+
+```text
+Issue #15 (this document)
+Issue #16 (Docker A/B/C/D lab)
+```
+
+Goal:
+
+```text
+GET /paths?source=agent-b&target=agent-d
+simple directed path search over in-memory graph
+path_score = product(D_ij)
 ```
 
 ---
 
-## 10. Recommended next implementation order
+## 11. Recommended next implementation order
 
 The recommended near-term sequence is now:
 
 ```text
-1. Complete Issue #11: initial TLA+ model for Q_ij, q_ema, D_ij.
-2. Review and optionally expand formal model notes.
-3. Add A/B/C/D lab design.
-4. Add basic /paths endpoint using D_ij and q_ema.
-5. Add simple path scoring.
-6. Create AWS Terraform skeleton only after the A/B/C/D and /paths direction is clear.
-7. Implement WASM visual simulator when the math is stable enough to present.
-8. Add security controls: enrollment, signatures, replay protection, optional mTLS.
-9. Add persistence and replay.
-10. Explore MCPM-inspired stochastic path-density engine.
-11. Add TOON export and integration with autonomous validation workflows.
+1. ✔ Complete Issue #11: initial TLA+ model for Q_ij, q_ema, D_ij.
+2. ✔ Align root README with current prototype state (Issue #13).
+3. ✔ Design A/B/C/D lab topology and path-readiness plan (Issue #15).
+4.   Implement Docker A/B/C/D lab (Issue #16).
+5.   Add basic /paths endpoint using D_ij (Issue #17).
+6.   Create AWS Terraform skeleton after A/B/C/D and /paths are stable.
+7.   Implement WASM visual simulator when the math is stable enough to present.
+8.   Add security controls: enrollment, signatures, replay protection, optional mTLS.
+9.   Add persistence and replay.
+10.  Explore MCPM-inspired stochastic path-density engine.
+11.  Add TOON export and integration with autonomous validation workflows.
 ```
 
 Do not jump directly to eBPF, AWS infrastructure, or path-density simulation before the current adaptive graph substrate is stable and formally documented.
 
 ---
 
-## 11. Future A/B/C/D direction
+## 12. A/B/C/D topology design
+
+This section documents the A/B/C/D topology that will be implemented in Issue #16 (Docker lab) and exercised by Issue #17 (/paths endpoint).
+
+### Agent roles
+
+```text
+A = physarum-server (coordinator)
+B = agent-b — perimeter-like / entry-layer agent
+C = agent-c — application/gateway-like agent
+D = agent-d — crown-jewel/database-like agent
+```
+
+### Why this matters
+
+```text
+B ↔ C only proves one adaptive edge pair.
+B/C/D creates a meaningful multi-hop path.
+B → C → D is the simplest useful path for scoring.
+```
+
+The key transition is:
+
+```text
+adaptive edge (D_BC)  →  adaptive path (D_BC * D_CD)
+```
+
+### Local port assignments
+
+```text
+physarum-server  127.0.0.1:8080
+agent-b          127.0.0.1:9001
+agent-c          127.0.0.1:9002
+agent-d          127.0.0.1:9003
+```
+
+### Docker service names
+
+```text
+physarum-server
+agent-b
+agent-c
+agent-d
+```
+
+### Expected graph behavior
+
+The current coordinator returns all registered agents as peers for any requesting agent (full mesh). In the A/B/C/D lab this means six directed edges will form:
+
+```text
+agent-b -> agent-c      (path-readiness edge)
+agent-c -> agent-b
+agent-b -> agent-d
+agent-d -> agent-b
+agent-c -> agent-d      (path-readiness edge)
+agent-d -> agent-c
+```
+
+Full-mesh behavior is acceptable for this phase. Constrained peer sets (security groups, topological filtering) will be introduced in a later phase to model realistic network segmentation.
+
+The path-readiness focus is on the logical attack path:
+
+```text
+agent-b → agent-c → agent-d
+```
+
+### Validation expectations for A/B/C/D
+
+A complete A/B/C/D validation should check:
+
+```text
+agent-b registered
+agent-c registered
+agent-d registered
+/graph nodes include agent-b, agent-c, agent-d
+agent-b -> agent-c: probe_success=true, q_ema>0.0, d_ij>0.0, sample_count>0
+agent-c -> agent-d: probe_success=true, q_ema>0.0, d_ij>0.0, sample_count>0
+```
+
+If full mesh: all six directed edges meet the same criteria.
+
+### Future /paths contract
+
+After Issue #17 is implemented, the endpoint will be:
+
+```text
+GET /paths?source=agent-b&target=agent-d
+```
+
+Conceptual response:
+
+```json
+{
+  "source": "agent-b",
+  "target": "agent-d",
+  "paths": [
+    {
+      "nodes": ["agent-b", "agent-c", "agent-d"],
+      "edges": [
+        { "source": "agent-b", "target": "agent-c", "d_ij": 0.833, "q_ema": 1.0 },
+        { "source": "agent-c", "target": "agent-d", "d_ij": 0.833, "q_ema": 1.0 }
+      ],
+      "score": 0.694
+    }
+  ]
+}
+```
+
+Initial scoring rule:
+
+```text
+path_score = product(D_ij for each edge in the path)
+           = D_BC * D_CD
+           = 0.833 * 0.833
+           ≈ 0.694
+```
+
+Future scoring inputs (not in the initial version):
+
+```text
+L_ij resistance (layer transition cost, service exposure)
+vulnerability pressure (CVSS, EPSS, KEV)
+asset criticality
+MCPM-inspired stochastic path density
+```
+
+---
+
+## 13. Future A/B/C/D direction *(superseded by Section 12 above)*
 
 The next topology expansion should be:
 
