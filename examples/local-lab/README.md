@@ -187,9 +187,11 @@ local observation window  →  enriched ProbeReport  →  Q_ij  →  q_ema  → 
 
 ### Stage 1 — local observation window (agent)
 
-Each agent keeps a per-peer window of the last 20 successful RTT samples
-plus a rolling count of successes and failures. Every `ProbeReport`
-includes these summaries:
+Each agent keeps a bounded per-peer sliding window of the last 20 probe
+samples. Each sample records whether the probe succeeded and an RTT when
+available. The agent computes `success_rate`, `sample_count`, `avg_rtt_ms`,
+and `jitter_ms` from that recent window only — old samples are evicted as new
+ones arrive. Every `ProbeReport` includes these summaries:
 
 | Field | Meaning |
 |---|---|

@@ -852,23 +852,29 @@ after:  observation window ──▶ Q_ij ──▶ q_ema ──▶ D_ij
 
 ### Agent changes
 
-Each agent now maintains a `PeerObservation` struct per peer:
+Each agent now maintains a `PeerObservation` struct per peer backed by a
+bounded sliding window (`WINDOW_SIZE = 20`):
 
 | Field | Description |
 |---|---|
-| `success_count` / `failure_count` | rolling totals |
-| `rtt_samples` | last 20 successful RTT values (ms) |
+| `samples` | bounded `VecDeque<ProbeSample>` capped at 20 entries |
+| `ProbeSample.success` | whether the probe succeeded |
+| `ProbeSample.rtt_ms` | RTT (ms) for successful probes, `None` for failures |
 | `window_start` | wall-clock start of the observation window |
+
+When the deque reaches `WINDOW_SIZE`, the oldest sample is evicted before the
+new one is inserted. All statistics therefore reflect the **most recent 20
+probes only** — never lifetime aggregates.
 
 Derived statistics included in every `ProbeReport`:
 
 | Field | Formula |
 |---|---|
-| `success_rate` | success_count / (success_count + failure_count) |
-| `avg_rtt_ms` | mean of rtt_samples |
-| `jitter_ms` | mean absolute deviation of rtt_samples |
+| `success_rate` | successful samples / `samples.len()` |
+| `avg_rtt_ms` | mean RTT over successful samples in the current window |
+| `jitter_ms` | mean absolute deviation of successful RTT samples |
 | `observation_window_seconds` | elapsed since window_start |
-| `sample_count` | success_count + failure_count |
+| `sample_count` | `samples.len()`, capped at 20 |
 
 ### Protocol changes
 
