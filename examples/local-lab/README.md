@@ -8,9 +8,12 @@ B  =  physarum-agent    (agent-b, probe port 9001)
 C  =  physarum-agent    (agent-c, probe port 9002)
 ```
 
-Each agent discovers the other through the coordinator, probes it over
-HTTP, and reports success/RTT back. The coordinator accumulates directed
-edges and updates the Physarum conductivity value `D_ij` for each one.
+Each agent maintains a short-term observation window per peer and sends
+an enriched `ProbeReport` that includes `success_rate`, `avg_rtt_ms`,
+and `jitter_ms`. The coordinator turns those reports into a normalised
+stimulus signal `Q_ij`, smooths it with an exponential moving average
+(`q_ema`), and drives the Physarum conductivity `D_ij` with that signal
+instead of reacting to a raw boolean.
 
 ---
 
@@ -145,44 +148,93 @@ Expected after several probe intervals:
       "source": "agent-b",
       "target": "agent-c",
       "probe_success": true,
-      "d_ij": 0.8327872000000001,
+      "d_ij": 0.72,
+      "q_ema": 0.91,
+      "success_rate": 1.0,
+      "avg_rtt_ms": 0.0,
+      "jitter_ms": 0.0,
+      "sample_count": 12,
       "last_seen": "<timestamp>"
     },
     {
       "source": "agent-c",
       "target": "agent-b",
       "probe_success": true,
-      "d_ij": 0.8327872000000001,
+      "d_ij": 0.72,
+      "q_ema": 0.91,
+      "success_rate": 1.0,
+      "avg_rtt_ms": 0.0,
+      "jitter_ms": 0.0,
+      "sample_count": 12,
       "last_seen": "<timestamp>"
     }
   ]
 }
 ```
 
-Both directed edges must be present with `probe_success: true` and `d_ij > 0.0`.
+Both directed edges must be present with `probe_success: true`,
+`d_ij > 0.0`, and `q_ema > 0.0`.
 
 ---
 
-## D_ij convergence
+## Stimulus-oriented model and D_ij convergence
 
-The Physarum conductivity model used here is:
-
-```
-D_ij(t+1) = D_ij(t) + f(Q) · (1 − D_ij) − r · D_ij
-```
-
-where `f(Q) = Q² / (1 + Q²)` and `r = 0.1` (decay rate).
-
-For a successful probe `Q = 1`, so `f(1) = 0.5`. The stable equilibrium
-under continuous successful probes is:
+The system now flows through three stages:
 
 ```
-D* = f(1) / (f(1) + r) = 0.5 / (0.5 + 0.1) = 5/6 ≈ 0.8333
+local observation window  →  enriched ProbeReport  →  Q_ij  →  q_ema  →  D_ij
 ```
 
-After enough intervals `D_ij` converges to approximately `0.833` but
-never reaches `1.0`. A single failure immediately pulls it down by
-`r · D_ij`.
+### Stage 1 — local observation window (agent)
+
+Each agent keeps a per-peer window of the last 20 successful RTT samples
+plus a rolling count of successes and failures. Every `ProbeReport`
+includes these summaries:
+
+| Field | Meaning |
+|---|---|
+| `success_rate` | fraction of recent probes that succeeded |
+| `avg_rtt_ms` | mean RTT of successful probes |
+| `jitter_ms` | mean absolute deviation of RTT |
+| `sample_count` | total probes in the window |
+
+### Stage 2 — stimulus Q_ij (coordinator)
+
+The coordinator converts each enriched report into a normalised stimulus:
+
+```
+latency_score = 1 / (1 + avg_rtt_ms / 100)
+Q_ij = clamp(0.7 · success_rate + 0.3 · latency_score, 0.0, 1.0)
+```
+
+If `success_rate = 0.0`, Q_ij is set to 0.0 (latency is undefined when
+all probes fail).
+
+### Stage 3 — q_ema and D_ij (coordinator)
+
+`q_ema` smooths Q_ij with an exponential moving average (α = 0.3):
+
+```
+q_ema(t+1) = 0.3 · Q_ij + 0.7 · q_ema(t)
+```
+
+Then `q_ema` drives the Physarum conductivity update:
+
+```
+D_ij(t+1) = D_ij(t) + f(q_ema) · (1 − D_ij) − r · D_ij
+```
+
+where `f(x) = x² / (1 + x²)` and `r = 0.1`.
+
+For a fast, always-reachable peer (success_rate=1.0, avg_rtt_ms≈0),
+`Q_ij ≈ 1.0` and `q_ema → 1.0`. The stable equilibrium is:
+
+```
+D* = f(1) / (f(1) + r) = 0.5 / 0.6 = 5/6 ≈ 0.833
+```
+
+Under sustained failure (`success_rate = 0.0`), `Q_ij = 0`, `q_ema → 0`,
+and D_ij decays to zero via the `r · D_ij` term.
 
 ---
 

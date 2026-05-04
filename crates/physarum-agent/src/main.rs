@@ -2,6 +2,7 @@ use axum::{routing::get, Json, Router};
 use chrono::Utc;
 use clap::Parser;
 use physarum_protocol::{PeerInfo, ProbeReport, RegisterRequest};
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,6 +31,84 @@ struct Cli {
 struct ProbeResponse {
     agent_id: String,
     status: &'static str,
+}
+
+/// Maximum number of RTT samples kept per peer.
+const MAX_RTT_SAMPLES: usize = 20;
+
+/// Short-term in-memory sensory state for a single peer.
+///
+/// Updated after every probe. The summarised statistics are included in each
+/// `ProbeReport` so the coordinator can compute a richer stimulus signal
+/// instead of reacting to a raw boolean.
+struct PeerObservation {
+    success_count: u32,
+    failure_count: u32,
+    /// RTT values (ms) from the last MAX_RTT_SAMPLES successful probes.
+    rtt_samples: VecDeque<f64>,
+    window_start: Instant,
+}
+
+impl PeerObservation {
+    fn new() -> Self {
+        Self {
+            success_count: 0,
+            failure_count: 0,
+            rtt_samples: VecDeque::new(),
+            window_start: Instant::now(),
+        }
+    }
+
+    fn record(&mut self, success: bool, rtt_ms: Option<u64>) {
+        if success {
+            self.success_count += 1;
+            if let Some(rtt) = rtt_ms {
+                if self.rtt_samples.len() >= MAX_RTT_SAMPLES {
+                    self.rtt_samples.pop_front();
+                }
+                self.rtt_samples.push_back(rtt as f64);
+            }
+        } else {
+            self.failure_count += 1;
+        }
+    }
+
+    fn success_rate(&self) -> f64 {
+        let total = self.success_count + self.failure_count;
+        if total == 0 {
+            0.0
+        } else {
+            self.success_count as f64 / total as f64
+        }
+    }
+
+    fn avg_rtt_ms(&self) -> f64 {
+        if self.rtt_samples.is_empty() {
+            return 0.0;
+        }
+        self.rtt_samples.iter().sum::<f64>() / self.rtt_samples.len() as f64
+    }
+
+    /// Mean absolute deviation of RTT samples. Returns 0.0 with fewer than 2 samples.
+    fn jitter_ms(&self) -> f64 {
+        if self.rtt_samples.len() < 2 {
+            return 0.0;
+        }
+        let avg = self.avg_rtt_ms();
+        self.rtt_samples
+            .iter()
+            .map(|r| (r - avg).abs())
+            .sum::<f64>()
+            / self.rtt_samples.len() as f64
+    }
+
+    fn sample_count(&self) -> u32 {
+        self.success_count + self.failure_count
+    }
+
+    fn observation_window_seconds(&self) -> u64 {
+        self.window_start.elapsed().as_secs()
+    }
 }
 
 fn build_probe_router(agent_id: Arc<String>) -> Router {
@@ -98,6 +177,7 @@ fn build_probe_report(
     peer: &PeerInfo,
     success: bool,
     rtt_ms: Option<u64>,
+    obs: &PeerObservation,
 ) -> ProbeReport {
     ProbeReport {
         source: source.to_string(),
@@ -105,6 +185,11 @@ fn build_probe_report(
         success,
         rtt_ms,
         observed_at: Utc::now(),
+        success_rate: obs.success_rate(),
+        avg_rtt_ms: obs.avg_rtt_ms(),
+        jitter_ms: obs.jitter_ms(),
+        observation_window_seconds: obs.observation_window_seconds(),
+        sample_count: obs.sample_count(),
     }
 }
 
@@ -124,6 +209,7 @@ async fn send_report(
 
 async fn probe_loop(cli: Arc<Cli>, client: Arc<reqwest::Client>) {
     let interval = Duration::from_secs(cli.probe_interval_seconds);
+    let mut observations: HashMap<String, PeerObservation> = HashMap::new();
     loop {
         match fetch_peers(&cli, &client).await {
             Ok(peers) => {
@@ -131,13 +217,18 @@ async fn probe_loop(cli: Arc<Cli>, client: Arc<reqwest::Client>) {
                 for peer in &peers {
                     let url = build_peer_probe_url(peer);
                     let (success, rtt_ms) = probe_peer(&client, &url).await;
+                    let obs = observations
+                        .entry(peer.agent_id.clone())
+                        .or_insert_with(PeerObservation::new);
+                    obs.record(success, rtt_ms);
                     tracing::info!(
                         target = %peer.agent_id,
                         success,
                         rtt_ms = ?rtt_ms,
+                        success_rate = obs.success_rate(),
                         "probe result"
                     );
-                    let report = build_probe_report(&cli.id, peer, success, rtt_ms);
+                    let report = build_probe_report(&cli.id, peer, success, rtt_ms, obs);
                     if let Err(e) = send_report(&cli, &client, &report).await {
                         tracing::warn!(error = %e, "failed to send report");
                     }
@@ -224,22 +315,84 @@ mod tests {
     }
 
     #[test]
-    fn probe_report_success() {
+    fn observation_success_rate_all_success() {
+        let mut obs = PeerObservation::new();
+        obs.record(true, Some(10));
+        obs.record(true, Some(12));
+        obs.record(true, Some(8));
+        assert!((obs.success_rate() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn observation_success_rate_with_failures() {
+        let mut obs = PeerObservation::new();
+        obs.record(true, Some(10));
+        obs.record(false, None);
+        obs.record(false, None);
+        obs.record(true, Some(8));
+        // 2 successes out of 4
+        assert!((obs.success_rate() - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn observation_avg_rtt() {
+        let mut obs = PeerObservation::new();
+        obs.record(true, Some(10));
+        obs.record(true, Some(20));
+        obs.record(false, None); // failures don't contribute to RTT
+        assert!((obs.avg_rtt_ms() - 15.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn observation_jitter_zero_with_one_sample() {
+        let mut obs = PeerObservation::new();
+        obs.record(true, Some(10));
+        assert_eq!(obs.jitter_ms(), 0.0);
+    }
+
+    #[test]
+    fn observation_jitter_nonzero_with_spread() {
+        let mut obs = PeerObservation::new();
+        obs.record(true, Some(10));
+        obs.record(true, Some(20)); // avg=15, MAD = (5+5)/2 = 5
+        assert!((obs.jitter_ms() - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn observation_sample_count() {
+        let mut obs = PeerObservation::new();
+        obs.record(true, Some(5));
+        obs.record(false, None);
+        obs.record(false, None);
+        assert_eq!(obs.sample_count(), 3);
+    }
+
+    #[test]
+    fn probe_report_success_includes_observation() {
         let cli = test_cli();
         let peer = test_peer();
-        let report = build_probe_report(&cli.id, &peer, true, Some(7));
+        let mut obs = PeerObservation::new();
+        obs.record(true, Some(7));
+        let report = build_probe_report(&cli.id, &peer, true, Some(7), &obs);
         assert_eq!(report.source, "agent-b");
         assert_eq!(report.target, "agent-c");
         assert!(report.success);
         assert_eq!(report.rtt_ms, Some(7));
+        assert!((report.success_rate - 1.0).abs() < 1e-12);
+        assert!((report.avg_rtt_ms - 7.0).abs() < 1e-12);
+        assert_eq!(report.sample_count, 1);
     }
 
     #[test]
-    fn probe_report_failure() {
+    fn probe_report_failure_includes_observation() {
         let cli = test_cli();
         let peer = test_peer();
-        let report = build_probe_report(&cli.id, &peer, false, None);
+        let mut obs = PeerObservation::new();
+        obs.record(false, None);
+        let report = build_probe_report(&cli.id, &peer, false, None, &obs);
         assert!(!report.success);
         assert_eq!(report.rtt_ms, None);
+        assert!((report.success_rate - 0.0).abs() < 1e-12);
+        assert_eq!(report.sample_count, 1);
     }
 }

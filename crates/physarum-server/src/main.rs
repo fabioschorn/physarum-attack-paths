@@ -73,13 +73,25 @@ mod tests {
         build_router(state).oneshot(request).await.unwrap();
     }
 
-    async fn send_report(state: Arc<AppState>, src: &str, dst: &str, success: bool) {
+    async fn send_report(
+        state: Arc<AppState>,
+        src: &str,
+        dst: &str,
+        success: bool,
+        success_rate: f64,
+        avg_rtt_ms: f64,
+    ) {
         let report = ProbeReport {
             source: src.to_string(),
             target: dst.to_string(),
             success,
             rtt_ms: if success { Some(7) } else { None },
             observed_at: Utc::now(),
+            success_rate,
+            avg_rtt_ms,
+            jitter_ms: 0.0,
+            observation_window_seconds: 0,
+            sample_count: 1,
         };
         let request = Request::builder()
             .method("POST")
@@ -114,7 +126,7 @@ mod tests {
     #[tokio::test]
     async fn report_creates_directed_edge() {
         let state = Arc::new(AppState::new());
-        send_report(state.clone(), "agent-b", "agent-c", true).await;
+        send_report(state.clone(), "agent-b", "agent-c", true, 1.0, 7.0).await;
 
         let edges = state.edges.read().await;
         let key = ("agent-b".to_string(), "agent-c".to_string());
@@ -127,7 +139,7 @@ mod tests {
     #[tokio::test]
     async fn success_increases_d_ij() {
         let state = Arc::new(AppState::new());
-        send_report(state.clone(), "b", "c", true).await;
+        send_report(state.clone(), "b", "c", true, 1.0, 7.0).await;
 
         let edges = state.edges.read().await;
         let d = edges[&("b".to_string(), "c".to_string())].d_ij;
@@ -135,18 +147,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failure_decreases_d_ij() {
+    async fn sustained_failures_drain_d_ij() {
         let state = Arc::new(AppState::new());
-        // Establish a positive D_ij via success first.
-        send_report(state.clone(), "b", "c", true).await;
-        let d_after_success = state.edges.read().await[&("b".to_string(), "c".to_string())].d_ij;
+        // Establish D_ij via successes.
+        for _ in 0..10 {
+            send_report(state.clone(), "b", "c", true, 1.0, 7.0).await;
+        }
+        let d_peak = state.edges.read().await[&("b".to_string(), "c".to_string())].d_ij;
 
-        send_report(state.clone(), "b", "c", false).await;
-        let d_after_failure = state.edges.read().await[&("b".to_string(), "c".to_string())].d_ij;
+        // Sustained all-failure reports: success_rate=0.0 → Q_ij=0 → q_ema→0 → pure decay.
+        for _ in 0..50 {
+            send_report(state.clone(), "b", "c", false, 0.0, 0.0).await;
+        }
+        let d_after = state.edges.read().await[&("b".to_string(), "c".to_string())].d_ij;
 
         assert!(
-            d_after_failure < d_after_success,
-            "D_ij should decrease after failure: {d_after_success} -> {d_after_failure}"
+            d_after < d_peak,
+            "D_ij should drain under sustained failures: peak={d_peak} -> after={d_after}"
         );
     }
 
@@ -154,18 +171,18 @@ mod tests {
     async fn d_ij_stays_clamped_to_unit_interval() {
         let state = Arc::new(AppState::new());
         for _ in 0..50 {
-            send_report(state.clone(), "b", "c", true).await;
+            send_report(state.clone(), "b", "c", true, 1.0, 7.0).await;
         }
         let d = state.edges.read().await[&("b".to_string(), "c".to_string())].d_ij;
         assert!((0.0..=1.0).contains(&d), "D_ij out of [0,1]: got {d}");
     }
 
     #[tokio::test]
-    async fn graph_returns_nodes_and_edges() {
+    async fn graph_returns_nodes_edges_and_q_ema() {
         let state = Arc::new(AppState::new());
         register_agent(state.clone(), "agent-b", 9001).await;
         register_agent(state.clone(), "agent-c", 9002).await;
-        send_report(state.clone(), "agent-b", "agent-c", true).await;
+        send_report(state.clone(), "agent-b", "agent-c", true, 1.0, 7.0).await;
 
         let request = Request::builder()
             .uri("/graph")
@@ -183,5 +200,7 @@ mod tests {
         assert_eq!(edge.source, "agent-b");
         assert_eq!(edge.target, "agent-c");
         assert!((0.0..=1.0).contains(&edge.d_ij));
+        assert!(edge.q_ema > 0.0, "q_ema should be > 0.0 after success");
+        assert!((0.0..=1.0).contains(&edge.q_ema));
     }
 }
