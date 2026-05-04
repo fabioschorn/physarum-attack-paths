@@ -1,121 +1,147 @@
-# Prototype Roadmap — Local A/B/C Laboratory
+# Prototype Roadmap — Physarum Attack Paths
 
-This document defines the first practical prototype for `physarum-attack-paths`.
+This document defines the prototype roadmap for `physarum-attack-paths`.
 
-The goal is to build a minimal but functional local laboratory with one coordinator server and two agents. This prototype intentionally starts without eBPF, attestation, mTLS, ClickHouse, or production hardening. The purpose is to validate the core idea first: agents observe reachability, report evidence to a coordinator, and the coordinator turns that evidence into a living attack-path graph with dynamic edge conductivity.
+The project started as a local A/B/C laboratory with one coordinator and two agents. It has now evolved into a working adaptive graph prototype with local execution, Docker reproducibility, stimulus-oriented reports, and a formal-methods track in progress.
 
----
-
-## 1. Prototype topology
-
-The initial test environment uses three machines, virtual machines, or containers:
+The guiding principle remains:
 
 ```text
-A = Coordinator / Server
-B = Agent
-C = Agent
-```
-
-Recommended local IP layout:
-
-```text
-A - 192.168.56.10 - physarum-server
-B - 192.168.56.11 - physarum-agent
-C - 192.168.56.12 - physarum-agent
-```
-
-Logical topology:
-
-```text
-        ┌──────────────────────┐
-        │ A - Coordinator       │
-        │ API + Graph Engine    │
-        └──────────┬───────────┘
-                   ▲
-          reports  │  reports
-                   │
-     ┌─────────────┴─────────────┐
-     │                           │
-     ▼                           ▼
-┌──────────────┐           ┌──────────────┐
-│ B - Agent    │◄─────────►│ C - Agent    │
-│ probe peer   │           │ probe peer   │
-│ report to A  │           │ report to A  │
-└──────────────┘           └──────────────┘
+Make it work.
+Make it observable.
+Make it reproducible.
+Make it formally understandable.
+Make it realistic.
+Make it secure.
+Make it production-grade.
 ```
 
 ---
 
-## 2. Prototype objective
+## 1. Current project status
 
-The first objective is not to prove exploitation or lateral movement.
+### Completed
 
-The first objective is to prove that:
+```text
+Phase 1A — Server-side graph loop
+Phase 1B — Minimal physarum-agent
+Phase 1C — Stimulus-oriented ProbeReport, Q_ij, q_ema, and D_ij
+Local A/B/C lab runbook
+Docker A/B/C lab
+Research/brainstorm notes for MCPM-inspired future path density
+AWS lab test-plan documentation
+WASM lab visual-simulation plan
+```
 
-> Two distributed agents can discover basic peer reachability, report observations to a coordinator, and allow the coordinator to maintain a dynamic graph whose edge conductivity changes over time.
+### In progress
 
-This validates the core mechanism before adding eBPF, cryptographic attestation, advanced path search, or autonomous validation agents.
+```text
+Initial TLA+ model for Q_ij, q_ema, and D_ij edge dynamics
+```
 
----
+### Planned, not started
 
-## 3. Prototype scope
-
-### Included in Phase 0
-
-- One coordinator server.
-- Two agents.
-- Agent registration.
-- Peer discovery through the coordinator.
-- Simple HTTP/TCP-based peer probe.
-- Periodic reports from agents to coordinator.
-- In-memory graph on the coordinator.
-- Dynamic edge conductivity update using reinforcement and decay.
-- JSON API to inspect agents, edges, and graph state.
-- Basic logs for debugging and observability.
-
-### Explicitly excluded from Phase 0
-
-- eBPF flow capture.
-- Kernel telemetry.
-- mTLS.
-- Ed25519 report signatures.
-- TPM/Nitro/Azure/GCP attestation.
-- ClickHouse persistence.
-- Multi-coordinator federation.
-- Kubernetes Helm deployment.
-- Terraform deployment.
-- TOON export.
-- Autonomous pentest orchestration.
-
-These features are intentionally deferred so the first prototype remains small, testable, and easy to debug.
+```text
+A/B/C/D lab
+GET /paths
+basic path scoring
+AWS Terraform skeleton
+WASM visual simulator implementation
+TLA+ expansion beyond one edge
+security hardening
+persistence
+MCPM-inspired stochastic path-density exploration
+TOON export
+```
 
 ---
 
-## 4. Repository structure for the MVP
+## 2. Current repository structure
 
-Recommended structure:
+The repository is now organized around code, labs, documentation, brainstorm notes, and future formal models.
 
 ```text
 physarum-attack-paths/
 ├── Cargo.toml
+├── Dockerfile
 ├── crates/
 │   ├── physarum-protocol/
 │   ├── physarum-server/
 │   └── physarum-agent/
 ├── examples/
-│   └── local-lab/
-│       ├── README.md
-│       └── docker-compose.yml
+│   ├── local-lab/
+│   │   ├── README.md
+│   │   └── check-local-lab.sh
+│   ├── docker-lab/
+│   │   ├── README.md
+│   │   ├── docker-compose.yml
+│   │   └── check-docker-lab.sh
+│   ├── aws-lab/
+│   │   └── README.md
+│   └── wasm-lab/
+│       └── README.md
 ├── General-Docs/
-│   └── PROTOTYPE_ROADMAP.md
-└── README.md
+│   ├── PROTOTYPE_ROADMAP.md
+│   └── INSIGHTS_AND_BRAINSTORM.md
+└── formal/
+    └── tla/                  # planned by Issue #11
+        ├── README.md
+        ├── PhysarumEdgeModel.tla
+        └── PhysarumEdgeModel.cfg
 ```
+
+---
+
+## 3. Core architecture as implemented
+
+The current implemented architecture uses:
+
+```text
+A = physarum-server / coordinator
+B = physarum-agent / agent-b
+C = physarum-agent / agent-c
+```
+
+Logical flow:
+
+```text
+agent-b registers with server
+agent-c registers with server
+agents fetch peers
+agents probe peers
+agents maintain short-term observation windows
+agents send enriched ProbeReport messages
+server computes Q_ij
+server smooths Q_ij into q_ema
+server updates D_ij
+server exposes /graph
+```
+
+Current signal flow:
+
+```text
+local observation window -> enriched ProbeReport -> Q_ij -> q_ema -> D_ij
+```
+
+Interpretation:
+
+```text
+agent = short-term local sensory organ
+ProbeReport = stimulus
+q_ema = smoothed stimulus memory
+D_ij = adaptive edge conductivity
+server graph = longer-term adaptive morphology
+```
+
+---
+
+## 4. Implemented crates
 
 ### `physarum-protocol`
 
 Shared types used by the server and agents.
 
-Initial data structures:
+Important concepts:
 
 ```text
 AgentId
@@ -123,10 +149,35 @@ AgentInfo
 RegisterRequest
 RegisterResponse
 PeerInfo
-ProbeResult
 ProbeReport
 GraphSnapshot
 EdgeSnapshot
+```
+
+`ProbeReport` is now stimulus-oriented and includes recent-window statistics:
+
+```text
+success
+rtt_ms
+success_rate
+avg_rtt_ms
+jitter_ms
+observation_window_seconds
+sample_count
+observed_at
+```
+
+`EdgeSnapshot` includes adaptive morphology fields:
+
+```text
+probe_success
+d_ij
+q_ema
+success_rate
+avg_rtt_ms
+jitter_ms
+sample_count
+last_seen
 ```
 
 ### `physarum-server`
@@ -135,13 +186,28 @@ Coordinator process.
 
 Responsibilities:
 
-- Accept agent registration.
-- Track active agents.
-- Return peer lists.
-- Receive probe reports.
-- Maintain the graph in memory.
-- Update edge conductivity.
-- Expose graph inspection endpoints.
+```text
+accept agent registration
+track active agents
+return peer lists
+receive enriched probe reports
+compute Q_ij
+update q_ema
+update D_ij
+maintain directed graph edges in memory
+expose graph inspection endpoints
+```
+
+Current main endpoints:
+
+```text
+GET  /health
+POST /register
+GET  /agents
+GET  /peers/:agent_id
+POST /report
+GET  /graph
+```
 
 ### `physarum-agent`
 
@@ -149,361 +215,451 @@ Agent process.
 
 Responsibilities:
 
-- Start with a configured `agent_id`.
-- Register itself with the coordinator.
-- Fetch the current peer list.
-- Probe peers periodically.
-- Report probe results to the coordinator.
-- Log local probe outcomes.
+```text
+start with configured agent_id
+register with coordinator
+expose local /probe endpoint
+fetch peers from coordinator
+probe peers periodically
+maintain bounded per-peer observation windows
+compute local statistics
+send enriched ProbeReport events to coordinator
+```
 
----
-
-## 5. Coordinator API for Phase 0
-
-The first server should expose the following minimal API:
+Each peer observation uses a bounded sliding window:
 
 ```text
-POST /register
-GET  /agents
-GET  /peers/{agent_id}
-POST /report
-GET  /graph
-GET  /health
+WINDOW_SIZE = 20
+samples = VecDeque<ProbeSample>
+ProbeSample.success = probe success/failure
+ProbeSample.rtt_ms = RTT for successful probes, None for failures
 ```
 
-### `POST /register`
-
-Registers an agent.
-
-Example request:
-
-```json
-{
-  "agent_id": "agent-b",
-  "address": "192.168.56.11",
-  "probe_port": 9001
-}
-```
-
-Example response:
-
-```json
-{
-  "registered": true,
-  "agent_id": "agent-b"
-}
-```
-
-### `GET /agents`
-
-Returns all known agents.
-
-Example response:
-
-```json
-[
-  {
-    "agent_id": "agent-b",
-    "address": "192.168.56.11",
-    "probe_port": 9001,
-    "last_seen": "2026-05-02T15:00:00Z"
-  },
-  {
-    "agent_id": "agent-c",
-    "address": "192.168.56.12",
-    "probe_port": 9001,
-    "last_seen": "2026-05-02T15:00:03Z"
-  }
-]
-```
-
-### `GET /peers/{agent_id}`
-
-Returns all agents except the requesting agent.
-
-Example:
+Derived values:
 
 ```text
-GET /peers/agent-b
-```
-
-Example response:
-
-```json
-[
-  {
-    "agent_id": "agent-c",
-    "address": "192.168.56.12",
-    "probe_port": 9001
-  }
-]
-```
-
-### `POST /report`
-
-Receives a probe result from an agent.
-
-Example request:
-
-```json
-{
-  "source": "agent-b",
-  "target": "agent-c",
-  "success": true,
-  "rtt_ms": 7,
-  "observed_at": "2026-05-02T15:00:10Z"
-}
-```
-
-### `GET /graph`
-
-Returns the current graph snapshot.
-
-Example response:
-
-```json
-{
-  "nodes": [
-    "agent-b",
-    "agent-c"
-  ],
-  "edges": [
-    {
-      "source": "agent-b",
-      "target": "agent-c",
-      "probe_success": true,
-      "d_ij": 0.72,
-      "last_seen": "2026-05-02T15:00:10Z"
-    },
-    {
-      "source": "agent-c",
-      "target": "agent-b",
-      "probe_success": true,
-      "d_ij": 0.69,
-      "last_seen": "2026-05-02T15:00:11Z"
-    }
-  ]
-}
+success_rate = successful samples / samples.len()
+avg_rtt_ms = mean RTT over successful samples
+jitter_ms = mean absolute deviation over successful RTT samples
+sample_count = samples.len(), capped at 20
 ```
 
 ---
 
-## 6. Agent behavior for Phase 0
+## 5. Adaptive edge model
 
-Each agent runs the following loop:
-
-```text
-1. Load configuration.
-2. Register with coordinator.
-3. Fetch peer list from coordinator.
-4. For each peer:
-   4.1 Run a simple probe.
-   4.2 Measure success/failure.
-   4.3 Measure RTT if successful.
-5. Send probe report to coordinator.
-6. Sleep for probe_interval.
-7. Repeat.
-```
-
-Example command for Agent B:
-
-```bash
-physarum-agent \
-  --id agent-b \
-  --coordinator http://192.168.56.10:8080 \
-  --listen 0.0.0.0:9001 \
-  --advertise-address 192.168.56.11 \
-  --probe-interval 10s
-```
-
-Example command for Agent C:
-
-```bash
-physarum-agent \
-  --id agent-c \
-  --coordinator http://192.168.56.10:8080 \
-  --listen 0.0.0.0:9001 \
-  --advertise-address 192.168.56.12 \
-  --probe-interval 10s
-```
-
----
-
-## 7. Edge conductivity model for the prototype
-
-For Phase 0, use a simplified version of the Physarum conductivity update.
-
-For each directed edge `i -> j`:
+The implemented adaptive edge model follows:
 
 ```text
-D_ij(t + Δt) = D_ij(t) + reinforcement - decay
+local observation window -> Q_ij -> q_ema -> D_ij
 ```
 
-Where:
+### Latency score
 
 ```text
-reinforcement = f(Q_ij) * (1 - D_ij)
-decay         = r * D_ij
+latency_score = 1.0 / (1.0 + avg_rtt_ms / 100.0)
 ```
 
-With:
+### Normalized stimulus
+
+```text
+if success_rate == 0.0:
+    Q_ij = 0.0
+else:
+    Q_ij = clamp(0.7 * success_rate + 0.3 * latency_score, 0.0, 1.0)
+```
+
+### EMA update
+
+```text
+q_ema(t+1) = 0.3 * Q_ij + 0.7 * q_ema(t)
+```
+
+### Physarum conductivity update
 
 ```text
 f(x) = x² / (1 + x²)
-```
-
-For the initial prototype:
-
-```text
-Q_ij = 1.0 if probe succeeds
-Q_ij = 0.0 if probe fails
-r    = 0.1
+D_ij(t+1) = D_ij(t) + f(q_ema) * (1 - D_ij(t)) - r * D_ij(t)
+r = 0.1
 D_ij is clamped to [0.0, 1.0]
 ```
 
-This means:
+Under stable successful low-latency probes, the observed equilibrium approaches:
 
-- successful probes reinforce the edge;
-- failed or absent probes allow the edge to decay;
-- `D_ij` never exceeds `1.0`;
-- `D_ij` never drops below `0.0`.
+```text
+D_ij ≈ 5/6 ≈ 0.833
+```
 
 ---
 
-## 8. Minimal test plan
+## 6. Labs
 
-### Test 1 — Server health
+### 6.1 Local lab — implemented
 
-Start Server A:
-
-```bash
-physarum-server --listen 0.0.0.0:8080
-```
-
-Validate:
-
-```bash
-curl http://192.168.56.10:8080/health
-```
-
-Expected result:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-### Test 2 — Agent registration
-
-Start Agent B and Agent C.
-
-Validate from any machine:
-
-```bash
-curl http://192.168.56.10:8080/agents
-```
-
-Expected result:
-
-```json
-[
-  "agent-b",
-  "agent-c"
-]
-```
-
-### Test 3 — Peer discovery
-
-Validate:
-
-```bash
-curl http://192.168.56.10:8080/peers/agent-b
-```
-
-Expected result:
-
-```json
-[
-  "agent-c"
-]
-```
-
-### Test 4 — Probe reporting
-
-After both agents run for at least one interval, validate:
-
-```bash
-curl http://192.168.56.10:8080/graph
-```
-
-Expected result:
+Path:
 
 ```text
+examples/local-lab/
+```
+
+Purpose:
+
+```text
+manual A/B/C execution with multiple terminals
+simple local debugging
+clear first-time runbook
+```
+
+Typical execution:
+
+```bash
+cargo run -p physarum-server -- --listen 127.0.0.1:8080
+cargo run -p physarum-agent -- --id agent-b --coordinator http://127.0.0.1:8080 --listen 127.0.0.1:9001 --advertise-address 127.0.0.1 --probe-interval-seconds 5
+cargo run -p physarum-agent -- --id agent-c --coordinator http://127.0.0.1:8080 --listen 127.0.0.1:9002 --advertise-address 127.0.0.1 --probe-interval-seconds 5
+bash examples/local-lab/check-local-lab.sh
+```
+
+### 6.2 Docker lab — implemented and validated
+
+Path:
+
+```text
+examples/docker-lab/
+```
+
+Purpose:
+
+```text
+reproducible A/B/C runtime test
+single-command local deployment
+fast developer validation
+```
+
+Typical execution:
+
+```bash
+cd examples/docker-lab
+docker compose up --build
+bash check-docker-lab.sh
+```
+
+The Docker lab validates:
+
+```text
+/health returns ok
+agent-b and agent-c register
+agent-b and agent-c discover each other
 agent-b -> agent-c exists
 agent-c -> agent-b exists
-D_ij > 0 for successful probes
+probe_success == true
+q_ema > 0.0
+D_ij > 0.0
+sample_count > 0
 ```
 
-### Test 5 — Decay behavior
-
-Stop Agent C.
-
-Wait several probe intervals.
-
-Validate:
-
-```bash
-curl http://192.168.56.10:8080/graph
-```
-
-Expected result:
+Observed Docker validation:
 
 ```text
-agent-b -> agent-c starts decreasing over time
+Results: 15 passed, 0 failed
 ```
 
-This proves that the graph is dynamic and not merely a static inventory.
+### 6.3 AWS lab — planned, documented only
+
+Path:
+
+```text
+examples/aws-lab/
+```
+
+Purpose:
+
+```text
+future EC2/VPC/subnet/security-group validation
+real cloud network behavior
+controlled asymmetric reachability
+foundation for future A/B/C/D path testing
+```
+
+Current status:
+
+```text
+Documentation only.
+No Terraform yet.
+```
+
+AWS should be used later to validate:
+
+```text
+real subnet boundaries
+security group changes
+asymmetric reachability
+D_ij decay when traffic is blocked
+q_ema recovery when traffic is restored
+```
+
+### 6.4 WASM lab — planned, documented only
+
+Path:
+
+```text
+examples/wasm-lab/
+```
+
+Purpose:
+
+```text
+future visual simulator for Q_ij, q_ema, and D_ij dynamics
+human-readable demonstration of adaptive morphology
+architecture/patent/research communication aid
+```
+
+Current status:
+
+```text
+Documentation only.
+No WASM implementation yet.
+```
+
+WASM should not replace Docker or AWS.
+
+```text
+Docker = runtime reproducibility
+AWS = network realism
+WASM = visual explanation
+TLA+ = formal reasoning
+```
 
 ---
 
-## 9. Success criteria for Phase 0
+## 7. Formal methods track
 
-Phase 0 is successful when:
+The formal-methods track is starting with Issue #11.
 
-- Server A starts reliably.
-- Agent B registers successfully.
-- Agent C registers successfully.
-- B discovers C as a peer.
-- C discovers B as a peer.
-- B can probe C.
-- C can probe B.
-- Both agents report probe results to A.
-- A exposes a graph containing B and C.
-- The graph contains directed edges B -> C and C -> B.
-- Edge conductivity increases after successful probes.
-- Edge conductivity decays when probes fail or stop.
+Planned path:
+
+```text
+formal/tla/
+```
+
+Planned files:
+
+```text
+formal/tla/README.md
+formal/tla/PhysarumEdgeModel.tla
+formal/tla/PhysarumEdgeModel.cfg
+```
+
+The first TLA+ model should represent one directed edge only:
+
+```text
+source -> target
+```
+
+The model should formalize the adaptive edge dynamics:
+
+```text
+ProbeReport fields -> Q_ij -> q_ema -> D_ij
+```
+
+Recommended simplification:
+
+```text
+SCALE = 1000
+1.0 = 1000
+0.3 = 300
+0.1 = 100
+```
+
+Initial invariants:
+
+```text
+0 <= Q_ij <= SCALE
+0 <= q_ema <= SCALE
+0 <= D_ij <= SCALE
+```
+
+This is not yet a full distributed-system specification. It is a formal model of the mathematical heart of the project.
 
 ---
 
-## 10. Phase 1 — Add path scoring
+## 8. Completed milestones
 
-After Phase 0 works, add basic path scoring.
+### Issue #1 — Phase 1A: server-side graph loop
 
-New server endpoint:
-
-```text
-GET /paths
-```
-
-For the A/B/C topology, this will be basic. The real value appears when adding a fourth node:
+Status:
 
 ```text
-A = Coordinator
-B = External/perimeter-like agent
-C = Gateway/application-like agent
-D = Crown-jewel/database-like agent
+completed
 ```
+
+Delivered:
+
+```text
+GET /peers/:agent_id
+POST /report
+GET /graph
+in-memory directed edges
+basic D_ij reinforcement/decay model
+tests for peers, reports, graph, bounds
+```
+
+### Issue #2 — CI formatting fix
+
+Status:
+
+```text
+completed
+```
+
+Delivered:
+
+```text
+identified rustfmt drift as CI failure cause
+kept Axum route syntax unchanged
+applied formatting-only fix
+```
+
+### Issue #3 / PR #4 — minimal physarum-agent
+
+Status:
+
+```text
+completed and merged
+```
+
+Delivered:
+
+```text
+crates/physarum-agent
+agent registration
+local /probe endpoint
+peer discovery
+peer probing
+ProbeReport sending
+first A/B/C distributed loop
+```
+
+### Issue #5 / PR #6 — local A/B/C lab runbook
+
+Status:
+
+```text
+completed and merged
+```
+
+Delivered:
+
+```text
+examples/local-lab/README.md
+examples/local-lab/check-local-lab.sh
+manual A/B/C validation flow
+expected graph output
+troubleshooting
+```
+
+### Issue #7 / PR #8 — stimulus-oriented reporting
+
+Status:
+
+```text
+completed and merged
+```
+
+Delivered:
+
+```text
+bounded peer observation window in agent
+enriched ProbeReport
+Q_ij calculation
+q_ema update
+D_ij driven by q_ema
+extended /graph edge fields
+updated local-lab and roadmap docs
+39 tests reported
+```
+
+### Issue #9 / PR #10 — Docker A/B/C lab
+
+Status:
+
+```text
+completed and merged
+```
+
+Delivered:
+
+```text
+Dockerfile
+examples/docker-lab/docker-compose.yml
+examples/docker-lab/check-docker-lab.sh
+updated examples/docker-lab/README.md
+runtime validation with 15 passed, 0 failed
+```
+
+---
+
+## 9. Current active issue
+
+### Issue #11 — initial TLA+ edge model
+
+Status:
+
+```text
+open / in progress
+```
+
+Goal:
+
+```text
+formalize Q_ij, q_ema, and D_ij edge dynamics using TLA+
+```
+
+Scope:
+
+```text
+one directed edge only
+scaled integer arithmetic
+boundedness invariants
+manual TLC run instructions
+no runtime Rust changes
+```
+
+---
+
+## 10. Recommended next implementation order
+
+The recommended near-term sequence is now:
+
+```text
+1. Complete Issue #11: initial TLA+ model for Q_ij, q_ema, D_ij.
+2. Review and optionally expand formal model notes.
+3. Add A/B/C/D lab design.
+4. Add basic /paths endpoint using D_ij and q_ema.
+5. Add simple path scoring.
+6. Create AWS Terraform skeleton only after the A/B/C/D and /paths direction is clear.
+7. Implement WASM visual simulator when the math is stable enough to present.
+8. Add security controls: enrollment, signatures, replay protection, optional mTLS.
+9. Add persistence and replay.
+10. Explore MCPM-inspired stochastic path-density engine.
+11. Add TOON export and integration with autonomous validation workflows.
+```
+
+Do not jump directly to eBPF, AWS infrastructure, or path-density simulation before the current adaptive graph substrate is stable and formally documented.
+
+---
+
+## 11. Future A/B/C/D direction
+
+The next topology expansion should be:
+
+```text
+A = coordinator / physarum-server
+B = perimeter-like agent
+C = application/gateway-like agent
+D = crown-jewel/database-like agent
+```
+
+This topology will make path scoring meaningful.
 
 Example path:
 
@@ -511,55 +667,80 @@ Example path:
 B -> C -> D
 ```
 
-The coordinator should calculate path attractiveness using:
+Future basic path score:
 
 ```text
-Attractiveness(path) = product(D_ij / L_ij)
+path_score = product(D_ij)
 ```
 
-For Phase 1, use:
+or:
+
+```text
+path_score = product(D_ij / L_ij)
+```
+
+For the first version:
 
 ```text
 L_ij = 1.0
 ```
 
-Later, `L_ij` can incorporate port exposure, vulnerability information, service weakness, and layer transition cost.
+Later, `L_ij` may incorporate:
+
+```text
+layer transition cost
+service exposure
+vulnerability pressure
+asset criticality
+credential/trust signal
+```
 
 ---
 
-## 11. Phase 2 — Add security controls
+## 12. Future security controls
 
-After the graph loop is stable, add:
+After the graph loop and path scoring are stable, add:
 
-- Ed25519 signatures for reports.
-- Agent enrollment tokens.
-- Monotonic nonces.
-- Replay protection.
-- Coordinator certificate pinning.
-- Optional mTLS.
+```text
+agent enrollment tokens
+Ed25519 report signatures
+monotonic nonces
+replay protection
+coordinator certificate pinning
+optional mTLS
+```
 
-The goal of Phase 2 is to prevent fake reports, replayed reports, and unauthorized agents from modifying the graph.
+The goal is to prevent:
+
+```text
+fake reports
+replayed reports
+unauthorized agents
+unauthorized graph manipulation
+```
 
 ---
 
-## 12. Phase 3 — Add eBPF telemetry
+## 13. Future eBPF telemetry
 
-Only after the probe/report/graph loop works, add eBPF.
+Only after the probe/report/graph/path loop is stable, add eBPF.
 
 Initial eBPF goals:
 
-- observe TCP connection state changes;
-- count flows between local agent and peer IPs;
-- export flow counts to user space;
-- include observed flow signal in `Q_ij`.
+```text
+observe TCP connection state changes
+count flows between local agent and peer IPs
+export flow counts to user space
+include observed flow signal in Q_ij
+```
 
-At this point, update:
+Possible future formula:
 
 ```text
 Q_ij = w1 * Probe(i,j) + w2 * Observe(i,j)
 ```
 
-Later, when validation agents exist:
+Later:
 
 ```text
 Q_ij = w1 * Probe(i,j) + w2 * Validation(i,j) + w3 * Observe(i,j)
@@ -567,38 +748,73 @@ Q_ij = w1 * Probe(i,j) + w2 * Validation(i,j) + w3 * Observe(i,j)
 
 ---
 
-## 13. Phase 4 — Add persistence and replay
+## 14. Future persistence and replay
 
-Add persistence after the coordinator behavior is stable.
+Persistence should come after the coordinator behavior is stable.
 
-Recommended first options:
+Possible first options:
 
-- SQLite for local prototype simplicity; or
-- ClickHouse for time-series behavior closer to the final architecture.
+```text
+SQLite for local prototype simplicity
+ClickHouse for time-series behavior closer to the final architecture
+```
 
 Persist:
 
-- agent registrations;
-- probe reports;
-- edge conductivity over time;
-- graph snapshots;
-- drift events.
+```text
+agent registrations
+probe reports
+Q_ij values
+q_ema values
+D_ij over time
+graph snapshots
+drift events
+```
 
-Replay should allow reconstructing the graph from historical reports.
+Replay should allow reconstructing the adaptive graph from historical reports.
 
 ---
 
-## 14. Phase 5 — Add TOON export and upstream integration
+## 15. Future MCPM-inspired path density
 
-Once graph behavior is validated, add TOON export.
+The idea is documented in:
 
-New endpoint:
+```text
+General-Docs/INSIGHTS_AND_BRAINSTORM.md
+```
+
+Future concept:
+
+```text
+real agents provide evidence
+server builds adaptive graph morphology
+simulated agents explore that graph
+path-density estimates emerge from repeated stochastic traversal
+```
+
+This is not near-term implementation work.
+
+It should be revisited only after:
+
+```text
+A/B/C/D works
+/paths exists
+basic path scoring is stable
+```
+
+---
+
+## 16. Future TOON export
+
+Once graph behavior and path scoring are validated, add TOON export.
+
+Possible endpoint:
 
 ```text
 GET /toon/{target}
 ```
 
-The output should include:
+Potential fields:
 
 ```text
 source
@@ -608,321 +824,31 @@ p_v
 p_e
 d_ij
 q_ema
+path_score
 layer_emergent
 layer_declared
 data_completeness
 ```
 
-This phase connects the prototype to the upstream autonomous validation and attack-path probability modeling system.
+This phase connects the prototype to upstream autonomous validation and attack-path probability modeling.
 
 ---
 
-## 15. Recommended implementation order
+## 17. Roadmap philosophy
 
-Implement in this order:
+The project should continue with baby steps.
 
-```text
-1. Create Rust workspace.
-2. Create shared protocol crate.
-3. Create server with /health.
-4. Add /register.
-5. Add /agents.
-6. Create basic agent startup.
-7. Make agent register with server.
-8. Add /peers/{agent_id}.
-9. Make agents fetch peers.
-10. Add agent peer probe.
-11. Add /report.
-12. Store reports in server memory.
-13. Build graph snapshot.
-14. Add D_ij update.
-15. Add decay loop.
-16. Add /graph.
-17. Test A/B/C lab.
-18. Add path scoring.
-19. Add signatures.
-20. Add eBPF.
-```
+The current priority is not to add complexity. The current priority is to make the adaptive graph substrate reliable, reproducible, explainable, and formally understandable.
 
-Do not start with eBPF. The first milestone is a working distributed graph loop.
-
----
-
-## 16. Practical local deployment options
-
-### Option A — Three local VMs
-
-Best option for validating real network behavior.
-
-Use:
-
-- VirtualBox;
-- VMware Fusion;
-- Proxmox;
-- Multipass;
-- three small Linux VMs.
-
-### Option B — Docker Compose
-
-Best option for fast development.
-
-Limitations:
-
-- container networking may hide some real host behavior;
-- not representative for eBPF host telemetry;
-- still useful for validating API, registration, probes, and graph updates.
-
-### Option C — One Linux host with three processes
-
-Fastest option.
-
-Use different ports for each process.
-
-Example:
+Recommended discipline:
 
 ```text
-server A: 127.0.0.1:8080
-agent B:  127.0.0.1:9001
-agent C:  127.0.0.1:9002
+one issue = one small capability
+runtime changes and research ideas stay separate
+labs validate behavior before infrastructure expands
+formal models protect core assumptions
+visual simulators explain the model but do not replace runtime tests
+AWS validates realism only after local and Docker behavior are stable
 ```
 
-This is useful for development, but less realistic than separate VMs.
-
----
-
-## 17. Prototype philosophy
-
-The prototype should remain intentionally small.
-
-The correct sequence is:
-
-```text
-Make it work.
-Make it observable.
-Make it correct.
-Make it secure.
-Make it fast.
-Make it production-grade.
-```
-
-The first version should prove the living graph mechanism, not the final production architecture.
-
----
-
-## 18. Tests executed so far
-
-This section records the concrete validation already performed during the prototype development.
-
-### Completed implementation checkpoints
-
-- **Issue #1 — Server-side graph loop:** completed.
-  - Added `GET /peers/:agent_id`.
-  - Added `POST /report`.
-  - Added `GET /graph`.
-  - Added in-memory directed edge storage.
-  - Added simplified `D_ij` reinforcement/decay update.
-
-- **Issue #2 — CI formatting fix:** completed.
-  - Investigated the CI failure after Issue #1.
-  - Confirmed the failure was caused by `rustfmt` drift, not by the Axum route syntax.
-  - Applied canonical `rustfmt` formatting.
-
-- **Issue #3 / PR #4 — Minimal `physarum-agent`:** completed and merged.
-  - Added `crates/physarum-agent`.
-  - Agent registers with the coordinator using `POST /register`.
-  - Agent exposes `GET /probe`.
-  - Agent fetches peers from `GET /peers/:agent_id`.
-  - Agent probes peer agents and measures RTT.
-  - Agent sends `ProbeReport` events to `POST /report`.
-
-### Validation commands reported for PR #4
-
-The PR validation reported:
-
-```bash
-cargo fmt --all
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-```
-
-The reported test count after adding the agent was:
-
-```text
-21 tests total
-4 agent unit tests
-13 server tests
-4 protocol tests
-```
-
-### Manual A/B/C lab executed
-
-The local lab was executed with one coordinator and two agents:
-
-```bash
-# Terminal 1 — coordinator
-cargo run -p physarum-server -- --listen 127.0.0.1:8080
-
-# Terminal 2 — agent B
-cargo run -p physarum-agent -- \
-  --id agent-b \
-  --coordinator http://127.0.0.1:8080 \
-  --listen 127.0.0.1:9001 \
-  --advertise-address 127.0.0.1 \
-  --probe-interval-seconds 5
-
-# Terminal 3 — agent C
-cargo run -p physarum-agent -- \
-  --id agent-c \
-  --coordinator http://127.0.0.1:8080 \
-  --listen 127.0.0.1:9002 \
-  --advertise-address 127.0.0.1 \
-  --probe-interval-seconds 5
-```
-
-After the agents ran for multiple probe intervals, the coordinator graph was queried:
-
-```bash
-curl -s http://127.0.0.1:8080/graph | jq
-```
-
-Observed result:
-
-```json
-{
-  "nodes": [
-    "agent-b",
-    "agent-c"
-  ],
-  "edges": [
-    {
-      "source": "agent-b",
-      "target": "agent-c",
-      "probe_success": true,
-      "d_ij": 0.8327872000000001,
-      "last_seen": "2026-05-03T04:03:32.128919Z"
-    },
-    {
-      "source": "agent-c",
-      "target": "agent-b",
-      "probe_success": true,
-      "d_ij": 0.8327872000000001,
-      "last_seen": "2026-05-03T04:03:31.672877Z"
-    }
-  ]
-}
-```
-
-### Test conclusion
-
-The manual test validated the first real distributed prototype loop:
-
-```text
-A = physarum-server
-B = physarum-agent
-C = physarum-agent
-```
-
-The following behavior was confirmed:
-
-- `agent-b` and `agent-c` registered successfully with the coordinator.
-- Both agents appeared as graph nodes.
-- Bidirectional directed edges were created: `agent-b -> agent-c` and `agent-c -> agent-b`.
-- Both probes succeeded.
-- Both agents sent probe reports to the coordinator.
-- The coordinator updated `D_ij` above `0.0`.
-- The observed `D_ij` value converged close to the expected continuous-success equilibrium of approximately `5/6 ≈ 0.833`.
-
-This confirms that the core living graph mechanism is working at the local A/B/C prototype level.
-
----
-
-## Phase 1C — Stimulus-oriented reporting (Issue #7)
-
-### Motivation
-
-The first A/B/C lab proved that the graph can reinforce directed edges
-through repeated successful probes. Phase 1C reinterprets the agent as a
-**local sensory organ** and the report as a **stimulus** that contributes
-to the coordinator's adaptive graph morphology.
-
-```
-before: probe result (bool) ──────────────────────▶ D_ij
-after:  observation window ──▶ Q_ij ──▶ q_ema ──▶ D_ij
-```
-
-### Agent changes
-
-Each agent now maintains a `PeerObservation` struct per peer backed by a
-bounded sliding window (`WINDOW_SIZE = 20`):
-
-| Field | Description |
-|---|---|
-| `samples` | bounded `VecDeque<ProbeSample>` capped at 20 entries |
-| `ProbeSample.success` | whether the probe succeeded |
-| `ProbeSample.rtt_ms` | RTT (ms) for successful probes, `None` for failures |
-| `window_start` | wall-clock start of the observation window |
-
-When the deque reaches `WINDOW_SIZE`, the oldest sample is evicted before the
-new one is inserted. All statistics therefore reflect the **most recent 20
-probes only** — never lifetime aggregates.
-
-Derived statistics included in every `ProbeReport`:
-
-| Field | Formula |
-|---|---|
-| `success_rate` | successful samples / `samples.len()` |
-| `avg_rtt_ms` | mean RTT over successful samples in the current window |
-| `jitter_ms` | mean absolute deviation of successful RTT samples |
-| `observation_window_seconds` | elapsed since window_start |
-| `sample_count` | `samples.len()`, capped at 20 |
-
-### Protocol changes
-
-`ProbeReport` extended with the five observation fields above.
-
-`EdgeSnapshot` extended with:
-
-| Field | Description |
-|---|---|
-| `q_ema` | exponential moving average of Q_ij, α = 0.3 |
-| `success_rate` | latest from the reporting agent |
-| `avg_rtt_ms` | latest from the reporting agent |
-| `jitter_ms` | latest from the reporting agent |
-| `sample_count` | latest from the reporting agent |
-
-### Coordinator changes
-
-On every `POST /report` the coordinator:
-
-1. Computes the normalised stimulus:
-   ```
-   latency_score = 1 / (1 + avg_rtt_ms / 100)
-   Q_ij = clamp(0.7 · success_rate + 0.3 · latency_score, 0.0, 1.0)
-   (Q_ij = 0.0 when success_rate = 0.0)
-   ```
-
-2. Updates the EMA:
-   ```
-   q_ema(t+1) = 0.3 · Q_ij + 0.7 · q_ema(t)
-   ```
-
-3. Drives conductivity with `q_ema` instead of the raw boolean:
-   ```
-   D_ij(t+1) = D_ij(t) + f(q_ema) · (1 − D_ij) − r · D_ij
-   ```
-
-### Equilibria
-
-| Condition | Q_ij | q_ema→ | D_ij→ |
-|---|---|---|---|
-| All success, fast link | ≈ 1.0 | 1.0 | 5/6 ≈ 0.833 |
-| All success, 100 ms RTT | 0.85 | 0.85 | ≈ 0.80 |
-| 50 % success, fast link | 0.65 | 0.65 | ≈ 0.74 |
-| All failure | 0.0 | 0.0 | 0.0 |
-
-### Test coverage added
-
-- Protocol: enriched `ProbeReport` serialization round-trip; new `EdgeSnapshot` fields
-- Agent: `PeerObservation` — success_rate, avg_rtt_ms, jitter_ms, sample_count; enriched report construction
-- Server: `calculate_q_ij` — zero-success short-circuit, blending formula, clamping; `update_q_ema` — first-step, convergence, exact formula; `update_conductivity` (renamed from bool to q_ema input) — all previous bounds/convergence properties preserved
-- Integration: `sustained_failures_drain_d_ij`; `graph_returns_nodes_edges_and_q_ema`
+The project is now beyond a pure concept. It has a working adaptive A/B/C prototype, a reproducible Docker lab, and a clear path toward formal modeling, A/B/C/D, path scoring, and eventually realistic AWS validation.
