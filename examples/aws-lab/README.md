@@ -2,7 +2,7 @@
 
 This document defines the design for the AWS-based laboratory for `physarum-attack-paths`.
 
-**Status: design only.** No Terraform files exist yet. This document defines what will be built in the next implementation gate.
+**Status: Terraform skeleton implemented — bootstrap placeholder only.** The binary artifact pipeline is not yet in place; runtime validation is deferred to a later gate.
 
 ---
 
@@ -61,19 +61,20 @@ inner subnet: 10.50.40.0/24
   D / agent-d:          10.50.40.10
 ```
 
-Exact CIDRs and IPs will be defined when Terraform is implemented.
+These CIDRs and IPs are implemented in `network.tf` and `instances.tf`.
 
 ---
 
 ## 4. Terraform skeleton layout
 
-The future Terraform implementation should use this layout:
+The Terraform skeleton currently uses this layout:
 
 ```text
 examples/aws-lab/terraform/
 ├── versions.tf          # Terraform and provider version constraints
 ├── providers.tf         # AWS provider configuration, region variable
-├── variables.tf         # region, instance_type, name_prefix, key_name
+├── variables.tf         # region, instance_type, name_prefix, key_name, architecture
+├── ami.tf               # SSM public parameter AMI lookup by architecture
 ├── network.tf           # VPC, subnets, internet gateway, route tables
 ├── security-groups.tf   # per-agent security groups, SG modes documented as variables
 ├── instances.tf         # EC2 instances for A, B, C, D with user_data references
@@ -83,7 +84,7 @@ examples/aws-lab/terraform/
     └── agent.sh         # bootstrap physarum-agent (parameterized by agent_id)
 ```
 
-No Terraform files are added in this design gate. The layout above defines the target for the implementation gate.
+The skeleton is implemented. The EC2 bootstrap uses placeholder systemd units until the binary artifact pipeline is added.
 
 ---
 
