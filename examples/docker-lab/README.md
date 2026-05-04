@@ -137,3 +137,91 @@ docker compose down --rmi local --volumes
 | `address already in use` on 8080 | Port conflict with another process | Stop the conflicting process or change the host port in `docker-compose.yml` |
 | Build fails on `libssl-dev` | Docker networking issue during build | Retry `docker compose build`; check internet connectivity |
 | `jq` not found | Not installed on host | `brew install jq` / `apt install jq` |
+
+---
+
+## Next topology: A/B/C/D lab
+
+The current Docker lab proves the A/B/C case (one adaptive edge pair). The planned next step is to extend to four agents.
+
+### A/B/C/D agent roles
+
+```
+A  =  physarum-server   (coordinator)
+B  =  agent-b           (perimeter-like / entry-layer)
+C  =  agent-c           (application/gateway-like)
+D  =  agent-d           (crown-jewel/database-like)
+```
+
+### Docker service names (A/B/C/D)
+
+```text
+physarum-server
+agent-b
+agent-c
+agent-d
+```
+
+### Why agent D matters
+
+```text
+B ↔ C  — one adaptive edge pair (current lab)
+B → C → D  — first meaningful attack path (next lab)
+```
+
+The key transition:
+
+```text
+adaptive edge: D_BC
+adaptive path: D_BC × D_CD  (path score ≈ 0.694 at equilibrium)
+```
+
+### Expected A/B/C/D graph
+
+With all three agents running, the coordinator currently returns all registered agents as peers (full mesh). Expected edges:
+
+```text
+agent-b -> agent-c      (path-readiness edge)
+agent-c -> agent-b
+agent-b -> agent-d
+agent-d -> agent-b
+agent-c -> agent-d      (path-readiness edge)
+agent-d -> agent-c
+```
+
+### Expected A/B/C/D validation checks
+
+```text
+agent-b registered
+agent-c registered
+agent-d registered
+/graph nodes include agent-b, agent-c, agent-d
+agent-b -> agent-c: probe_success=true, q_ema>0.0, d_ij>0.0, sample_count>0
+agent-c -> agent-d: probe_success=true, q_ema>0.0, d_ij>0.0, sample_count>0
+(all six full-mesh edges also validated if full mesh is active)
+```
+
+### Future /paths readiness
+
+Once Issue #17 implements the `/paths` endpoint, the path can be queried:
+
+```bash
+curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d' | jq
+```
+
+Expected conceptual response:
+
+```json
+{
+  "source": "agent-b",
+  "target": "agent-d",
+  "paths": [
+    {
+      "nodes": ["agent-b", "agent-c", "agent-d"],
+      "score": 0.694
+    }
+  ]
+}
+```
+
+The Docker A/B/C/D lab implementation is tracked in Issue #16.

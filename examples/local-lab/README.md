@@ -263,3 +263,92 @@ The script exits `0` on success and `1` on any failed assertion.
 | Only one edge in `/graph` | One agent started but not the other | Start both agents |
 | `address already in use` on 9001/9002 | Previous run still running | Kill old processes |
 | `jq` not found | Not installed | `brew install jq` / `apt install jq` |
+
+---
+
+## Next topology: A/B/C/D lab
+
+The current A/B/C lab proves one adaptive edge pair (B ↔ C). The next step adds a fourth agent (D) to create a meaningful multi-hop path.
+
+### A/B/C/D agent roles
+
+```
+A  =  physarum-server   (coordinator, port 8080)
+B  =  agent-b           (perimeter-like / entry-layer,  port 9001)
+C  =  agent-c           (application/gateway-like,       port 9002)
+D  =  agent-d           (crown-jewel/database-like,      port 9003)
+```
+
+### Local port assignments
+
+```text
+physarum-server  127.0.0.1:8080
+agent-b          127.0.0.1:9001
+agent-c          127.0.0.1:9002
+agent-d          127.0.0.1:9003
+```
+
+### Why agent D matters
+
+```text
+B ↔ C  — one adaptive edge pair (current lab)
+B → C → D  — first meaningful attack path (next lab)
+```
+
+The key transition:
+
+```text
+adaptive edge: D_BC
+adaptive path: D_BC × D_CD  (path score ≈ 0.694 at equilibrium)
+```
+
+### Local lab command for agent D
+
+```bash
+cargo run -p physarum-agent -- \
+  --id agent-d \
+  --coordinator http://127.0.0.1:8080 \
+  --listen 127.0.0.1:9003 \
+  --advertise-address 127.0.0.1 \
+  --probe-interval-seconds 5
+```
+
+### Expected A/B/C/D graph
+
+With all three agents running, the coordinator currently returns all registered agents as peers (full mesh). Expected edges:
+
+```text
+agent-b -> agent-c      (path-readiness edge)
+agent-c -> agent-b
+agent-b -> agent-d
+agent-d -> agent-b
+agent-c -> agent-d      (path-readiness edge)
+agent-d -> agent-c
+```
+
+### Future /paths readiness
+
+Once Issue #17 implements the `/paths` endpoint, the logical attack path can be queried:
+
+```bash
+curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d' | jq
+```
+
+Expected conceptual response:
+
+```json
+{
+  "source": "agent-b",
+  "target": "agent-d",
+  "paths": [
+    {
+      "nodes": ["agent-b", "agent-c", "agent-d"],
+      "score": 0.694
+    }
+  ]
+}
+```
+
+The score is `D_BC × D_CD ≈ 0.833 × 0.833 ≈ 0.694` at equilibrium.
+
+The Docker A/B/C/D lab (Issue #16) will implement this topology in a reproducible container setup.
