@@ -25,15 +25,16 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | `physarum-agent` peer-probing agent | ✔ implemented |
 | A/B/C local lab (`examples/local-lab`) | ✔ implemented |
 | A/B/C Docker lab (`examples/docker-lab`) | ✔ implemented |
+| A/B/C/D Docker lab (Agent D) | ✔ implemented |
 | TLA+ edge dynamics model (`formal/tla`) | ✔ implemented |
+| `GET /paths` endpoint (adaptive path scoring) | ✔ implemented |
 | `examples/aws-lab` | docs / planned |
 | `examples/wasm-lab` | docs / planned |
 | `physarum-graph` crate | planned |
 | `physarum-ebpf` crate | planned |
 | `physarum-coordinator` crate (full) | planned |
 | `physarum-cli` crate | planned |
-| `/paths`, `/path-density` endpoints | planned |
-| A/B/C/D lab (Agent D) | planned |
+| `/path-density` endpoint | planned |
 | AWS Terraform | planned |
 | WASM visual simulator | planned |
 | mTLS / Ed25519 / attestation | planned |
@@ -199,7 +200,8 @@ physarum-attack-paths/
 ├── crates/
 │   ├── physarum-protocol/           ✔    # shared wire types across all crates
 │   │   └── src/lib.rs                   # AgentInfo, RegisterRequest/Response,
-│   │                                    # ProbeReport, GraphSnapshot, EdgeSnapshot
+│   │                                    # ProbeReport, GraphSnapshot, EdgeSnapshot,
+│   │                                    # PathEdge, PathResult, PathsResponse
 │   │
 │   ├── physarum-server/             ✔    # HTTP coordinator (Axum 0.7 + Tokio)
 │   │   └── src/
@@ -210,7 +212,8 @@ physarum-attack-paths/
 │   │           ├── agents.rs            # POST /register · GET /agents
 │   │           ├── peers.rs             # GET  /peers/{agent_id}
 │   │           ├── report.rs            # POST /report  (ProbeReport ingest + D_ij update)
-│   │           └── graph.rs             # GET  /graph   (GraphSnapshot)
+│   │           ├── graph.rs             # GET  /graph   (GraphSnapshot)
+│           └── paths.rs             # GET  /paths   (adaptive path scoring, DFS)
 │   │
 │   └── physarum-agent/              ✔    # host agent binary
 │       └── src/
@@ -292,7 +295,7 @@ Wait for both agents to register (watch for `registered with coordinator` in the
 bash check-docker-lab.sh
 ```
 
-Expected: `Results: 15 passed, 0 failed`.
+Expected: `Results: 34 passed, 0 failed`.
 
 Stop and clean up:
 
@@ -345,6 +348,13 @@ curl -s http://127.0.0.1:8080/peers/agent-b | jq
 
 # Full graph with conductivity (D_ij, q_ema, sample_count)
 curl -s http://127.0.0.1:8080/graph | jq
+
+# Adaptive path scoring: all simple paths from agent-b to agent-d,
+# sorted by score = product(d_ij) descending.
+# In a full-mesh lab the direct hop agent-b -> agent-d may outscore the
+# two-hop agent-b -> agent-c -> agent-d if its conductivity is higher.
+# Ranking depends on live d_ij values, not hop count.
+curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d' | jq
 ```
 
 ### Verify and build

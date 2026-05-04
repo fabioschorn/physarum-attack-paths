@@ -27,6 +27,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/peers/:agent_id", get(routes::agents::get_peers))
         .route("/report", post(routes::reports::ingest_report))
         .route("/graph", get(routes::graph::get_graph))
+        .route("/paths", get(routes::paths::get_paths))
         .with_state(state)
 }
 
@@ -55,7 +56,7 @@ mod tests {
     use axum::{body::Body, http::Request};
     use chrono::Utc;
     use http_body_util::BodyExt;
-    use physarum_protocol::{GraphSnapshot, PeerInfo, ProbeReport, RegisterRequest};
+    use physarum_protocol::{GraphSnapshot, PathsResponse, PeerInfo, ProbeReport, RegisterRequest};
     use tower::ServiceExt;
 
     async fn register_agent(state: Arc<AppState>, id: &str, port: u16) {
@@ -202,5 +203,150 @@ mod tests {
         assert!((0.0..=1.0).contains(&edge.d_ij));
         assert!(edge.q_ema > 0.0, "q_ema should be > 0.0 after success");
         assert!((0.0..=1.0).contains(&edge.q_ema));
+    }
+
+    // ── /paths tests ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn paths_missing_source_returns_400() {
+        let state = Arc::new(AppState::new());
+        let request = Request::builder()
+            .uri("/paths?target=agent-d")
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(state).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), 400);
+    }
+
+    #[tokio::test]
+    async fn paths_missing_target_returns_400() {
+        let state = Arc::new(AppState::new());
+        let request = Request::builder()
+            .uri("/paths?source=agent-b")
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(state).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), 400);
+    }
+
+    #[tokio::test]
+    async fn paths_unknown_agents_returns_empty() {
+        let state = Arc::new(AppState::new());
+        let request = Request::builder()
+            .uri("/paths?source=agent-x&target=agent-z")
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(state).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), 200);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let pr: PathsResponse = serde_json::from_slice(&bytes).unwrap();
+        assert!(pr.paths.is_empty(), "no known edges → no paths");
+    }
+
+    #[tokio::test]
+    async fn paths_source_equals_target_returns_empty() {
+        let state = Arc::new(AppState::new());
+        let request = Request::builder()
+            .uri("/paths?source=agent-b&target=agent-b")
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(state).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), 200);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let pr: PathsResponse = serde_json::from_slice(&bytes).unwrap();
+        assert!(pr.paths.is_empty(), "source==target should yield no paths");
+    }
+
+    #[tokio::test]
+    async fn paths_b_to_d_via_c_found() {
+        let state = Arc::new(AppState::new());
+        // Only provide b→c and c→d: single path exists.
+        send_report(state.clone(), "agent-b", "agent-c", true, 1.0, 0.0).await;
+        send_report(state.clone(), "agent-c", "agent-d", true, 1.0, 0.0).await;
+
+        let request = Request::builder()
+            .uri("/paths?source=agent-b&target=agent-d")
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(state).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), 200);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let pr: PathsResponse = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(pr.paths.len(), 1, "exactly one path: b→c→d");
+        let path = &pr.paths[0];
+        assert_eq!(path.nodes, vec!["agent-b", "agent-c", "agent-d"]);
+        assert_eq!(path.edges.len(), 2);
+        assert_eq!(path.edges[0].source, "agent-b");
+        assert_eq!(path.edges[0].target, "agent-c");
+        assert_eq!(path.edges[1].source, "agent-c");
+        assert_eq!(path.edges[1].target, "agent-d");
+    }
+
+    #[tokio::test]
+    async fn paths_score_equals_product_of_d_ij() {
+        let state = Arc::new(AppState::new());
+        send_report(state.clone(), "agent-b", "agent-c", true, 1.0, 0.0).await;
+        send_report(state.clone(), "agent-c", "agent-d", true, 1.0, 0.0).await;
+
+        let request = Request::builder()
+            .uri("/paths?source=agent-b&target=agent-d")
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(state).oneshot(request).await.unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let pr: PathsResponse = serde_json::from_slice(&bytes).unwrap();
+
+        for path in &pr.paths {
+            let expected: f64 = path.edges.iter().map(|e| e.d_ij).product();
+            assert!(
+                (path.score - expected).abs() < 1e-12,
+                "score {:.6} != product of d_ij {:.6}",
+                path.score,
+                expected,
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn paths_max_depth_limits_path_length() {
+        let state = Arc::new(AppState::new());
+        // b→c, c→d, and direct b→d
+        send_report(state.clone(), "agent-b", "agent-c", true, 1.0, 0.0).await;
+        send_report(state.clone(), "agent-c", "agent-d", true, 1.0, 0.0).await;
+        send_report(state.clone(), "agent-b", "agent-d", true, 1.0, 0.0).await;
+
+        let request = Request::builder()
+            .uri("/paths?source=agent-b&target=agent-d&max_depth=1")
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(state).oneshot(request).await.unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let pr: PathsResponse = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(pr.paths.len(), 1, "only direct b→d with max_depth=1");
+        assert_eq!(pr.paths[0].edges.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn paths_sorted_by_score_descending() {
+        let state = Arc::new(AppState::new());
+        // b→d direct after one report (lower d_ij than b→c→d after many)
+        send_report(state.clone(), "agent-b", "agent-c", true, 1.0, 0.0).await;
+        send_report(state.clone(), "agent-c", "agent-d", true, 1.0, 0.0).await;
+        send_report(state.clone(), "agent-b", "agent-d", true, 1.0, 0.0).await;
+
+        let request = Request::builder()
+            .uri("/paths?source=agent-b&target=agent-d")
+            .body(Body::empty())
+            .unwrap();
+        let response = build_router(state).oneshot(request).await.unwrap();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let pr: PathsResponse = serde_json::from_slice(&bytes).unwrap();
+
+        let scores: Vec<f64> = pr.paths.iter().map(|p| p.score).collect();
+        let mut sorted = scores.clone();
+        sorted.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        assert_eq!(scores, sorted, "paths must be sorted by score descending");
     }
 }
