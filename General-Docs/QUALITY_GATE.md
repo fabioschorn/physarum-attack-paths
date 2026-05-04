@@ -1,6 +1,6 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** AWS Lab Skeleton / Implementation Planning  
+**Current gate:** AWS Terraform Skeleton Implementation  
 **Overall status:** GREEN  
 **Last updated:** 2026-05-04
 
@@ -12,16 +12,16 @@
 
 | Area | Status | Evidence | Notes |
 |---|---|---|---|
-| Build | GREEN | `cargo fmt/clippy/test` passing | Last verified PR #20, PR #25 |
+| Build | GREEN | `cargo fmt/clippy/test` passing | Last verified PR #20, PR #25, PR #29 |
 | Docker A/B/C/D lab | GREEN | `check-docker-lab.sh`: 34 passed, 0 failed | PR #19 |
 | GET /paths endpoint | GREEN | Docker `/paths` validation posted | PR #20 |
-| Documentation | GREEN | Roadmap trimmed and aligned | PR #25 merged |
+| Documentation | GREEN | Roadmap trimmed; AWS lab design documented | PR #25, PR #29 merged |
 | Formal model (TLA+) | GREEN | `PhysarumEdgeModel.tla` TypeOK + Safety verified | PR #12 |
-| AWS readiness | YELLOW | Lab plan documented, no Terraform yet | Issue #28 active |
+| AWS readiness | YELLOW | Design complete (PR #29); Terraform not started | Issue #30 active |
 | WASM readiness | YELLOW | Visual-sim plan documented, no impl yet | Future phase |
 
 **Overall GREEN** for the Adaptive Path Prototype gate.  
-AWS and WASM remain YELLOW because implementation has not started.
+AWS and WASM remain YELLOW because Terraform implementation has not started.
 
 ---
 
@@ -36,31 +36,32 @@ AWS and WASM remain YELLOW because implementation has not started.
 | Docker A/B/C/D Lab | COMPLETED |
 | Basic Adaptive Path Prototype (GET /paths) | COMPLETED |
 | Documentation workflow (templates + guidelines) | COMPLETED |
-| Roadmap cleanup after /paths milestone | COMPLETED |
+| Roadmap cleanup after /paths milestone | COMPLETED — PR #25 |
+| AWS Lab Terraform skeleton design | COMPLETED — PR #29 |
 
 ---
 
 ## Active gate
 
-**AWS Lab Skeleton / Implementation Planning**  
-Tracked by: Issue #28  
-Scope: Design AWS A/B/C/D mapping, minimal Terraform skeleton layout, full-mesh and segmented security group modes, validation commands, and success criteria. No Terraform files created in this gate.  
-Exit criteria: `examples/aws-lab/README.md` documents the design clearly enough to begin implementation in the next gate.
+**AWS Terraform Skeleton Implementation**  
+Tracked by: Issue #30  
+Scope: Implement the minimal Terraform skeleton under `examples/aws-lab/terraform/` as designed in Issue #28 / PR #29. VPC, subnets, security groups, EC2 instances, user-data scripts, and outputs. First version may use placeholder bootstrap for Rust binaries.  
+Exit criteria: Terraform files created, `terraform fmt` and `terraform validate` pass, skeleton is deployable (even if bootstrap is placeholder-only).
 
 ---
 
 ## Next proposed gate
 
-**AWS Lab Implementation**  
-Entry criteria: Issue #28 closed, AWS skeleton design reviewed and approved.  
-Scope: Terraform files created, AWS A/B/C/D lab deployed and validated against `/paths` with both full-mesh and segmented security group modes.
+**AWS Lab Deployment and Validation**  
+Entry criteria: Issue #30 closed, Terraform skeleton merged and reviewed.  
+Scope: Deploy AWS A/B/C/D lab to a real account, validate full-mesh mode (Mode 1), then segmented mode (Mode 2 — B→D blocked, B→C→D only), confirm `/paths` reasoning under real network segmentation.
 
 ---
 
 ## Open blockers
 
 ```text
-- AWS Terraform not started (Issue #28 design in progress)
+- AWS Terraform skeleton not yet implemented (Issue #30 in progress)
 ```
 
 ---
