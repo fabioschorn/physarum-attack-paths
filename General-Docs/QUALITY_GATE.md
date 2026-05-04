@@ -1,7 +1,7 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** Adaptive Path Prototype  
-**Overall status:** YELLOW  
+**Current gate:** AWS Lab Skeleton / Implementation Planning  
+**Overall status:** GREEN  
 **Last updated:** 2026-05-04
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable
@@ -12,16 +12,16 @@
 
 | Area | Status | Evidence | Notes |
 |---|---|---|---|
-| Build | GREEN | `cargo fmt/clippy/test` passing | Last verified PR #20, PR #25 branch |
+| Build | GREEN | `cargo fmt/clippy/test` passing | Last verified PR #20, PR #25 |
 | Docker A/B/C/D lab | GREEN | `check-docker-lab.sh`: 34 passed, 0 failed | PR #19 |
 | GET /paths endpoint | GREEN | Docker `/paths` validation posted | PR #20 |
-| Documentation | YELLOW | Roadmap cleanup in review | Issue #24, PR #25 open |
-| Formal model (TLA+) | GREEN | `PhysarumEdgeModel.tla` TypeOK + Safety verified | Issue #11, PR #12 |
-| AWS readiness | YELLOW | Lab plan documented, no Terraform yet | Planned next |
+| Documentation | GREEN | Roadmap trimmed and aligned | PR #25 merged |
+| Formal model (TLA+) | GREEN | `PhysarumEdgeModel.tla` TypeOK + Safety verified | PR #12 |
+| AWS readiness | YELLOW | Lab plan documented, no Terraform yet | Issue #28 active |
 | WASM readiness | YELLOW | Visual-sim plan documented, no impl yet | Future phase |
 
-**Overall YELLOW** because documentation cleanup (Issue #24 / PR #25) and AWS implementation are outstanding.  
-Once PR #25 merges, the documentation row becomes GREEN and overall status becomes GREEN.
+**Overall GREEN** for the Adaptive Path Prototype gate.  
+AWS and WASM remain YELLOW because implementation has not started.
 
 ---
 
@@ -36,31 +36,31 @@ Once PR #25 merges, the documentation row becomes GREEN and overall status becom
 | Docker A/B/C/D Lab | COMPLETED |
 | Basic Adaptive Path Prototype (GET /paths) | COMPLETED |
 | Documentation workflow (templates + guidelines) | COMPLETED |
+| Roadmap cleanup after /paths milestone | COMPLETED |
 
 ---
 
 ## Active gate
 
-**Roadmap/status cleanup after /paths merge**  
-Tracked by: Issue #24  
-PR: #25  
-Exit criteria: `PROTOTYPE_ROADMAP.md` reflects implemented `/paths`, architecture section describes A/B/C/D, stale content removed, numbering consistent.
+**AWS Lab Skeleton / Implementation Planning**  
+Tracked by: Issue #28  
+Scope: Design AWS A/B/C/D mapping, minimal Terraform skeleton layout, full-mesh and segmented security group modes, validation commands, and success criteria. No Terraform files created in this gate.  
+Exit criteria: `examples/aws-lab/README.md` documents the design clearly enough to begin implementation in the next gate.
 
 ---
 
 ## Next proposed gate
 
-**AWS Lab Skeleton / Implementation Planning**  
-Entry criteria: Issue #24 closed, PR #25 merged, documentation status GREEN.  
-Scope: Terraform skeleton for EC2/VPC/subnet topology; AWS lab runbook updated with real execution steps.
+**AWS Lab Implementation**  
+Entry criteria: Issue #28 closed, AWS skeleton design reviewed and approved.  
+Scope: Terraform files created, AWS A/B/C/D lab deployed and validated against `/paths` with both full-mesh and segmented security group modes.
 
 ---
 
 ## Open blockers
 
 ```text
-- PROTOTYPE_ROADMAP.md cleanup in review (Issue #24, PR #25)
-- AWS Terraform not started
+- AWS Terraform not started (Issue #28 design in progress)
 ```
 
 ---
@@ -68,9 +68,9 @@ Scope: Terraform skeleton for EC2/VPC/subnet topology; AWS lab runbook updated w
 ## Known risks
 
 ```text
-- Documentation drifts if PROTOTYPE_ROADMAP.md starts tracking issue history again
 - AWS work may introduce infrastructure complexity if started before scope is agreed
 - TLA+ model covers only one edge; multi-agent formal properties are unverified
+- Documentation can drift if PROTOTYPE_ROADMAP.md starts tracking issue history again
 ```
 
 ---
