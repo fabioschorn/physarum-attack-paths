@@ -74,6 +74,35 @@ pub struct GraphSnapshot {
     pub edges: Vec<EdgeSnapshot>,
 }
 
+/// One directed edge within a discovered path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathEdge {
+    pub source: AgentId,
+    pub target: AgentId,
+    pub d_ij: f64,
+    pub q_ema: f64,
+}
+
+/// A single path from source to target, with its adaptive score.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathResult {
+    /// Ordered node IDs from source to target (inclusive).
+    pub nodes: Vec<AgentId>,
+    /// Ordered directed edges traversed.
+    pub edges: Vec<PathEdge>,
+    /// Product of all d_ij values along the path.
+    pub score: f64,
+}
+
+/// Response body for GET /paths.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathsResponse {
+    pub source: AgentId,
+    pub target: AgentId,
+    /// All discovered simple paths, sorted by score descending.
+    pub paths: Vec<PathResult>,
+}
+
 /// State of a single directed edge at a point in time.
 ///
 /// In addition to the Physarum conductivity `d_ij`, the coordinator now stores

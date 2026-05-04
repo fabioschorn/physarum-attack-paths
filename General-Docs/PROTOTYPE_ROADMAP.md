@@ -28,19 +28,17 @@ Phase 1B — Minimal physarum-agent
 Phase 1C — Stimulus-oriented ProbeReport, Q_ij, q_ema, and D_ij
 Local A/B/C lab runbook
 Docker A/B/C lab (validated: 15 passed, 0 failed)
+Docker A/B/C/D lab (Issue #16, validated: 34 passed, 0 failed)
+GET /paths — adaptive path scoring, DFS, product(d_ij) score (Issue #17)
 Research/brainstorm notes for MCPM-inspired future path density
 AWS lab test-plan documentation
 WASM lab visual-simulation plan
-Initial TLA+ model for Q_ij, q_ema, and D_ij edge dynamics (formal/tla/)
-Root README aligned with current prototype state
-A/B/C/D lab topology design and path-readiness plan (this document)
 ```
 
 ### In progress / planned next
 
 ```text
-Docker A/B/C/D lab (Issue #16)
-basic /paths endpoint (Issue #17)
+(none)
 ```
 
 ### Planned, not started
@@ -594,125 +592,63 @@ runtime validation with 15 passed, 0 failed
 
 ---
 
-## 9. Completed milestones (continued)
+## 9. Completed milestones (summary)
+
+Issues #11, #13, #15, #16, and #17 are all closed and merged.
 
 ### Issue #11 / PR #12 — initial TLA+ edge model
 
-Status:
+Status: `completed`
 
-```text
-completed and merged
-```
+Delivered: `formal/tla/PhysarumEdgeModel.tla`, TypeOK and Safety invariants verified by TLC.
 
-Delivered:
+### Issue #13 — README refresh
 
-```text
-formal/tla/PhysarumEdgeModel.tla
-formal/tla/PhysarumEdgeModel.cfg
-formal/tla/README.md
-TypeOK and Safety invariants verified by TLC (SCALE=1000)
-```
+Status: `completed`
 
-### Issue #13 / PR #14 — root README refresh
+Delivered: root README rewritten to reflect current prototype state.
 
-Status:
+### Issue #15 — A/B/C/D lab design
 
-```text
-completed and merged
-```
+Status: `completed`
 
-Delivered:
-
-```text
-README.md aligned with current prototype state
-status table (implemented vs planned)
-correct quick start (Docker lab + local lab)
-updated repository layout
-future architecture clearly labeled as not implemented
-```
-
-### Issue #15 — A/B/C/D lab topology design
-
-Status:
-
-```text
-completed by this document
-```
-
-Delivered:
-
-```text
-A/B/C/D topology defined (roles, ports, Docker service names)
-expected graph behavior documented
-validation expectations for A/B/C/D defined
-future /paths contract described
-roadmap updated
-```
-
-## 10. Current active issues
+Delivered: A/B/C/D topology design in PROTOTYPE_ROADMAP.md and local-lab README.
 
 ### Issue #16 — Docker A/B/C/D lab
 
-Status:
+Status: `completed`
 
-```text
-next implementation step
-```
+Delivered: `agent-d` added to Compose; `check-docker-lab.sh` validates 34 checks (1 health + 3 registration + 6 edges × 5).
 
-Depends on:
+### Issue #17 — GET /paths endpoint
 
-```text
-Issue #15 (this document)
-```
+Status: `completed`
 
-Goal:
-
-```text
-extend Docker Compose lab to include agent-d
-validate B/C/D adaptive edges in Docker
-```
-
-### Issue #17 — basic /paths endpoint
-
-Status:
-
-```text
-planned after Issue #16
-```
-
-Depends on:
-
-```text
-Issue #15 (this document)
-Issue #16 (Docker A/B/C/D lab)
-```
-
-Goal:
-
-```text
-GET /paths?source=agent-b&target=agent-d
-simple directed path search over in-memory graph
-path_score = product(D_ij)
-```
+Delivered:
+- Protocol types: `PathEdge`, `PathResult`, `PathsResponse` in `physarum-protocol`
+- Route `GET /paths?source=…&target=…&max_depth=…` in `physarum-server/src/routes/paths.rs`
+- DFS path search, cycle-safe, sorted by `score = product(d_ij)` descending
+- 8 new tests (47 workspace tests total)
+- Documentation updated in README.md, PROTOTYPE_ROADMAP.md, docker-lab README
 
 ---
 
 ## 11. Recommended next implementation order
 
-The recommended near-term sequence is now:
+The recommended near-term sequence is:
 
 ```text
-1. ✔ Complete Issue #11: initial TLA+ model for Q_ij, q_ema, D_ij.
-2. ✔ Align root README with current prototype state (Issue #13).
-3. ✔ Design A/B/C/D lab topology and path-readiness plan (Issue #15).
-4.   Implement Docker A/B/C/D lab (Issue #16).
-5.   Add basic /paths endpoint using D_ij (Issue #17).
-6.   Create AWS Terraform skeleton after A/B/C/D and /paths are stable.
-7.   Implement WASM visual simulator when the math is stable enough to present.
-8.   Add security controls: enrollment, signatures, replay protection, optional mTLS.
-9.   Add persistence and replay.
-10.  Explore MCPM-inspired stochastic path-density engine.
-11.  Add TOON export and integration with autonomous validation workflows.
+✔ 1. Complete Issue #11: initial TLA+ model for Q_ij, q_ema, D_ij.
+✔ 2. Align root README with current prototype state (Issue #13).
+✔ 3. Design A/B/C/D lab topology and path-readiness plan (Issue #15).
+✔ 4. Implement Docker A/B/C/D lab (Issue #16).
+✔ 5. Add basic /paths endpoint using D_ij and q_ema (Issue #17).
+  6. Create AWS Terraform skeleton only after the A/B/C/D and /paths direction is clear.
+  7. Implement WASM visual simulator when the math is stable enough to present.
+  8. Add security controls: enrollment, signatures, replay protection, optional mTLS.
+  9. Add persistence and replay.
+ 10. Explore MCPM-inspired stochastic path-density engine.
+ 11. Add TOON export and integration with autonomous validation workflows.
 ```
 
 Do not jump directly to eBPF, AWS infrastructure, or path-density simulation before the current adaptive graph substrate is stable and formally documented.

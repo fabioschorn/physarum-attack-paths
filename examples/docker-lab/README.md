@@ -237,15 +237,20 @@ agent-c -> agent-d: probe_success=true, q_ema>0.0, d_ij>0.0, sample_count>0
 (all six full-mesh edges also validated if full mesh is active)
 ```
 
-### Future /paths readiness
+### Adaptive path scoring
 
-Once Issue #17 implements the `/paths` endpoint, the path can be queried:
+Query all simple paths from `agent-b` to `agent-d`, sorted by score = product(d\_ij):
 
 ```bash
 curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d' | jq
 ```
 
-Expected conceptual response:
+Because the A/B/C/D lab is full-mesh, the response will include both the direct
+hop and the two-hop path. The order depends on live conductivity values — the
+direct `agent-b → agent-d` edge may outscore the two-hop route if its `d_ij`
+is higher. Path ranking reflects live conductivity, not hop count.
+
+Example response shape (actual scores vary with live d\_ij values):
 
 ```json
 {
@@ -253,11 +258,17 @@ Expected conceptual response:
   "target": "agent-d",
   "paths": [
     {
+      "nodes": ["agent-b", "agent-d"],
+      "edges": [{ "source": "agent-b", "target": "agent-d", "d_ij": 0.833, "q_ema": 0.91 }],
+      "score": 0.833
+    },
+    {
       "nodes": ["agent-b", "agent-c", "agent-d"],
+      "edges": [
+        { "source": "agent-b", "target": "agent-c", "d_ij": 0.833, "q_ema": 0.91 },
+        { "source": "agent-c", "target": "agent-d", "d_ij": 0.833, "q_ema": 0.91 }
+      ],
       "score": 0.694
     }
   ]
 }
-```
-
-The Docker A/B/C/D lab implementation is tracked in Issue #16.
