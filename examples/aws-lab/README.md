@@ -270,31 +270,36 @@ Mode 3 (restore, optional):
 
 ## 10. Cost and safety controls
 
-The future Terraform implementation must follow these rules:
+**This lab creates billable AWS resources. Use a non-production account. Always run `terraform destroy` when done.**
 
 ```text
-Instance types: t3.micro or t3.small only
+Preferred instance type: t4g.micro (ARM/Graviton, Free Tier eligible in many accounts)
+Fallback: t3.micro or t2.micro depending on account Free Tier eligibility
+No NAT Gateway — public subnets with restricted security groups are used instead
+No ALB/NLB — direct EC2 access via operator_cidr only
+No Elastic IP — public IPs assigned at instance launch, released on destroy
 Name prefix variable: all resources tagged/named with a common prefix for easy cleanup
-Region variable: default to a low-cost region (e.g. us-east-1)
-No NAT Gateway in the first version (use public subnets with restricted SGs)
-No broad 0.0.0.0/0 inbound except SSH from known CIDR and :8080 for testing
-terraform destroy clearly documented as the cleanup step
+Region variable: default to us-east-1 (low-cost, Free Tier eligible)
+operator_cidr must be your own IP — never use 0.0.0.0/0
 No production accounts
 ```
+
+**Why public subnets without NAT Gateway:**
+The first version uses public subnets with an internet gateway to allow operator access to the coordinator API and SSH. This avoids the ~$0.045/hour NAT Gateway cost. Security groups restrict all inbound access to `operator_cidr` or inter-agent SG references — no broad public inbound is allowed.
 
 Required cleanup:
 
 ```bash
 cd examples/aws-lab/terraform
-terraform destroy
+terraform destroy -var="operator_cidr=<your-ip>/32"
 ```
 
 Watch for forgotten costs:
 
 ```text
-EC2 instance-hours
+EC2 instance-hours (t4g.micro: ~$0.0042/hr, t3.micro: ~$0.0104/hr)
 EBS volumes (even after instance stop)
-Elastic IPs if allocated
+Data transfer out
 CloudWatch logs if configured
 ```
 
@@ -318,13 +323,17 @@ Treat this as a controlled research lab, not a production system.
 Explicitly deferred to later phases:
 
 ```text
-Terraform implementation (this gate is design only)
+Binary artifact pipeline (S3 upload or CI build — required for real deployment)
+Runtime validation of AWS lab (depends on binary pipeline)
+Segmented SG mode automation (Mode 2 — documented in security-groups.tf comments)
+S3 remote Terraform state backend (bootstrapped after skeleton is deployed)
 Multi-account AWS
 Kubernetes / EKS
 ALB or NLB
 RDS or ClickHouse
-NAT Gateway (unless required for routing)
-SSM automation (acceptable alternative to key pairs — decide at implementation time)
+NAT Gateway
+SSM automation (acceptable alternative to key pairs — decide at deployment time)
+GitHub Actions deployment
 mTLS / Ed25519 agent authentication
 Persistence and replay
 eBPF telemetry
@@ -334,35 +343,146 @@ MCPM-inspired path-density simulation
 
 ---
 
-## 13. Terraform skeleton status
+## 13. Terraform skeleton
 
 **Status: implemented — bootstrap placeholder only.**
 
-The Terraform skeleton is created. It defines VPC, subnets, route tables, security groups, EC2 instances, user-data scripts, and outputs. The skeleton passes `terraform fmt` and `terraform validate`.
+The Terraform skeleton exists under `examples/aws-lab/terraform/`. It defines VPC, subnets, route tables, security groups, EC2 instances, user-data scripts, and outputs. The skeleton passes `terraform fmt` and `terraform validate`.
 
-The bootstrap scripts (`user-data/server.sh` and `user-data/agent.sh`) install system dependencies but use placeholder systemd units — the `physarum-server` and `physarum-agent` binaries are not yet distributed via an artifact pipeline. The scripts document two installation paths (build on instance, or download from S3) that must be completed before the lab can run.
+The bootstrap scripts (`user-data/server.sh` and `user-data/agent.sh`) install system dependencies but use placeholder systemd units. The `physarum-server` and `physarum-agent` binaries are not yet distributed via an artifact pipeline. The scripts document two installation options (build on instance or download from S3). Runtime validation is not claimed.
 
-This skeleton is not yet runtime validated. It will be marked deployable once binaries are available and `terraform apply` succeeds with `/health`, `/graph`, and `/paths` returning expected results.
+### Instance type and architecture
 
-### Terraform commands
+Default: **`t4g.micro`** (ARM/Graviton2, Free Tier eligible in many accounts).
+
+If `t4g.micro` is used, the AMI and future Rust binaries must be **`arm64`/`aarch64`**. The AMI is resolved automatically via SSM public parameter for the selected architecture — no region-specific AMI ID is hard-coded.
+
+To fall back to x86_64:
+
+```hcl
+instance_type = "t3.micro"
+architecture  = "x86_64"
+```
+
+The AMI resolves to:
+
+```text
+arm64:  /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+x86_64: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+```
+
+### AWS credentials
+
+Credentials must come from outside the repository. Never commit `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `*.tfvars` containing secrets, or `terraform.tfstate`.
+
+Option A — environment variables (temporary credentials):
+
+```bash
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...   # if using STS/AssumeRole
+```
+
+Option B — named profile:
+
+```bash
+export AWS_PROFILE=<profile-name>
+```
+
+### Terraform: local execution
 
 ```bash
 cd examples/aws-lab/terraform
 
-# Initialize
 terraform init
+terraform fmt -recursive
+terraform plan  -var="operator_cidr=$(curl -s https://checkip.amazonaws.com)/32"
+terraform apply -var="operator_cidr=$(curl -s https://checkip.amazonaws.com)/32"
 
-# Preview
-terraform plan -var="operator_cidr=<your-ip>/32"
-
-# Deploy
-terraform apply -var="operator_cidr=<your-ip>/32"
-
-# Destroy (always run when done — do not leave instances running)
-terraform destroy -var="operator_cidr=<your-ip>/32"
+# Always destroy when done
+terraform destroy -var="operator_cidr=$(curl -s https://checkip.amazonaws.com)/32"
 ```
 
-**Cost/safety reminder:** EC2 instances run as `t3.micro` by default. Always run `terraform destroy` after testing. Watch for forgotten EBS volumes and Elastic IPs. Never deploy into a production account.
+### Terraform: Docker execution (no local Terraform install required)
+
+Use a pinned image version. Replace `1.9.8` with the current stable release if different.
+
+```bash
+TF_IMAGE="hashicorp/terraform:1.9.8"
+TF_DIR="$(pwd)/examples/aws-lab/terraform"
+
+# fmt (read-only check)
+docker run --rm -v "$TF_DIR:/workspace" -w /workspace "$TF_IMAGE" fmt -recursive -check
+
+# init
+docker run --rm \
+  -v "$TF_DIR:/workspace" \
+  -w /workspace \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN \
+  "$TF_IMAGE" init
+
+# plan
+docker run --rm \
+  -v "$TF_DIR:/workspace" \
+  -w /workspace \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN \
+  "$TF_IMAGE" plan -var="operator_cidr=<your-ip>/32"
+
+# apply
+docker run --rm -it \
+  -v "$TF_DIR:/workspace" \
+  -w /workspace \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN \
+  "$TF_IMAGE" apply -var="operator_cidr=<your-ip>/32"
+
+# destroy (always run when done)
+docker run --rm -it \
+  -v "$TF_DIR:/workspace" \
+  -w /workspace \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN \
+  "$TF_IMAGE" destroy -var="operator_cidr=<your-ip>/32"
+```
+
+For AWS named profile, replace the `-e AWS_*` flags with:
+
+```bash
+  -v "$HOME/.aws:/root/.aws:ro" \
+  -e AWS_PROFILE=<profile-name>
+```
+
+### Terraform state: S3 remote backend plan
+
+The current skeleton uses **local state** (`terraform.tfstate`). Local state is acceptable for an initial operator-driven lab but must not be shared or committed.
+
+Planned S3 remote state (to be bootstrapped before team use):
+
+```text
+Bucket: physarum-terraform-state-<account-id>
+  - versioning enabled
+  - server-side encryption (SSE-S3 or SSE-KMS)
+  - public access blocked
+State key: physarum-attack-paths/aws-lab/terraform.tfstate
+State locking: DynamoDB table (if using Terraform < 1.10) or native S3 locking (Terraform >= 1.10)
+```
+
+Bootstrap sequence:
+
+```text
+Phase A: create the S3 bucket and DynamoDB table using local state or AWS CLI
+Phase B: add backend "s3" block to versions.tf and run terraform init -migrate-state
+```
+
+Do not create the backend bucket inside the same configuration that immediately uses it as a backend — this creates a chicken-and-egg problem. Phase A must complete before Phase B.
+
+This is deferred. A follow-up issue will implement the bootstrap when team collaboration requires shared state.
 
 ---
 

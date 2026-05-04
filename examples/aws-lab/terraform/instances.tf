@@ -6,7 +6,7 @@ locals {
 }
 
 resource "aws_instance" "server_a" {
-  ami                    = var.ami_id
+  ami                    = local.ami_id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.lab["management"].id
   private_ip             = local.server_private_ip
@@ -24,7 +24,7 @@ resource "aws_instance" "server_a" {
 }
 
 resource "aws_instance" "agent_b" {
-  ami                    = var.ami_id
+  ami                    = local.ami_id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.lab["outer"].id
   private_ip             = local.agent_b_private_ip
@@ -46,7 +46,7 @@ resource "aws_instance" "agent_b" {
 }
 
 resource "aws_instance" "agent_c" {
-  ami                    = var.ami_id
+  ami                    = local.ami_id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.lab["middle"].id
   private_ip             = local.agent_c_private_ip
@@ -68,7 +68,7 @@ resource "aws_instance" "agent_c" {
 }
 
 resource "aws_instance" "agent_d" {
-  ami                    = var.ami_id
+  ami                    = local.ami_id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.lab["inner"].id
   private_ip             = local.agent_d_private_ip
