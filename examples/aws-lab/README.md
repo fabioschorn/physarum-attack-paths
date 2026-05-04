@@ -334,15 +334,48 @@ MCPM-inspired path-density simulation
 
 ---
 
-## 13. Implementation sequence (updated)
+## 13. Terraform skeleton status
+
+**Status: implemented — bootstrap placeholder only.**
+
+The Terraform skeleton is created. It defines VPC, subnets, route tables, security groups, EC2 instances, user-data scripts, and outputs. The skeleton passes `terraform fmt` and `terraform validate`.
+
+The bootstrap scripts (`user-data/server.sh` and `user-data/agent.sh`) install system dependencies but use placeholder systemd units — the `physarum-server` and `physarum-agent` binaries are not yet distributed via an artifact pipeline. The scripts document two installation paths (build on instance, or download from S3) that must be completed before the lab can run.
+
+This skeleton is not yet runtime validated. It will be marked deployable once binaries are available and `terraform apply` succeeds with `/health`, `/graph`, and `/paths` returning expected results.
+
+### Terraform commands
+
+```bash
+cd examples/aws-lab/terraform
+
+# Initialize
+terraform init
+
+# Preview
+terraform plan -var="operator_cidr=<your-ip>/32"
+
+# Deploy
+terraform apply -var="operator_cidr=<your-ip>/32"
+
+# Destroy (always run when done — do not leave instances running)
+terraform destroy -var="operator_cidr=<your-ip>/32"
+```
+
+**Cost/safety reminder:** EC2 instances run as `t3.micro` by default. Always run `terraform destroy` after testing. Watch for forgotten EBS volumes and Elastic IPs. Never deploy into a production account.
+
+---
+
+## 14. Implementation sequence (updated)
 
 ```text
 ✔ 1. Docker A/B/C lab implemented and validated.
 ✔ 2. Docker A/B/C/D lab implemented and validated.
 ✔ 3. GET /paths implemented and Docker-validated.
-✔ 4. AWS lab design documented (this issue).
-  5. Implement Terraform skeleton — create VPC, subnets, SGs, EC2 instances, user_data.
-  6. Deploy and validate mode 1 (full mesh).
-  7. Switch to mode 2 (segmented B→C→D) and validate /paths reasoning.
-  8. Optional: validate mode 3 (restore connectivity, observe d_ij recovery).
+✔ 4. AWS lab design documented (this gate).
+✔ 5. Terraform skeleton implemented — VPC, subnets, SGs, EC2 instances, user_data.
+  6. Add binary artifact pipeline (S3 or build-on-instance) and deploy for real.
+  7. Validate mode 1 (full mesh) — /health, /agents, /graph, /paths all pass.
+  8. Switch to mode 2 (segmented B→C→D) and validate /paths reasoning.
+  9. Optional: validate mode 3 (restore connectivity, observe d_ij recovery).
 ```
