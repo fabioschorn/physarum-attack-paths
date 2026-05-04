@@ -33,77 +33,88 @@ struct ProbeResponse {
     status: &'static str,
 }
 
-/// Maximum number of RTT samples kept per peer.
-const MAX_RTT_SAMPLES: usize = 20;
+/// Maximum number of probe samples kept per peer (sliding window).
+const WINDOW_SIZE: usize = 20;
 
-/// Short-term in-memory sensory state for a single peer.
+struct ProbeSample {
+    success: bool,
+    rtt_ms: Option<u64>,
+}
+
+/// Short-term sliding-window sensory state for a single peer.
 ///
-/// Updated after every probe. The summarised statistics are included in each
-/// `ProbeReport` so the coordinator can compute a richer stimulus signal
-/// instead of reacting to a raw boolean.
+/// Keeps the last WINDOW_SIZE probe outcomes. Old samples are evicted as new
+/// ones arrive so that statistics always reflect recent conditions, not
+/// lifetime aggregates. The summarised statistics are included in each
+/// `ProbeReport` so the coordinator can compute a richer stimulus signal.
 struct PeerObservation {
-    success_count: u32,
-    failure_count: u32,
-    /// RTT values (ms) from the last MAX_RTT_SAMPLES successful probes.
-    rtt_samples: VecDeque<f64>,
+    samples: VecDeque<ProbeSample>,
     window_start: Instant,
 }
 
 impl PeerObservation {
     fn new() -> Self {
         Self {
-            success_count: 0,
-            failure_count: 0,
-            rtt_samples: VecDeque::new(),
+            samples: VecDeque::new(),
             window_start: Instant::now(),
         }
     }
 
     fn record(&mut self, success: bool, rtt_ms: Option<u64>) {
-        if success {
-            self.success_count += 1;
-            if let Some(rtt) = rtt_ms {
-                if self.rtt_samples.len() >= MAX_RTT_SAMPLES {
-                    self.rtt_samples.pop_front();
-                }
-                self.rtt_samples.push_back(rtt as f64);
-            }
-        } else {
-            self.failure_count += 1;
+        if self.samples.len() >= WINDOW_SIZE {
+            self.samples.pop_front();
         }
+        self.samples.push_back(ProbeSample { success, rtt_ms });
     }
 
     fn success_rate(&self) -> f64 {
-        let total = self.success_count + self.failure_count;
-        if total == 0 {
-            0.0
-        } else {
-            self.success_count as f64 / total as f64
+        if self.samples.is_empty() {
+            return 0.0;
         }
+        let successes = self.samples.iter().filter(|s| s.success).count();
+        successes as f64 / self.samples.len() as f64
     }
 
     fn avg_rtt_ms(&self) -> f64 {
-        if self.rtt_samples.is_empty() {
+        let rtts: Vec<f64> = self
+            .samples
+            .iter()
+            .filter_map(|s| {
+                if s.success {
+                    s.rtt_ms.map(|r| r as f64)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if rtts.is_empty() {
             return 0.0;
         }
-        self.rtt_samples.iter().sum::<f64>() / self.rtt_samples.len() as f64
+        rtts.iter().sum::<f64>() / rtts.len() as f64
     }
 
-    /// Mean absolute deviation of RTT samples. Returns 0.0 with fewer than 2 samples.
+    /// Mean absolute deviation of successful RTT samples. Returns 0.0 with fewer than 2.
     fn jitter_ms(&self) -> f64 {
-        if self.rtt_samples.len() < 2 {
+        let rtts: Vec<f64> = self
+            .samples
+            .iter()
+            .filter_map(|s| {
+                if s.success {
+                    s.rtt_ms.map(|r| r as f64)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if rtts.len() < 2 {
             return 0.0;
         }
-        let avg = self.avg_rtt_ms();
-        self.rtt_samples
-            .iter()
-            .map(|r| (r - avg).abs())
-            .sum::<f64>()
-            / self.rtt_samples.len() as f64
+        let avg = rtts.iter().sum::<f64>() / rtts.len() as f64;
+        rtts.iter().map(|r| (r - avg).abs()).sum::<f64>() / rtts.len() as f64
     }
 
     fn sample_count(&self) -> u32 {
-        self.success_count + self.failure_count
+        self.samples.len() as u32
     }
 
     fn observation_window_seconds(&self) -> u64 {
@@ -366,6 +377,72 @@ mod tests {
         obs.record(false, None);
         assert_eq!(obs.sample_count(), 3);
     }
+
+    // ── sliding-window eviction tests ─────────────────────────────────────────
+
+    #[test]
+    fn window_caps_sample_count_at_window_size() {
+        let mut obs = PeerObservation::new();
+        for i in 0..30u64 {
+            obs.record(true, Some(i));
+        }
+        assert!(
+            obs.sample_count() <= WINDOW_SIZE as u32,
+            "sample_count should be <= {WINDOW_SIZE}, got {}",
+            obs.sample_count()
+        );
+        assert_eq!(obs.sample_count(), WINDOW_SIZE as u32);
+    }
+
+    #[test]
+    fn window_drops_oldest_samples() {
+        let mut obs = PeerObservation::new();
+        // Fill the window with successes (RTT=10).
+        for _ in 0..WINDOW_SIZE {
+            obs.record(true, Some(10));
+        }
+        // Push one more success with a different RTT — evicts one old sample.
+        obs.record(true, Some(10));
+        // The window is still full and all samples are successes.
+        assert_eq!(obs.sample_count(), WINDOW_SIZE as u32);
+        assert!((obs.success_rate() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn window_success_rate_reflects_recent_window_not_lifetime() {
+        let mut obs = PeerObservation::new();
+        // Record WINDOW_SIZE successes to fill the window.
+        for _ in 0..WINDOW_SIZE {
+            obs.record(true, Some(5));
+        }
+        assert!((obs.success_rate() - 1.0).abs() < 1e-12);
+
+        // Now push WINDOW_SIZE failures, evicting all old successes.
+        for _ in 0..WINDOW_SIZE {
+            obs.record(false, None);
+        }
+        // The window should now show 0% success (all old successes are gone).
+        assert!(
+            obs.success_rate() < 1e-12,
+            "success_rate should be 0.0 after window filled with failures, got {}",
+            obs.success_rate()
+        );
+    }
+
+    #[test]
+    fn window_rtt_and_jitter_use_only_successful_samples_in_window() {
+        let mut obs = PeerObservation::new();
+        // Fill window with successes at RTT=100, then push one failure.
+        obs.record(true, Some(100));
+        obs.record(true, Some(200));
+        obs.record(false, None); // failure: no RTT contribution
+                                 // avg RTT should still be (100+200)/2 = 150 from successful probes only
+        assert!((obs.avg_rtt_ms() - 150.0).abs() < 1e-12);
+        // jitter: MAD of [100, 200] around mean 150 = (50+50)/2 = 50
+        assert!((obs.jitter_ms() - 50.0).abs() < 1e-12);
+    }
+
+    // ── probe_report integration ──────────────────────────────────────────────
 
     #[test]
     fn probe_report_success_includes_observation() {
