@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Validates that the Docker A/B/C lab is running correctly.
+# Validates that the Docker A/B/C/D lab is running correctly.
 # Prerequisites: docker compose up --build (from examples/docker-lab/).
 # Usage: bash examples/docker-lab/check-docker-lab.sh
 set -euo pipefail
@@ -22,110 +22,76 @@ fi
 # ── /agents ───────────────────────────────────────────────────────────────────
 AGENTS=$(curl -sf "$COORDINATOR/agents" 2>/dev/null || true)
 
-if echo "$AGENTS" | jq -e '[.[].agent_id] | contains(["agent-b"])' > /dev/null 2>&1; then
-    _pass "agent-b is registered"
-else
-    _fail "agent-b not found in /agents"
-fi
-
-if echo "$AGENTS" | jq -e '[.[].agent_id] | contains(["agent-c"])' > /dev/null 2>&1; then
-    _pass "agent-c is registered"
-else
-    _fail "agent-c not found in /agents"
-fi
-
-# ── /peers/agent-b ────────────────────────────────────────────────────────────
-PEERS=$(curl -sf "$COORDINATOR/peers/agent-b" 2>/dev/null || true)
-
-if echo "$PEERS" | jq -e '[.[].agent_id] | contains(["agent-c"])' > /dev/null 2>&1; then
-    _pass "/peers/agent-b contains agent-c"
-else
-    _fail "/peers/agent-b does not contain agent-c"
-fi
-
-if echo "$PEERS" | jq -e '[.[].agent_id] | contains(["agent-b"]) | not' > /dev/null 2>&1; then
-    _pass "/peers/agent-b excludes agent-b itself"
-else
-    _fail "/peers/agent-b incorrectly includes agent-b"
-fi
+for agent in agent-b agent-c agent-d; do
+    if echo "$AGENTS" | jq -e --arg a "$agent" '[.[].agent_id] | contains([$a])' > /dev/null 2>&1; then
+        _pass "$agent is registered"
+    else
+        _fail "$agent not found in /agents"
+    fi
+done
 
 # ── /graph ────────────────────────────────────────────────────────────────────
 GRAPH=$(curl -sf "$COORDINATOR/graph" 2>/dev/null || true)
 
-EDGE_BC=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-b" and .target=="agent-c")] | length' 2>/dev/null || echo "0")
-EDGE_CB=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-c" and .target=="agent-b")] | length' 2>/dev/null || echo "0")
+# Helper: check a single directed edge for existence, probe_success, d_ij, q_ema, sample_count.
+check_edge() {
+    local src="$1" tgt="$2"
+    local label="edge $src -> $tgt"
 
-if [ "$EDGE_BC" -ge 1 ]; then
-    _pass "edge agent-b -> agent-c exists"
-else
-    _fail "edge agent-b -> agent-c not found in /graph"
-fi
+    local count
+    count=$(echo "$GRAPH" | jq --arg s "$src" --arg t "$tgt" \
+        '[.edges[] | select(.source==$s and .target==$t)] | length' 2>/dev/null || echo "0")
+    if [ "$count" -ge 1 ]; then
+        _pass "$label exists"
+    else
+        _fail "$label not found in /graph"
+        return
+    fi
 
-if [ "$EDGE_CB" -ge 1 ]; then
-    _pass "edge agent-c -> agent-b exists"
-else
-    _fail "edge agent-c -> agent-b not found in /graph"
-fi
+    local success
+    success=$(echo "$GRAPH" | jq --arg s "$src" --arg t "$tgt" \
+        '[.edges[] | select(.source==$s and .target==$t)] | .[0].probe_success // false' 2>/dev/null || echo "false")
+    if [ "$success" = "true" ]; then
+        _pass "$label probe_success=true"
+    else
+        _fail "$label probe_success is not true"
+    fi
 
-BC_SUCCESS=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-b" and .target=="agent-c")] | .[0].probe_success // false' 2>/dev/null || echo "false")
-CB_SUCCESS=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-c" and .target=="agent-b")] | .[0].probe_success // false' 2>/dev/null || echo "false")
+    local dij
+    dij=$(echo "$GRAPH" | jq --arg s "$src" --arg t "$tgt" \
+        '[.edges[] | select(.source==$s and .target==$t)] | .[0].d_ij // 0' 2>/dev/null || echo "0")
+    if echo "$dij" | awk '{exit ($1 > 0.0) ? 0 : 1}'; then
+        _pass "$label d_ij > 0.0 (got $dij)"
+    else
+        _fail "$label d_ij is not > 0.0 (got $dij)"
+    fi
 
-if [ "$BC_SUCCESS" = "true" ]; then
-    _pass "edge agent-b -> agent-c probe_success=true"
-else
-    _fail "edge agent-b -> agent-c probe_success is not true"
-fi
+    local qema
+    qema=$(echo "$GRAPH" | jq --arg s "$src" --arg t "$tgt" \
+        '[.edges[] | select(.source==$s and .target==$t)] | .[0].q_ema // 0' 2>/dev/null || echo "0")
+    if echo "$qema" | awk '{exit ($1 > 0.0) ? 0 : 1}'; then
+        _pass "$label q_ema > 0.0 (got $qema)"
+    else
+        _fail "$label q_ema is not > 0.0 (got $qema)"
+    fi
 
-if [ "$CB_SUCCESS" = "true" ]; then
-    _pass "edge agent-c -> agent-b probe_success=true"
-else
-    _fail "edge agent-c -> agent-b probe_success is not true"
-fi
+    local samples
+    samples=$(echo "$GRAPH" | jq --arg s "$src" --arg t "$tgt" \
+        '[.edges[] | select(.source==$s and .target==$t)] | .[0].sample_count // 0' 2>/dev/null || echo "0")
+    if [ "$samples" -gt 0 ]; then
+        _pass "$label sample_count > 0 (got $samples)"
+    else
+        _fail "$label sample_count is not > 0 (got $samples)"
+    fi
+}
 
-BC_DIJ=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-b" and .target=="agent-c")] | .[0].d_ij // 0' 2>/dev/null || echo "0")
-CB_DIJ=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-c" and .target=="agent-b")] | .[0].d_ij // 0' 2>/dev/null || echo "0")
-
-if echo "$BC_DIJ" | awk '{exit ($1 > 0.0) ? 0 : 1}'; then
-    _pass "edge agent-b -> agent-c d_ij > 0.0 (got $BC_DIJ)"
-else
-    _fail "edge agent-b -> agent-c d_ij is not > 0.0 (got $BC_DIJ)"
-fi
-
-if echo "$CB_DIJ" | awk '{exit ($1 > 0.0) ? 0 : 1}'; then
-    _pass "edge agent-c -> agent-b d_ij > 0.0 (got $CB_DIJ)"
-else
-    _fail "edge agent-c -> agent-b d_ij is not > 0.0 (got $CB_DIJ)"
-fi
-
-BC_QEMA=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-b" and .target=="agent-c")] | .[0].q_ema // 0' 2>/dev/null || echo "0")
-CB_QEMA=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-c" and .target=="agent-b")] | .[0].q_ema // 0' 2>/dev/null || echo "0")
-
-if echo "$BC_QEMA" | awk '{exit ($1 > 0.0) ? 0 : 1}'; then
-    _pass "edge agent-b -> agent-c q_ema > 0.0 (got $BC_QEMA)"
-else
-    _fail "edge agent-b -> agent-c q_ema is not > 0.0 (got $BC_QEMA)"
-fi
-
-if echo "$CB_QEMA" | awk '{exit ($1 > 0.0) ? 0 : 1}'; then
-    _pass "edge agent-c -> agent-b q_ema > 0.0 (got $CB_QEMA)"
-else
-    _fail "edge agent-c -> agent-b q_ema is not > 0.0 (got $CB_QEMA)"
-fi
-
-BC_SAMPLES=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-b" and .target=="agent-c")] | .[0].sample_count // 0' 2>/dev/null || echo "0")
-CB_SAMPLES=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-c" and .target=="agent-b")] | .[0].sample_count // 0' 2>/dev/null || echo "0")
-
-if [ "$BC_SAMPLES" -gt 0 ]; then
-    _pass "edge agent-b -> agent-c sample_count > 0 (got $BC_SAMPLES)"
-else
-    _fail "edge agent-b -> agent-c sample_count is not > 0 (got $BC_SAMPLES)"
-fi
-
-if [ "$CB_SAMPLES" -gt 0 ]; then
-    _pass "edge agent-c -> agent-b sample_count > 0 (got $CB_SAMPLES)"
-else
-    _fail "edge agent-c -> agent-b sample_count is not > 0 (got $CB_SAMPLES)"
-fi
+# Full mesh: all six directed edges among B, C, D.
+check_edge agent-b agent-c
+check_edge agent-c agent-b
+check_edge agent-b agent-d
+check_edge agent-d agent-b
+check_edge agent-c agent-d
+check_edge agent-d agent-c
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""

@@ -1,16 +1,31 @@
-# Docker A/B/C Lab
+# Docker A/B/C/D Lab
 
-Reproduces the minimal three-process A/B/C prototype inside Docker Compose.
+Reproduces the four-process A/B/C/D prototype inside Docker Compose.
 
 ```
 A  =  physarum-server   (coordinator, published on host port 8080)
-B  =  physarum-agent    (agent-b, probe port 9001 internal)
-C  =  physarum-agent    (agent-c, probe port 9002 internal)
+B  =  agent-b           (perimeter-like / entry-layer,  probe port 9001 internal)
+C  =  agent-c           (application/gateway-like,       probe port 9002 internal)
+D  =  agent-d           (crown-jewel/database-like,      probe port 9003 internal)
 ```
 
-All three containers share a Compose network. Agent B and agent C discover
+All four containers share a Compose network. Agents B, C, and D discover
 each other through the coordinator and probe each other using Docker service
-names as addresses (`agent-b`, `agent-c`).
+names as addresses (`agent-b`, `agent-c`, `agent-d`). The current coordinator
+returns all registered agents as peers (full mesh), so six directed edges form:
+
+```
+agent-b ↔ agent-c      (path-readiness: B → C)
+agent-b ↔ agent-d
+agent-c ↔ agent-d      (path-readiness: C → D)
+```
+
+The key path for future `/paths` endpoint validation:
+
+```
+agent-b → agent-c → agent-d
+path_score = D_BC × D_CD ≈ 0.833 × 0.833 ≈ 0.694
+```
 
 ---
 
@@ -51,41 +66,62 @@ agent-b          | INFO physarum_agent: probe server listening listen=0.0.0.0:90
 agent-b          | INFO physarum_agent: registered with coordinator agent_id=agent-b
 agent-c          | INFO physarum_agent: probe server listening listen=0.0.0.0:9002 agent_id=agent-c
 agent-c          | INFO physarum_agent: registered with coordinator agent_id=agent-c
+agent-d          | INFO physarum_agent: probe server listening listen=0.0.0.0:9003 agent_id=agent-d
+agent-d          | INFO physarum_agent: registered with coordinator agent_id=agent-d
 ```
 
-`agent-b` and `agent-c` only start after the server passes its health check
+All agents start only after the server passes its health check
 (`GET /health` returns `"ok"`), so registration order is deterministic.
 
 ---
 
 ## Step 2 — Validate
 
-Wait at least one probe interval (5 s) after both agents are running, then run:
+Wait at least one probe interval (5 s) after all agents register, then run:
 
 ```bash
 bash examples/docker-lab/check-docker-lab.sh
 ```
 
-Expected output:
+Expected output (34 checks — 1 health + 3 registration + 6 edges × 5 checks each):
 
 ```
 [PASS] /health returns ok
 [PASS] agent-b is registered
 [PASS] agent-c is registered
-[PASS] /peers/agent-b contains agent-c
-[PASS] /peers/agent-b excludes agent-b itself
+[PASS] agent-d is registered
 [PASS] edge agent-b -> agent-c exists
-[PASS] edge agent-c -> agent-b exists
 [PASS] edge agent-b -> agent-c probe_success=true
+[PASS] edge agent-b -> agent-c d_ij > 0.0 (got 0.72)
+[PASS] edge agent-b -> agent-c q_ema > 0.0 (got 0.91)
+[PASS] edge agent-b -> agent-c sample_count > 0 (got 12)
+[PASS] edge agent-c -> agent-b exists
 [PASS] edge agent-c -> agent-b probe_success=true
-[PASS] edge agent-b -> agent-c d_ij > 0.0
-[PASS] edge agent-c -> agent-b d_ij > 0.0
-[PASS] edge agent-b -> agent-c q_ema > 0.0
-[PASS] edge agent-c -> agent-b q_ema > 0.0
-[PASS] edge agent-b -> agent-c sample_count > 0
-[PASS] edge agent-c -> agent-b sample_count > 0
+[PASS] edge agent-c -> agent-b d_ij > 0.0 (got 0.72)
+[PASS] edge agent-c -> agent-b q_ema > 0.0 (got 0.91)
+[PASS] edge agent-c -> agent-b sample_count > 0 (got 12)
+[PASS] edge agent-b -> agent-d exists
+[PASS] edge agent-b -> agent-d probe_success=true
+[PASS] edge agent-b -> agent-d d_ij > 0.0 (got 0.72)
+[PASS] edge agent-b -> agent-d q_ema > 0.0 (got 0.91)
+[PASS] edge agent-b -> agent-d sample_count > 0 (got 12)
+[PASS] edge agent-d -> agent-b exists
+[PASS] edge agent-d -> agent-b probe_success=true
+[PASS] edge agent-d -> agent-b d_ij > 0.0 (got 0.72)
+[PASS] edge agent-d -> agent-b q_ema > 0.0 (got 0.91)
+[PASS] edge agent-d -> agent-b sample_count > 0 (got 12)
+[PASS] edge agent-c -> agent-d exists
+[PASS] edge agent-c -> agent-d probe_success=true
+[PASS] edge agent-c -> agent-d d_ij > 0.0 (got 0.72)
+[PASS] edge agent-c -> agent-d q_ema > 0.0 (got 0.91)
+[PASS] edge agent-c -> agent-d sample_count > 0 (got 12)
+[PASS] edge agent-d -> agent-c exists
+[PASS] edge agent-d -> agent-c probe_success=true
+[PASS] edge agent-d -> agent-c d_ij > 0.0 (got 0.72)
+[PASS] edge agent-d -> agent-c q_ema > 0.0 (got 0.91)
+[PASS] edge agent-d -> agent-c sample_count > 0 (got 12)
 
-Results: 15 passed, 0 failed
+Results: 34 passed, 0 failed
 ```
 
 The coordinator defaults to `http://127.0.0.1:8080`. Override with:
@@ -102,13 +138,13 @@ PHYSARUM_COORDINATOR=http://127.0.0.1:8080 bash examples/docker-lab/check-docker
 # Health
 curl -s http://127.0.0.1:8080/health | jq
 
-# Registered agents
+# Registered agents (should list agent-b, agent-c, agent-d)
 curl -s http://127.0.0.1:8080/agents | jq
 
-# Peers of agent-b
+# Peers of agent-b (should list agent-c and agent-d)
 curl -s http://127.0.0.1:8080/peers/agent-b | jq
 
-# Full graph with conductivity
+# Full graph with conductivity (six directed edges)
 curl -s http://127.0.0.1:8080/graph | jq
 ```
 
@@ -130,10 +166,10 @@ docker compose down --rmi local --volumes
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `agent-b` / `agent-c` exit immediately | Server not healthy yet | `depends_on` health check handles this; check server logs |
+| Any agent exits immediately | Server not healthy yet | `depends_on` health check handles this; check server logs |
 | `connection refused` on port 8080 | Server container not running | Run `docker compose ps` to check status |
-| `d_ij` stays at `0.0` | No probe interval has elapsed yet | Wait ≥ 5 s after both agents register |
-| Only one edge in `/graph` | One agent failed to start | Check `docker compose logs agent-b` / `agent-c` |
+| `d_ij` stays at `0.0` | No probe interval has elapsed yet | Wait ≥ 5 s after all agents register |
+| Missing edges in `/graph` | One agent failed to start | Check `docker compose logs agent-b` / `agent-c` / `agent-d` |
 | `address already in use` on 8080 | Port conflict with another process | Stop the conflicting process or change the host port in `docker-compose.yml` |
 | Build fails on `libssl-dev` | Docker networking issue during build | Retry `docker compose build`; check internet connectivity |
 | `jq` not found | Not installed on host | `brew install jq` / `apt install jq` |

@@ -52,3 +52,23 @@ services:
     depends_on:
       physarum-server:
         condition: service_healthy
+
+  agent-d:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command:
+      - physarum-agent
+      - --id
+      - agent-d
+      - --coordinator
+      - http://physarum-server:8080
+      - --listen
+      - 0.0.0.0:9003
+      - --advertise-address
+      - agent-d
+      - --probe-interval-seconds
+      - "5"
+    depends_on:
+      physarum-server:
+        condition: service_healthy
