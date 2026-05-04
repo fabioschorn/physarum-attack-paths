@@ -833,3 +833,96 @@ The following behavior was confirmed:
 - The observed `D_ij` value converged close to the expected continuous-success equilibrium of approximately `5/6 ≈ 0.833`.
 
 This confirms that the core living graph mechanism is working at the local A/B/C prototype level.
+
+---
+
+## Phase 1C — Stimulus-oriented reporting (Issue #7)
+
+### Motivation
+
+The first A/B/C lab proved that the graph can reinforce directed edges
+through repeated successful probes. Phase 1C reinterprets the agent as a
+**local sensory organ** and the report as a **stimulus** that contributes
+to the coordinator's adaptive graph morphology.
+
+```
+before: probe result (bool) ──────────────────────▶ D_ij
+after:  observation window ──▶ Q_ij ──▶ q_ema ──▶ D_ij
+```
+
+### Agent changes
+
+Each agent now maintains a `PeerObservation` struct per peer backed by a
+bounded sliding window (`WINDOW_SIZE = 20`):
+
+| Field | Description |
+|---|---|
+| `samples` | bounded `VecDeque<ProbeSample>` capped at 20 entries |
+| `ProbeSample.success` | whether the probe succeeded |
+| `ProbeSample.rtt_ms` | RTT (ms) for successful probes, `None` for failures |
+| `window_start` | wall-clock start of the observation window |
+
+When the deque reaches `WINDOW_SIZE`, the oldest sample is evicted before the
+new one is inserted. All statistics therefore reflect the **most recent 20
+probes only** — never lifetime aggregates.
+
+Derived statistics included in every `ProbeReport`:
+
+| Field | Formula |
+|---|---|
+| `success_rate` | successful samples / `samples.len()` |
+| `avg_rtt_ms` | mean RTT over successful samples in the current window |
+| `jitter_ms` | mean absolute deviation of successful RTT samples |
+| `observation_window_seconds` | elapsed since window_start |
+| `sample_count` | `samples.len()`, capped at 20 |
+
+### Protocol changes
+
+`ProbeReport` extended with the five observation fields above.
+
+`EdgeSnapshot` extended with:
+
+| Field | Description |
+|---|---|
+| `q_ema` | exponential moving average of Q_ij, α = 0.3 |
+| `success_rate` | latest from the reporting agent |
+| `avg_rtt_ms` | latest from the reporting agent |
+| `jitter_ms` | latest from the reporting agent |
+| `sample_count` | latest from the reporting agent |
+
+### Coordinator changes
+
+On every `POST /report` the coordinator:
+
+1. Computes the normalised stimulus:
+   ```
+   latency_score = 1 / (1 + avg_rtt_ms / 100)
+   Q_ij = clamp(0.7 · success_rate + 0.3 · latency_score, 0.0, 1.0)
+   (Q_ij = 0.0 when success_rate = 0.0)
+   ```
+
+2. Updates the EMA:
+   ```
+   q_ema(t+1) = 0.3 · Q_ij + 0.7 · q_ema(t)
+   ```
+
+3. Drives conductivity with `q_ema` instead of the raw boolean:
+   ```
+   D_ij(t+1) = D_ij(t) + f(q_ema) · (1 − D_ij) − r · D_ij
+   ```
+
+### Equilibria
+
+| Condition | Q_ij | q_ema→ | D_ij→ |
+|---|---|---|---|
+| All success, fast link | ≈ 1.0 | 1.0 | 5/6 ≈ 0.833 |
+| All success, 100 ms RTT | 0.85 | 0.85 | ≈ 0.80 |
+| 50 % success, fast link | 0.65 | 0.65 | ≈ 0.74 |
+| All failure | 0.0 | 0.0 | 0.0 |
+
+### Test coverage added
+
+- Protocol: enriched `ProbeReport` serialization round-trip; new `EdgeSnapshot` fields
+- Agent: `PeerObservation` — success_rate, avg_rtt_ms, jitter_ms, sample_count; enriched report construction
+- Server: `calculate_q_ij` — zero-success short-circuit, blending formula, clamping; `update_q_ema` — first-step, convergence, exact formula; `update_conductivity` (renamed from bool to q_ema input) — all previous bounds/convergence properties preserved
+- Integration: `sustained_failures_drain_d_ij`; `graph_returns_nodes_edges_and_q_ema`

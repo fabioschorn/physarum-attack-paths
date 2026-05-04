@@ -97,6 +97,21 @@ else
     _fail "edge agent-c -> agent-b d_ij is not > 0.0 (got $CB_DIJ)"
 fi
 
+BC_QEMA=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-b" and .target=="agent-c")] | .[0].q_ema // 0' 2>/dev/null || echo "0")
+CB_QEMA=$(echo "$GRAPH" | jq '[.edges[] | select(.source=="agent-c" and .target=="agent-b")] | .[0].q_ema // 0' 2>/dev/null || echo "0")
+
+if echo "$BC_QEMA" | awk '{exit ($1 > 0.0) ? 0 : 1}'; then
+    _pass "edge agent-b -> agent-c q_ema > 0.0 (got $BC_QEMA)"
+else
+    _fail "edge agent-b -> agent-c q_ema is not > 0.0 (got $BC_QEMA)"
+fi
+
+if echo "$CB_QEMA" | awk '{exit ($1 > 0.0) ? 0 : 1}'; then
+    _pass "edge agent-c -> agent-b q_ema > 0.0 (got $CB_QEMA)"
+else
+    _fail "edge agent-c -> agent-b q_ema is not > 0.0 (got $CB_QEMA)"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
