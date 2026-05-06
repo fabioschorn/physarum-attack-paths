@@ -13,6 +13,13 @@ resource "aws_iam_role" "physarum_ec2" {
   tags = {
     Name = "${var.name_prefix}-ec2-role"
   }
+
+  lifecycle {
+    precondition {
+      condition     = !(var.enable_artifact_download && var.artifact_bucket == "")
+      error_message = "artifact_bucket must be set when enable_artifact_download is true."
+    }
+  }
 }
 
 resource "aws_iam_instance_profile" "physarum_ec2" {

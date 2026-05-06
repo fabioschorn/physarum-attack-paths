@@ -935,9 +935,9 @@ real user_data download and systemd startup behind enable_artifact_download feat
 
 ## 17. S3 Artifact Delivery — Build, Upload, and Apply Workflow (Issue #38)
 
-**Status: implemented.**
+**Status: Terraform and user_data support implemented. Binary upload and AWS runtime validation are not yet performed — those are the next gate.**
 
-This section documents the operator workflow to build Linux x86_64 binaries, upload them to a pre-existing S3 bucket, and apply the Terraform stack with artifact download enabled.
+This section documents the Terraform and user_data changes shipped in Issue #38 and the operator workflow that will be executed in the runtime validation gate. No binary has been uploaded to S3 and no EC2 runtime endpoints have been validated in this PR.
 
 The S3 bucket must be created outside this Terraform stack (Option B from section 16.2). This keeps the artifact store separate from the disposable lab infrastructure — `terraform destroy` does not delete the bucket.
 

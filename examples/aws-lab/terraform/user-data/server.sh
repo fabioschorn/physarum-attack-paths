@@ -21,11 +21,23 @@ ARTIFACT_REGION="${artifact_region}"
 dnf update -y
 dnf install -y jq curl
 
+# Log bootstrap configuration for cloud-init diagnostics (no secrets logged)
+echo "physarum bootstrap: enable_artifact_download=$ENABLE_ARTIFACT_DOWNLOAD"
+echo "physarum bootstrap: artifact_bucket_set=$([ -n "$ARTIFACT_BUCKET" ] && echo yes || echo no)"
+echo "physarum bootstrap: artifact_prefix=$ARTIFACT_PREFIX"
+echo "physarum bootstrap: artifact_region=$ARTIFACT_REGION"
+
 if [ "$ENABLE_ARTIFACT_DOWNLOAD" = "true" ]; then
   # Download physarum-server binary from S3 using the attached IAM Instance Profile.
   # No static AWS credentials required or permitted.
   if ! command -v aws &>/dev/null; then
-    dnf install -y awscli2
+    dnf install -y awscli2 || \
+    dnf install -y aws-cli2 || \
+    dnf install -y awscli
+  fi
+  if ! command -v aws &>/dev/null; then
+    echo "ERROR: AWS CLI not available after install attempt — cannot download artifacts"
+    exit 1
   fi
 
   aws s3 cp "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/physarum-server" \
