@@ -11,9 +11,9 @@ variable "name_prefix" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type for all nodes. Prefer t4g.micro (ARM/Graviton, Free Tier eligible). Use t3.micro or t2.micro as fallback if Graviton is not viable in the target account/region."
+  description = "EC2 instance type for all nodes. Default: t3.micro (Intel/x86_64, Free Tier-oriented). Optional Graviton path: t4g.micro (arm64). t2.micro may be used where Free Tier eligible."
   type        = string
-  default     = "t4g.micro"
+  default     = "t3.micro"
 
   validation {
     condition     = contains(["t4g.micro", "t4g.small", "t3.micro", "t3.small", "t2.micro"], var.instance_type)
@@ -22,9 +22,9 @@ variable "instance_type" {
 }
 
 variable "architecture" {
-  description = "CPU architecture for AMI selection. Must match instance_type: t4g.* requires arm64; t3.* and t2.* require x86_64."
+  description = "CPU architecture for AMI selection. Must match instance_type: t4g.* requires arm64; t3.* and t2.* require x86_64. Default: x86_64 to match t3.micro."
   type        = string
-  default     = "arm64"
+  default     = "x86_64"
 
   validation {
     condition     = contains(["arm64", "x86_64"], var.architecture)

@@ -274,13 +274,14 @@ Mode 3 (restore, optional):
 **This lab creates billable AWS resources. Use a non-production account. Always run `terraform destroy` when done.**
 
 ```text
-Preferred instance type: t4g.micro (ARM/Graviton, Free Tier eligible in many accounts)
-Fallback: t3.micro or t2.micro depending on account Free Tier eligibility
+Default instance type: t3.micro (Intel/x86_64, Free Tier-oriented)
+Optional Graviton path: t4g.micro (arm64) — see architecture variable
+t2.micro: fallback only where Free Tier eligible; do not assume
 No NAT Gateway — public subnets with restricted security groups are used instead
 No ALB/NLB — direct EC2 access via operator_cidr only
 No Elastic IP — public IPs assigned at instance launch, released on destroy
 Name prefix variable: all resources tagged/named with a common prefix for easy cleanup
-Region variable: default to us-east-1 (low-cost, Free Tier eligible)
+Region variable: default to us-east-1 (low-cost, Free Tier-oriented)
 operator_cidr must be your own IP — never use 0.0.0.0/0
 No production accounts
 ```
@@ -288,17 +289,20 @@ No production accounts
 **Why public subnets without NAT Gateway:**
 The first version uses public subnets with an internet gateway to allow operator access to the coordinator API and SSH. This avoids the ~$0.045/hour NAT Gateway cost. Security groups restrict all inbound access to `operator_cidr` or inter-agent SG references — no broad public inbound is allowed.
 
+**Why operator_cidr must be a single workstation IP:**
+The coordinator API (port 8080) is not yet protected by authentication, mTLS, or an API gateway. The Security Group is the only access control. Using a narrow `/32` CIDR — your workstation IP — ensures that no other host on the internet can reach the API during tests. This will remain required until authentication is added.
+
 Required cleanup:
 
 ```bash
 cd examples/aws-lab/terraform
-terraform destroy -var="operator_cidr=<your-ip>/32"
+terraform destroy -var="operator_cidr=187.101.126.140/32"
 ```
 
 Watch for forgotten costs:
 
 ```text
-EC2 instance-hours (t4g.micro: ~$0.0042/hr, t3.micro: ~$0.0104/hr)
+EC2 instance-hours (t3.micro: ~$0.0104/hr, t4g.micro: ~$0.0042/hr if using Graviton)
 EBS volumes (even after instance stop)
 Data transfer out
 CloudWatch logs if configured
@@ -354,23 +358,25 @@ The bootstrap scripts (`user-data/server.sh` and `user-data/agent.sh`) install s
 
 ### Instance type and architecture
 
-Default: **`t4g.micro`** (ARM/Graviton2, Free Tier eligible in many accounts).
+Default: **`t3.micro`** (Intel/x86_64, Free Tier-oriented).
 
-If `t4g.micro` is used, the AMI and future Rust binaries must be **`arm64`/`aarch64`**. The AMI is resolved automatically via SSM public parameter for the selected architecture — no region-specific AMI ID is hard-coded.
-
-To fall back to x86_64:
-
-```hcl
-instance_type = "t3.micro"
-architecture  = "x86_64"
-```
+The AMI is resolved automatically via SSM public parameter for the selected architecture — no region-specific AMI ID is hard-coded.
 
 The AMI resolves to:
 
 ```text
-arm64:  /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
 x86_64: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+arm64:  /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
 ```
+
+Optional Graviton path — use only when future Rust binaries are built for `aarch64`:
+
+```hcl
+instance_type = "t4g.micro"
+architecture  = "arm64"
+```
+
+`t2.micro` may be used as a fallback only where it is Free Tier eligible in the target account and region. Free Tier eligibility depends on account age and AWS terms — do not assume.
 
 ### AWS credentials
 
@@ -392,16 +398,27 @@ export AWS_PROFILE=<profile-name>
 
 ### Terraform: local execution
 
+The `operator_cidr` must be your workstation IP. The coordinator API (port 8080) is not
+yet authenticated — the Security Group is the only access control. Use a `/32` CIDR.
+
+Dev Lead test value: `187.101.126.140/32`. Other operators: substitute your own IP.
+
 ```bash
 cd examples/aws-lab/terraform
 
 terraform init
 terraform fmt -recursive
-terraform plan  -var="operator_cidr=$(curl -s https://checkip.amazonaws.com)/32"
-terraform apply -var="operator_cidr=$(curl -s https://checkip.amazonaws.com)/32"
+terraform plan  -var="operator_cidr=187.101.126.140/32"
+terraform apply -var="operator_cidr=187.101.126.140/32"
 
 # Always destroy when done
-terraform destroy -var="operator_cidr=$(curl -s https://checkip.amazonaws.com)/32"
+terraform destroy -var="operator_cidr=187.101.126.140/32"
+```
+
+To auto-detect your current IP instead of hard-coding:
+
+```bash
+terraform plan -var="operator_cidr=$(curl -s https://checkip.amazonaws.com)/32"
 ```
 
 ### Terraform: Docker execution (no local Terraform install required)
@@ -424,14 +441,14 @@ docker run --rm \
   -e AWS_SESSION_TOKEN \
   "$TF_IMAGE" init
 
-# plan
+# plan — substitute your operator CIDR; Dev Lead value: 187.101.126.140/32
 docker run --rm \
   -v "$TF_DIR:/workspace" \
   -w /workspace \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
   -e AWS_SESSION_TOKEN \
-  "$TF_IMAGE" plan -var="operator_cidr=<your-ip>/32"
+  "$TF_IMAGE" plan -var="operator_cidr=187.101.126.140/32"
 
 # apply
 docker run --rm -it \
@@ -440,7 +457,7 @@ docker run --rm -it \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
   -e AWS_SESSION_TOKEN \
-  "$TF_IMAGE" apply -var="operator_cidr=<your-ip>/32"
+  "$TF_IMAGE" apply -var="operator_cidr=187.101.126.140/32"
 
 # destroy (always run when done)
 docker run --rm -it \
@@ -449,7 +466,7 @@ docker run --rm -it \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
   -e AWS_SESSION_TOKEN \
-  "$TF_IMAGE" destroy -var="operator_cidr=<your-ip>/32"
+  "$TF_IMAGE" destroy -var="operator_cidr=187.101.126.140/32"
 ```
 
 For AWS named profile, replace the `-e AWS_*` flags with:
