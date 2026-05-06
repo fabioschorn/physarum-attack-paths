@@ -495,8 +495,88 @@ This is deferred. A follow-up issue will implement the bootstrap when team colla
 ✔ 3. GET /paths implemented and Docker-validated.
 ✔ 4. AWS lab design documented (this gate).
 ✔ 5. Terraform skeleton implemented — VPC, subnets, SGs, EC2 instances, user_data.
-  6. Add binary artifact pipeline (S3 or build-on-instance) and deploy for real.
-  7. Validate mode 1 (full mesh) — /health, /agents, /graph, /paths all pass.
-  8. Switch to mode 2 (segmented B→C→D) and validate /paths reasoning.
-  9. Optional: validate mode 3 (restore connectivity, observe d_ij recovery).
+✔ 6. Terraform v0 smoke test — create/destroy validated, no runtime expected (Issue #32).
+  7. Add binary artifact pipeline (S3 or build-on-instance) and deploy for real.
+  8. Validate mode 1 (full mesh) — /health, /agents, /graph, /paths all pass.
+  9. Switch to mode 2 (segmented B→C→D) and validate /paths reasoning.
+ 10. Optional: validate mode 3 (restore connectivity, observe d_ij recovery).
 ```
+
+---
+
+## 15. Smoke test v0 — 2026-05-05
+
+Infrastructure create/destroy validation. No runtime validation expected at this gate.
+
+```text
+Date:              2026-05-05
+Region:            us-east-1
+Terraform:         1.9.8 (Docker image hashicorp/terraform:1.9.8)
+AWS provider:      6.43.0
+instance_type:     t4g.micro
+architecture:      arm64
+AMI:               resolved via SSM public parameter (al2023-ami-kernel-default-arm64)
+operator_cidr:     <operator-ip>/32 (restricted, not 0.0.0.0/0)
+credentials:       AWS CLI named profile via ~/.aws mount (never committed)
+```
+
+### Phase 1 — Static checks
+
+```text
+terraform fmt -recursive -check  →  pass
+terraform init                   →  success (AWS provider 6.43.0 installed)
+terraform validate               →  Success! The configuration is valid.
+```
+
+### Phase 2 — Plan
+
+```text
+Plan: 32 to add, 0 to change, 0 to destroy.
+No NAT Gateway, ALB/NLB, Elastic IP, RDS, or EKS in plan.
+```
+
+### Phase 3 — Apply
+
+```text
+Apply complete! Resources: 32 added, 0 changed, 0 destroyed.
+```
+
+Outputs:
+
+```text
+agent_b_private_ip = "10.50.20.10"
+agent_c_private_ip = "10.50.30.10"
+agent_d_private_ip = "10.50.40.10"
+server_private_ip  = "10.50.10.10"
+server_public_ip   = <redacted — instance destroyed>
+curl_health / curl_agents / curl_graph / curl_paths_b_to_d: generated correctly
+```
+
+### Phase 4 — AWS resource inspection
+
+```text
+VPC:              physarum-lab-vpc (10.50.0.0/16) — created
+Subnets:          management (10.50.10.0/24), outer (10.50.20.0/24),
+                  middle (10.50.30.0/24), inner (10.50.40.0/24) — created
+Internet Gateway: created and attached
+EC2 instances:    4 running — physarum-server-a, physarum-agent-b, physarum-agent-c,
+                  physarum-agent-d — all t4g.micro, arm64
+NAT Gateway:      none (expected)
+Load Balancers:   none (expected)
+Elastic IPs:      none (expected)
+```
+
+### Phase 5 — Runtime endpoints
+
+Not tested. Binary artifact pipeline not in place. `/health`, `/graph`, `/paths` not
+expected at this gate. Placeholder systemd units are present on instances.
+
+### Phase 6 — Destroy
+
+```text
+terraform destroy  →  Destroy complete! Resources: 32 destroyed.
+terraform show     →  The state file is empty. No resources are represented.
+AWS verify         →  0 instances running with project tag.
+```
+
+**Result: PASS** — infrastructure skeleton creates and destroys cleanly with zero leftover resources.
