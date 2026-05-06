@@ -32,14 +32,14 @@ variable "architecture" {
   }
 }
 
-variable "key_name" {
-  description = "EC2 key pair name for SSH access (leave empty to skip key-based SSH)"
+variable "ssh_public_key_path" {
+  description = "Path to the local ed25519 public key file. Terraform creates an AWS key pair from this material only. Generate with: ssh-keygen -t ed25519 -f examples/aws-lab/.keys/physarum-lab-devlead -N ''"
   type        = string
-  default     = ""
+  default     = "../.keys/physarum-lab-devlead.pub"
 }
 
 variable "operator_cidr" {
-  description = "CIDR allowed to reach coordinator port 8080 and SSH port 22. Must be set to your operator IP, e.g. 203.0.113.10/32. Never use 0.0.0.0/0."
+  description = "CIDR allowed SSH access (port 22) to all lab nodes. Must be set to your operator IP, e.g. 203.0.113.10/32. Never use 0.0.0.0/0. Port 8080 is not publicly exposed."
   type        = string
 
   validation {

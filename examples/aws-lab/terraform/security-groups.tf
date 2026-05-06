@@ -85,16 +85,8 @@ resource "aws_security_group" "agent_d" {
 }
 
 # ── Server A ingress rules ────────────────────────────────────────────────────
-
-resource "aws_security_group_rule" "server_a_from_operator" {
-  type              = "ingress"
-  description       = "Coordinator API from operator"
-  from_port         = 8080
-  to_port           = 8080
-  protocol          = "tcp"
-  cidr_blocks       = [var.operator_cidr]
-  security_group_id = aws_security_group.server_a.id
-}
+# Port 8080 is NOT exposed publicly. Operator access uses SSH only.
+# Agents reach the coordinator via internal Security Group references.
 
 resource "aws_security_group_rule" "server_a_from_agent_b" {
   type                     = "ingress"
@@ -127,9 +119,8 @@ resource "aws_security_group_rule" "server_a_from_agent_d" {
 }
 
 resource "aws_security_group_rule" "server_a_ssh" {
-  count             = var.key_name != "" ? 1 : 0
   type              = "ingress"
-  description       = "SSH from operator"
+  description       = "SSH from operator (Dev Lead workstation only)"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
@@ -161,9 +152,8 @@ resource "aws_security_group_rule" "agent_b_from_d" {
 }
 
 resource "aws_security_group_rule" "agent_b_ssh" {
-  count             = var.key_name != "" ? 1 : 0
   type              = "ingress"
-  description       = "SSH from operator"
+  description       = "SSH from operator (Dev Lead workstation only)"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
@@ -194,9 +184,8 @@ resource "aws_security_group_rule" "agent_c_from_d" {
 }
 
 resource "aws_security_group_rule" "agent_c_ssh" {
-  count             = var.key_name != "" ? 1 : 0
   type              = "ingress"
-  description       = "SSH from operator"
+  description       = "SSH from operator (Dev Lead workstation only)"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
@@ -228,9 +217,8 @@ resource "aws_security_group_rule" "agent_d_from_c" {
 }
 
 resource "aws_security_group_rule" "agent_d_ssh" {
-  count             = var.key_name != "" ? 1 : 0
   type              = "ingress"
-  description       = "SSH from operator"
+  description       = "SSH from operator (Dev Lead workstation only)"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
