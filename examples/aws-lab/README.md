@@ -2,7 +2,7 @@
 
 This document defines the design for the AWS-based laboratory for `physarum-attack-paths`.
 
-**Status: Terraform skeleton implemented — bootstrap placeholder only.** S3 artifact delivery and EC2 runtime bootstrap design documented in section 16 (Issue #36); implementation deferred to the next gate. Runtime validation deferred until binary pipeline is implemented.
+**Status: S3 artifact delivery and EC2 runtime bootstrap implemented (Issue #38).** IAM Role/Instance Profile, artifact variables, and `enable_artifact_download` feature flag added to Terraform. `user_data` downloads real binaries and starts systemd services when `enable_artifact_download=true`; placeholder mode preserved as the safe default. Runtime validation (Mode 1 full mesh) is the next gate.
 
 ---
 
@@ -328,8 +328,7 @@ Treat this as a controlled research lab, not a production system.
 Explicitly deferred to later phases:
 
 ```text
-Binary artifact pipeline implementation (S3 bucket, IAM role, real user_data) — design documented in section 16; implementation deferred to next gate
-Runtime validation of AWS lab (depends on binary pipeline)
+Runtime validation of AWS lab — Mode 1 full mesh (depends on binary upload to S3 and terraform apply with enable_artifact_download=true)
 Segmented SG mode automation (Mode 2 — documented in security-groups.tf comments)
 S3 remote Terraform state backend (bootstrapped after skeleton is deployed)
 Multi-account AWS
@@ -513,11 +512,12 @@ This is deferred. A follow-up issue will implement the bootstrap when team colla
 ✔ 4. AWS lab design documented (this gate).
 ✔ 5. Terraform skeleton implemented — VPC, subnets, SGs, EC2 instances, user_data.
 ✔ 6. Terraform v0 smoke test — create/destroy validated, no runtime expected (Issue #32).
-  7. [Design — Issue #36] Design S3 artifact delivery, IAM role, and EC2 bootstrap (section 16).
-  8. Implement S3 artifact delivery + IAM role + real user_data and deploy binaries.
-  9. Validate mode 1 (full mesh) — /health, /agents, /graph, /paths all respond from EC2.
- 10. Switch to mode 2 (segmented B→C→D) and validate /paths reasoning under real SG rules.
- 11. Optional: validate mode 3 (restore connectivity, observe d_ij recovery).
+✔ 7. Design S3 artifact delivery, IAM role, and EC2 bootstrap (Issue #36, section 16).
+✔ 8. Implement S3 artifact delivery + IAM role + real user_data behind enable_artifact_download flag (Issue #38, section 17).
+  9. Build linux-x86_64 binaries, upload to S3, apply with enable_artifact_download=true.
+ 10. Validate mode 1 (full mesh) — /health, /agents, /graph, /paths all respond from EC2.
+ 11. Switch to mode 2 (segmented B→C→D) and validate /paths reasoning under real SG rules.
+ 12. Optional: validate mode 3 (restore connectivity, observe d_ij recovery).
 ```
 
 ---
@@ -603,7 +603,7 @@ AWS verify         →  0 instances running with project tag.
 
 ## 16. S3 Artifact Delivery and EC2 Runtime Bootstrap — Design (Issue #36)
 
-**Status: design only. No S3 bucket, IAM role, artifact upload, or real user_data bootstrap is implemented yet. No runtime validation is claimed.**
+**Status: design reference. IAM Role/Instance Profile and user_data feature flag implemented in Issue #38 (section 17). S3 bucket is pre-existing (operator-provided via artifact_bucket variable). No runtime validation is claimed in this section — see section 17 for the operator workflow.**
 
 This section defines the intended path from Terraform skeleton to live binary deployment. The first target is `linux-x86_64`, aligned with the `t3.micro` default. An optional `linux-arm64` path is documented for future Graviton use.
 
@@ -786,7 +786,7 @@ variable "enable_artifact_download" {
 }
 ```
 
-These variables are not added to `variables.tf` at this design gate.
+These variables are implemented in `variables.tf` (Issue #38). `artifact_bucket` defaults to `""`, `enable_artifact_download` defaults to `false` — a plain `terraform apply` without these variables set uses placeholder mode and does not attempt S3 access.
 
 ---
 
@@ -854,7 +854,7 @@ systemctl enable physarum-agent
 systemctl start physarum-agent
 ```
 
-The current placeholder scripts in `user-data/` will be replaced with the above pattern in the implementation gate. The implementation gate must verify whether the AWS CLI is present on the selected Amazon Linux 2023 AMI. If not available, `user_data` must install it (e.g., via `dnf install -y awscli2`) or use an alternative minimal download method before the `aws s3 cp` commands.
+The real `user-data/server.sh` and `user-data/agent.sh` now implement this pattern (Issue #38). AWS CLI presence is verified at runtime — `dnf install -y awscli2` is called if `aws` is not found. No static credentials are used; the IAM Instance Profile provides access.
 
 ---
 
@@ -907,17 +907,14 @@ Mode 2 — segmented B→C→D (subsequent gate):
 
 ---
 
-### 16.9 Out of scope for this design gate
+### 16.9 Remaining out of scope
 
-The following are documented above but must not be implemented until the next gate:
+The following remain deferred:
 
 ```text
-S3 bucket Terraform resources
-IAM Role and Instance Profile Terraform resources
-artifact upload scripts or CI automation
-Docker build scripts for Linux x86_64
-real user_data download and systemd startup
-AWS runtime apply and endpoint testing
+S3 bucket Terraform resource (operator provides pre-existing bucket — Option B)
+artifact upload automation or CI pipeline
+AWS runtime apply and endpoint testing (Mode 1 — next gate)
 GitHub Actions build/release pipeline
 segmented B→C→D runtime validation (Mode 2)
 remote Terraform state
@@ -925,3 +922,193 @@ mTLS or API authentication
 persistence and replay
 WASM simulator
 ```
+
+Implemented in Issue #38 (no longer deferred):
+
+```text
+IAM Role and Instance Profile Terraform resources — iam.tf
+artifact variables — variables.tf (artifact_bucket, artifact_prefix, artifact_region, enable_artifact_download)
+real user_data download and systemd startup behind enable_artifact_download feature flag
+```
+
+---
+
+## 17. S3 Artifact Delivery — Build, Upload, and Apply Workflow (Issue #38)
+
+**Status: Terraform and user_data support implemented. Binary upload and AWS runtime validation are not yet performed — those are the next gate.**
+
+This section documents the Terraform and user_data changes shipped in Issue #38 and the operator workflow that will be executed in the runtime validation gate. No binary has been uploaded to S3 and no EC2 runtime endpoints have been validated in this PR.
+
+The S3 bucket must be created outside this Terraform stack (Option B from section 16.2). This keeps the artifact store separate from the disposable lab infrastructure — `terraform destroy` does not delete the bucket.
+
+---
+
+### 17.1 Prerequisites
+
+```text
+- Pre-existing private S3 bucket with server-side encryption and public access blocked
+- AWS credentials with s3:PutObject on the bucket (for binary upload)
+- AWS credentials for terraform apply (must be able to create EC2, IAM, VPC resources)
+- operator_cidr set to your workstation IP — never 0.0.0.0/0
+```
+
+---
+
+### 17.2 Step 1 — Verify CLI flags
+
+Verified 2026-05-06 from source:
+
+```bash
+cargo run -p physarum-server -- --help
+# Options:
+#   --listen <LISTEN>  [default: 0.0.0.0:8080]
+
+cargo run -p physarum-agent -- --help
+# Options:
+#   --id <ID>                           (required)
+#   --coordinator <COORDINATOR>         (required)
+#   --listen <LISTEN>                   (required)
+#   --advertise-address <ADDR>          (required)
+#   --probe-interval-seconds <N>        [default: 10]
+```
+
+The `user-data/` systemd units use these exact flags.
+
+---
+
+### 17.3 Step 2 — Build Linux x86_64 binaries
+
+Use the pinned Rust image. Run from the repository root:
+
+```bash
+docker run --rm \
+  -v "$(pwd):/workspace" \
+  -w /workspace \
+  rust:1.85-bookworm \
+  cargo build --release --target x86_64-unknown-linux-gnu \
+    -p physarum-server -p physarum-agent
+```
+
+Output:
+
+```text
+target/x86_64-unknown-linux-gnu/release/physarum-server
+target/x86_64-unknown-linux-gnu/release/physarum-agent
+```
+
+---
+
+### 17.4 Step 3 — Upload binaries to S3
+
+```bash
+BUCKET=<your-artifact-bucket>
+PREFIX=physarum-attack-paths/dev/linux-x86_64
+
+aws s3 cp target/x86_64-unknown-linux-gnu/release/physarum-server \
+  s3://$BUCKET/$PREFIX/physarum-server
+
+aws s3 cp target/x86_64-unknown-linux-gnu/release/physarum-agent \
+  s3://$BUCKET/$PREFIX/physarum-agent
+```
+
+The `PREFIX` value must match `artifact_prefix` passed to Terraform (default: `physarum-attack-paths/dev/linux-x86_64`).
+
+---
+
+### 17.5 Step 4 — Apply with artifact download enabled
+
+```bash
+cd examples/aws-lab/terraform
+
+terraform init
+terraform plan \
+  -var="operator_cidr=187.101.126.140/32" \
+  -var="artifact_bucket=<your-artifact-bucket>" \
+  -var="enable_artifact_download=true"
+
+terraform apply \
+  -var="operator_cidr=187.101.126.140/32" \
+  -var="artifact_bucket=<your-artifact-bucket>" \
+  -var="enable_artifact_download=true"
+```
+
+Dev Lead test value for `operator_cidr`: `187.101.126.140/32`. Other operators: substitute your own IP.
+
+`artifact_region` defaults to `aws_region` (`us-east-1`). Set explicitly if the bucket is in a different region:
+
+```bash
+  -var="artifact_region=us-west-2"
+```
+
+**Safe default behavior:** a plain `terraform apply` without `artifact_bucket` or `enable_artifact_download` uses the placeholder systemd units. No S3 access is attempted.
+
+---
+
+### 17.6 Step 5 — Validate runtime (Mode 1)
+
+Allow approximately 2 minutes for `user_data` to complete after `terraform apply`.
+
+```bash
+SERVER_IP=$(cd examples/aws-lab/terraform && terraform output -raw server_public_ip)
+
+# Health check
+curl -s "http://$SERVER_IP:8080/health" | jq
+
+# Agent registration — expect agent-b, agent-c, agent-d
+curl -s "http://$SERVER_IP:8080/agents" | jq
+
+# Edge graph — Mode 1: expect 6 directed edges, all probe_success=true
+curl -s "http://$SERVER_IP:8080/graph" | jq
+
+# Adaptive paths — Mode 1: expect both B→D and B→C→D
+curl -s "http://$SERVER_IP:8080/paths?source=agent-b&target=agent-d" | jq
+```
+
+The `outputs.tf` emits these commands with real IPs after apply.
+
+---
+
+### 17.7 Step 6 — Destroy
+
+Always destroy after testing to avoid ongoing EC2 charges:
+
+```bash
+cd examples/aws-lab/terraform
+
+terraform destroy \
+  -var="operator_cidr=187.101.126.140/32" \
+  -var="artifact_bucket=<your-artifact-bucket>" \
+  -var="enable_artifact_download=true"
+```
+
+The S3 bucket and its contents are not destroyed — they exist outside this Terraform stack.
+
+---
+
+### 17.8 Terraform layout changes (Issue #38)
+
+New and modified files:
+
+```text
+terraform/
+├── iam.tf               # NEW — IAM role, instance profile, conditional s3:GetObject policy
+├── variables.tf         # UPDATED — artifact_bucket, artifact_prefix, artifact_region,
+│                        #           enable_artifact_download added
+├── instances.tf         # UPDATED — iam_instance_profile on all 4 EC2 instances;
+│                        #           new template vars passed to user-data
+└── user-data/
+    ├── server.sh        # UPDATED — feature flag: real download or placeholder
+    └── agent.sh         # UPDATED — feature flag: real download or placeholder
+```
+
+IAM resources created by `iam.tf`:
+
+```text
+aws_iam_role            physarum-ec2-role        — assume role for ec2.amazonaws.com
+aws_iam_instance_profile physarum-ec2-profile    — attached to all 4 EC2 instances
+aws_iam_role_policy     physarum-s3-artifact     — s3:GetObject scoped to artifact prefix
+                                                    (created only when enable_artifact_download=true
+                                                     and artifact_bucket is non-empty)
+```
+
+EC2 instances authenticate to S3 via the Instance Profile. No static AWS credentials are placed in `user_data` or committed to this repository.
