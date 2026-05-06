@@ -3,6 +3,9 @@ locals {
   agent_b_private_ip = cidrhost(local.subnets.outer.cidr, 10)
   agent_c_private_ip = cidrhost(local.subnets.middle.cidr, 10)
   agent_d_private_ip = cidrhost(local.subnets.inner.cidr, 10)
+
+  # Resolve artifact region: use artifact_region variable if set, otherwise fall back to aws_region.
+  resolved_artifact_region = var.artifact_region != "" ? var.artifact_region : var.aws_region
 }
 
 resource "aws_instance" "server_a" {
@@ -12,9 +15,14 @@ resource "aws_instance" "server_a" {
   private_ip             = local.server_private_ip
   vpc_security_group_ids = [aws_security_group.server_a.id]
   key_name               = var.key_name != "" ? var.key_name : null
+  iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 
   user_data = templatefile("${path.module}/user-data/server.sh", {
-    name_prefix = var.name_prefix
+    name_prefix              = var.name_prefix
+    enable_artifact_download = var.enable_artifact_download
+    artifact_bucket          = var.artifact_bucket
+    artifact_prefix          = var.artifact_prefix
+    artifact_region          = local.resolved_artifact_region
   })
 
   tags = {
@@ -30,13 +38,18 @@ resource "aws_instance" "agent_b" {
   private_ip             = local.agent_b_private_ip
   vpc_security_group_ids = [aws_security_group.agent_b.id]
   key_name               = var.key_name != "" ? var.key_name : null
+  iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 
   user_data = templatefile("${path.module}/user-data/agent.sh", {
-    agent_id          = "agent-b"
-    listen_port       = 9001
-    coordinator_ip    = local.server_private_ip
-    advertise_address = local.agent_b_private_ip
-    name_prefix       = var.name_prefix
+    agent_id                 = "agent-b"
+    listen_port              = 9001
+    coordinator_ip           = local.server_private_ip
+    advertise_address        = local.agent_b_private_ip
+    name_prefix              = var.name_prefix
+    enable_artifact_download = var.enable_artifact_download
+    artifact_bucket          = var.artifact_bucket
+    artifact_prefix          = var.artifact_prefix
+    artifact_region          = local.resolved_artifact_region
   })
 
   tags = {
@@ -52,13 +65,18 @@ resource "aws_instance" "agent_c" {
   private_ip             = local.agent_c_private_ip
   vpc_security_group_ids = [aws_security_group.agent_c.id]
   key_name               = var.key_name != "" ? var.key_name : null
+  iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 
   user_data = templatefile("${path.module}/user-data/agent.sh", {
-    agent_id          = "agent-c"
-    listen_port       = 9002
-    coordinator_ip    = local.server_private_ip
-    advertise_address = local.agent_c_private_ip
-    name_prefix       = var.name_prefix
+    agent_id                 = "agent-c"
+    listen_port              = 9002
+    coordinator_ip           = local.server_private_ip
+    advertise_address        = local.agent_c_private_ip
+    name_prefix              = var.name_prefix
+    enable_artifact_download = var.enable_artifact_download
+    artifact_bucket          = var.artifact_bucket
+    artifact_prefix          = var.artifact_prefix
+    artifact_region          = local.resolved_artifact_region
   })
 
   tags = {
@@ -74,13 +92,18 @@ resource "aws_instance" "agent_d" {
   private_ip             = local.agent_d_private_ip
   vpc_security_group_ids = [aws_security_group.agent_d.id]
   key_name               = var.key_name != "" ? var.key_name : null
+  iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 
   user_data = templatefile("${path.module}/user-data/agent.sh", {
-    agent_id          = "agent-d"
-    listen_port       = 9003
-    coordinator_ip    = local.server_private_ip
-    advertise_address = local.agent_d_private_ip
-    name_prefix       = var.name_prefix
+    agent_id                 = "agent-d"
+    listen_port              = 9003
+    coordinator_ip           = local.server_private_ip
+    advertise_address        = local.agent_d_private_ip
+    name_prefix              = var.name_prefix
+    enable_artifact_download = var.enable_artifact_download
+    artifact_bucket          = var.artifact_bucket
+    artifact_prefix          = var.artifact_prefix
+    artifact_region          = local.resolved_artifact_region
   })
 
   tags = {

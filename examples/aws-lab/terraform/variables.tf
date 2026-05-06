@@ -53,3 +53,27 @@ variable "vpc_cidr" {
   type        = string
   default     = "10.50.0.0/16"
 }
+
+variable "artifact_bucket" {
+  description = "Name of the pre-existing S3 bucket holding compiled binaries. Required when enable_artifact_download = true. Leave empty when enable_artifact_download = false."
+  type        = string
+  default     = ""
+}
+
+variable "artifact_prefix" {
+  description = "S3 key prefix for compiled binaries. Binaries are expected at s3://<artifact_bucket>/<artifact_prefix>/physarum-{server,agent}."
+  type        = string
+  default     = "physarum-attack-paths/dev/linux-x86_64"
+}
+
+variable "artifact_region" {
+  description = "AWS region of the artifact S3 bucket. Defaults to aws_region if left empty."
+  type        = string
+  default     = ""
+}
+
+variable "enable_artifact_download" {
+  description = "When true, user_data downloads physarum-server and physarum-agent from S3 and starts real systemd services. When false (default), placeholder units are used and no S3 access is attempted."
+  type        = bool
+  default     = false
+}
