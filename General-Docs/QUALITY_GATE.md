@@ -19,7 +19,7 @@
 | Roadmap | GREEN | Trimmed to current status + next steps only | PR #25 |
 | Formal model (TLA+) | GREEN | `PhysarumEdgeModel.tla` TypeOK + Safety verified | PR #12 |
 | AWS lab design | GREEN | A/B/C/D Terraform skeleton designed | PR #29 |
-| AWS Terraform skeleton | GREEN | 5-file skeleton implemented | PR #31 |
+| AWS Terraform skeleton | GREEN | Skeleton implemented under `examples/aws-lab/terraform/` | PR #31 |
 | AWS v0 smoke test | GREEN | 32 resources created/destroyed; `terraform destroy` clean | PR #33 |
 | AWS default cost/security posture | GREEN | `t3.micro`/`x86_64` default; `187.101.126.140/32` documented | PR #35 |
 | AWS runtime validation | YELLOW | Binaries not deployed to EC2; `/health` `/agents` `/graph` `/paths` not validated in AWS | Active gate |
@@ -73,25 +73,31 @@ Runtime endpoints     : NOT yet validated in AWS
 
 ## Active gate
 
-**AWS Binary Artifact Delivery and EC2 Runtime Bootstrap**  
+**AWS S3 Artifact Delivery and EC2 Runtime Bootstrap Design**  
+Tracked by: Issue #36  
 Entry criteria: PR #35 merged, Issue #34 closed. ✔  
-Scope:
-- Build `linux-x86_64` Rust binaries (`physarum-server`, `physarum-agent`); optionally `linux-arm64`
-- Upload binaries to S3 artifact location
-- Add EC2 IAM role with `s3:GetObject` permission scoped to artifact bucket
-- Update `user_data` to download binaries from S3 and start real systemd services
-- Validate `/health`, `/agents`, `/graph`, `/paths` in Mode 1 (full mesh, 6 directed edges)
-- Validate Mode 2 (segmented: B→C→D only, B→D blocked)
+Scope: Design (documentation only) — define artifact layout, build strategy, S3 bucket requirements, EC2 IAM Role with least-privilege `s3:GetObject`, future `user_data` bootstrap behavior, and runtime validation plan. No Terraform resources added, no artifact pipeline implemented, no runtime validation claimed.  
+Exit criteria: Issue #36 merged with `examples/aws-lab/README.md` documenting artifact strategy, Linux x86_64 build direction, private S3 bucket requirements, IAM Role/Instance Profile design, future Terraform variables, `user_data` download/startup design, and runtime validation commands. No secrets committed.
 
-Exit criteria: all four endpoints respond correctly from EC2 in both modes; `terraform destroy` cleans all resources; no secrets committed.
+---
+
+## Gate sequence ahead
+
+| Gate | Tracked by | Status |
+|---|---|---|
+| A — Design S3 artifact delivery and EC2 bootstrap | Issue #36 | Active |
+| B — Implement S3 delivery + IAM role + real `user_data` | Future issue | Not started |
+| C — Validate AWS Mode 1 full mesh runtime (`/health` `/agents` `/graph` `/paths`) | Future issue | Not started |
+| D — Validate AWS Mode 2 segmented B→C→D behavior | Future issue | Not started |
+| Research — Multi-Agent Formal Verification (TLA+) | Future issue | Future |
 
 ---
 
 ## Next proposed gate
 
-**Multi-Agent Formal Verification**  
-Entry criteria: AWS runtime validation complete in Mode 1 and Mode 2.  
-Scope: Extend `PhysarumEdgeModel.tla` to model multi-agent path convergence; verify liveness and safety properties across the full A/B/C/D topology.
+**Implement S3 Artifact Delivery and EC2 Runtime Bootstrap**  
+Entry criteria: Issue #36 merged (design complete).  
+Scope: Create S3 bucket Terraform resource, IAM Role/Instance Profile, real `user_data` scripts that download binaries and start systemd services for `physarum-server` and `physarum-agent`.
 
 ---
 
