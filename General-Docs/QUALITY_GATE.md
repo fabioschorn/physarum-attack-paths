@@ -1,10 +1,10 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** AWS Lab Intel Default and Operator CIDR Hardening  
+**Current gate:** AWS Lab Binary Artifact Pipeline and Runtime Validation  
 **Overall status:** GREEN  
 **Last updated:** 2026-05-06
 
-> GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable
+> GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked on unstable
 
 ---
 
@@ -12,16 +12,16 @@
 
 | Area | Status | Evidence | Notes |
 |---|---|---|---|
-| Build | GREEN | `cargo fmt/clippy/test` passing | Last verified PR #20, PR #25, PR #29, PR #33 |
+| Build | GREEN | `cargo fmt/clippy/test` passing | Last verified PR #20, PR #25, PR #29, PR #33, PR #35 |
 | Docker A/B/C/D lab | GREEN | `check-docker-lab.sh`: 34 passed, 0 failed | PR #19 |
 | GET /paths endpoint | GREEN | Docker `/paths` validation posted | PR #20 |
-| Documentation | GREEN | Roadmap trimmed; AWS lab designed and smoke-tested | PR #25, PR #29, PR #33 merged |
+| Documentation | GREEN | Roadmap trimmed; AWS lab designed, smoke-tested, Intel default merged | PR #25, PR #29, PR #33, PR #35 merged |
 | Formal model (TLA+) | GREEN | `PhysarumEdgeModel.tla` TypeOK + Safety verified | PR #12 |
-| AWS readiness | YELLOW | Skeleton smoke-tested; Intel default pending | PR #33 merged; Issue #34 / PR #35 open |
+| AWS readiness | GREEN | Skeleton smoke-tested; Intel default + operator CIDR merged | PR #33, PR #35 merged; Issue #34 closed |
 | WASM readiness | YELLOW | Visual-sim plan documented, no impl yet | Future phase |
 
-**Overall GREEN** for the Adaptive Path Prototype gate.  
-AWS is YELLOW because Issue #34 (Intel default + operator CIDR hardening) is open.
+**Overall GREEN** for the AWS Lab Intel Default and Operator CIDR Hardening gate.  
+Ready to advance to the Binary Artifact Pipeline gate.
 
 ---
 
@@ -40,31 +40,31 @@ AWS is YELLOW because Issue #34 (Intel default + operator CIDR hardening) is ope
 | AWS Lab Terraform skeleton design | COMPLETED — PR #29 |
 | AWS Lab Terraform skeleton implementation | COMPLETED — PR #31 |
 | AWS Lab Terraform v0 smoke test | COMPLETED — PR #33 |
+| AWS Lab Intel Default and Operator CIDR Hardening | COMPLETED — PR #35 |
 
 ---
 
 ## Active gate
 
-**AWS Lab Intel Default and Operator CIDR Hardening**  
-Tracked by: Issue #34 / PR #35  
-Scope: Switch default instance type to `t3.micro` / `x86_64` (Intel/Free Tier-oriented). Document explicit operator CIDR `187.101.126.140/32` in README examples and explain security rationale (coordinator API not yet authenticated). Keep Graviton/t4g path documented as optional.  
-Exit criteria: PR #35 merged; `terraform fmt` and `terraform validate` pass; no `0.0.0.0/0` introduced; Graviton path not deleted.
+**AWS Lab Binary Artifact Pipeline and Runtime Validation**  
+Entry criteria: Issue #34 closed, PR #35 merged. ✔  
+Scope: Build `linux-x86_64` (and optionally `linux-arm64`) Rust binaries, upload to S3, add EC2 IAM role with `s3:GetObject`, update `user_data` to download binaries, start real systemd services, validate `/health`, `/agents`, `/graph`, `/paths` in Mode 1 (full mesh). Then validate Mode 2 (segmented B→C→D).
 
 ---
 
 ## Next proposed gate
 
-**AWS Lab Binary Artifact Pipeline and Runtime Validation**  
-Entry criteria: Issue #34 closed, PR #35 merged.  
-Scope: Build `linux-x86_64` (and optionally `linux-arm64`) Rust binaries, upload to S3, add EC2 IAM role with `s3:GetObject`, update `user_data` to download binaries, start real systemd services, validate `/health`, `/agents`, `/graph`, `/paths` in Mode 1 (full mesh). Then validate Mode 2 (segmented B→C→D).
+**Multi-Agent Formal Verification**  
+Entry criteria: Binary artifact pipeline complete; runtime validation in Mode 1 and Mode 2 passes.  
+Scope: Extend `PhysarumEdgeModel.tla` to model multi-agent path convergence; verify liveness and safety properties across the full A/B/C/D topology.
 
 ---
 
 ## Open blockers
 
 ```text
-- Issue #34 / PR #35 open: switch to Intel default and document operator CIDR
 - Binary artifact pipeline not started (required for runtime validation)
+- No S3 bucket or IAM role provisioned yet for binary distribution
 ```
 
 ---
