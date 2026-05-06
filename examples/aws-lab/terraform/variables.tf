@@ -33,9 +33,14 @@ variable "architecture" {
 }
 
 variable "ssh_public_key_path" {
-  description = "Path to the local ed25519 public key file. Terraform creates an AWS key pair from this material only. Generate with: ssh-keygen -t ed25519 -f examples/aws-lab/.keys/physarum-lab-devlead -N ''"
+  description = "Path to the local ed25519 public key file. Terraform creates an AWS key pair from this material only. Generate the key BEFORE terraform plan/apply with: ssh-keygen -t ed25519 -f examples/aws-lab/.keys/physarum-lab-devlead -N ''"
   type        = string
   default     = "../.keys/physarum-lab-devlead.pub"
+
+  validation {
+    condition     = fileexists(var.ssh_public_key_path)
+    error_message = "ssh_public_key_path does not exist: '${var.ssh_public_key_path}'. Generate the SSH key before terraform plan/apply: ssh-keygen -t ed25519 -f examples/aws-lab/.keys/physarum-lab-devlead -N ''"
+  }
 }
 
 variable "operator_cidr" {

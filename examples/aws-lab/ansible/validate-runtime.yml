@@ -136,6 +136,26 @@
         fail_msg: "agent-d not found in /agents response"
         success_msg: "agent-d registered"
 
+    - name: Assert /graph returned non-empty response
+      ansible.builtin.assert:
+        that: graph.stdout | length > 0
+        fail_msg: "/graph returned empty — graph endpoint may not be working"
+        success_msg: "/graph OK"
+
+    - name: Assert /paths returned non-empty response
+      ansible.builtin.assert:
+        that: paths.stdout | length > 0
+        fail_msg: "/paths returned empty — path scoring endpoint may not be working"
+        success_msg: "/paths OK"
+
+    - name: Assert /paths contains agent-b and agent-d
+      ansible.builtin.assert:
+        that:
+          - "'agent-b' in paths.stdout"
+          - "'agent-d' in paths.stdout"
+        fail_msg: "/paths response does not mention agent-b or agent-d"
+        success_msg: "/paths contains agent-b and agent-d"
+
 
 - name: Check agent listener ports from each agent node
   hosts: agents

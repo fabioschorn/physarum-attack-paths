@@ -5,13 +5,13 @@ Ansible replaces public `curl` for runtime validation. All checks run through SS
 ## Prerequisites
 
 - Ansible >= 2.14 installed locally (`pip install ansible`)
-- SSH key generated at `examples/aws-lab/.keys/physarum-lab-devlead` (see below)
+- SSH key generated at `examples/aws-lab/.keys/physarum-lab-devlead` (see below — **must exist before `terraform plan`**)
 - Terraform applied with `enable_artifact_download=true`
 - Your IP matches `operator_cidr` (SSH is the only public access)
 
 ## SSH key setup
 
-Generate once, before the first `terraform apply`:
+**Generate the key before `terraform plan` or `terraform apply`.** Terraform will fail immediately if the public key file does not exist (validation is enforced in `variables.tf`).
 
 ```bash
 mkdir -p examples/aws-lab/.keys
