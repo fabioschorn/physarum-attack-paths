@@ -1,11 +1,26 @@
 output "server_public_ip" {
-  description = "Public IP of physarum-server (A)"
+  description = "Public IP of physarum-server (A) — SSH access only, port 8080 not exposed"
   value       = aws_instance.server_a.public_ip
 }
 
 output "server_private_ip" {
   description = "Private IP of physarum-server (A)"
   value       = aws_instance.server_a.private_ip
+}
+
+output "agent_b_public_ip" {
+  description = "Public IP of agent-b — SSH access for Ansible"
+  value       = aws_instance.agent_b.public_ip
+}
+
+output "agent_c_public_ip" {
+  description = "Public IP of agent-c — SSH access for Ansible"
+  value       = aws_instance.agent_c.public_ip
+}
+
+output "agent_d_public_ip" {
+  description = "Public IP of agent-d — SSH access for Ansible"
+  value       = aws_instance.agent_d.public_ip
 }
 
 output "agent_b_private_ip" {
@@ -23,22 +38,17 @@ output "agent_d_private_ip" {
   value       = aws_instance.agent_d.private_ip
 }
 
-output "curl_health" {
-  description = "Health check command"
-  value       = "curl -s http://${aws_instance.server_a.public_ip}:8080/health | jq"
+output "ssh_server_a" {
+  description = "SSH command to connect to server-a"
+  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@${aws_instance.server_a.public_ip}"
 }
 
-output "curl_agents" {
-  description = "Agent registration check command"
-  value       = "curl -s http://${aws_instance.server_a.public_ip}:8080/agents | jq"
+output "ssh_tunnel_8080" {
+  description = "SSH tunnel command — forwards server-a:8080 to localhost:18080 for manual curl"
+  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead -L 18080:127.0.0.1:8080 ec2-user@${aws_instance.server_a.public_ip}"
 }
 
-output "curl_graph" {
-  description = "Edge graph check command"
-  value       = "curl -s http://${aws_instance.server_a.public_ip}:8080/graph | jq"
-}
-
-output "curl_paths_b_to_d" {
-  description = "Adaptive path scoring — agent-b to agent-d"
-  value       = "curl -s 'http://${aws_instance.server_a.public_ip}:8080/paths?source=agent-b&target=agent-d' | jq"
+output "ansible_run" {
+  description = "Ansible validation command after generating inventory from terraform output"
+  value       = "ansible-playbook -i examples/aws-lab/ansible/inventory.local.ini examples/aws-lab/ansible/validate-runtime.yml"
 }

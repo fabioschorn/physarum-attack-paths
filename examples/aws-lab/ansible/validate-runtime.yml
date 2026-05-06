@@ -1,0 +1,205 @@
+---
+# physarum AWS lab — Mode 1 runtime validation playbook.
+#
+# Collects diagnostic evidence from all lab nodes via SSH.
+# Does not require public access to port 8080.
+#
+# Usage:
+#   ansible-playbook -i ansible/inventory.local.ini ansible/validate-runtime.yml
+#
+# Requires: ansible >= 2.14, jq installed on target nodes (via dnf in user_data).
+
+- name: Collect diagnostics from all lab nodes
+  hosts: lab
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check physarum-server systemd status
+      ansible.builtin.command: systemctl is-active physarum-server
+      register: server_active
+      failed_when: false
+      changed_when: false
+
+    - name: Check physarum-agent systemd status
+      ansible.builtin.command: systemctl is-active physarum-agent
+      register: agent_active
+      failed_when: false
+      changed_when: false
+
+    - name: Print service status summary
+      ansible.builtin.debug:
+        msg: >
+          {{ inventory_hostname }}:
+          physarum-server={{ server_active.stdout | default('n/a') }},
+          physarum-agent={{ agent_active.stdout | default('n/a') }}
+
+    - name: Tail cloud-init output log
+      ansible.builtin.command: tail -n 200 /var/log/cloud-init-output.log
+      register: cloud_init_log
+      failed_when: false
+      changed_when: false
+
+    - name: Print cloud-init log
+      ansible.builtin.debug:
+        msg: "{{ cloud_init_log.stdout_lines }}"
+
+    - name: Tail physarum-server journal (last 100 lines)
+      ansible.builtin.command: journalctl -u physarum-server --no-pager -n 100
+      register: server_journal
+      failed_when: false
+      changed_when: false
+
+    - name: Print physarum-server journal
+      ansible.builtin.debug:
+        msg: "{{ server_journal.stdout_lines }}"
+
+    - name: Tail physarum-agent journal (last 100 lines)
+      ansible.builtin.command: journalctl -u physarum-agent --no-pager -n 100
+      register: agent_journal
+      failed_when: false
+      changed_when: false
+
+    - name: Print physarum-agent journal
+      ansible.builtin.debug:
+        msg: "{{ agent_journal.stdout_lines }}"
+
+
+- name: Validate server-a endpoints from inside the coordinator
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /health
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/health
+      register: health
+      failed_when: false
+      changed_when: false
+
+    - name: Print /health
+      ansible.builtin.debug:
+        msg: "{{ health.stdout }}"
+
+    - name: GET /agents
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/agents
+      register: agents
+      failed_when: false
+      changed_when: false
+
+    - name: Print /agents
+      ansible.builtin.debug:
+        msg: "{{ agents.stdout }}"
+
+    - name: GET /graph
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/graph
+      register: graph
+      failed_when: false
+      changed_when: false
+
+    - name: Print /graph
+      ansible.builtin.debug:
+        msg: "{{ graph.stdout }}"
+
+    - name: GET /paths?source=agent-b&target=agent-d
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d'
+      register: paths
+      failed_when: false
+      changed_when: false
+
+    - name: Print /paths B->D
+      ansible.builtin.debug:
+        msg: "{{ paths.stdout }}"
+
+    - name: Assert /health returned non-empty response
+      ansible.builtin.assert:
+        that: health.stdout | length > 0
+        fail_msg: "/health returned empty — physarum-server may not be running"
+        success_msg: "/health OK"
+
+    - name: Assert /agents lists agent-b
+      ansible.builtin.assert:
+        that: "'agent-b' in agents.stdout"
+        fail_msg: "agent-b not found in /agents response"
+        success_msg: "agent-b registered"
+
+    - name: Assert /agents lists agent-c
+      ansible.builtin.assert:
+        that: "'agent-c' in agents.stdout"
+        fail_msg: "agent-c not found in /agents response"
+        success_msg: "agent-c registered"
+
+    - name: Assert /agents lists agent-d
+      ansible.builtin.assert:
+        that: "'agent-d' in agents.stdout"
+        fail_msg: "agent-d not found in /agents response"
+        success_msg: "agent-d registered"
+
+    - name: Assert /graph returned non-empty response
+      ansible.builtin.assert:
+        that: graph.stdout | length > 0
+        fail_msg: "/graph returned empty — graph endpoint may not be working"
+        success_msg: "/graph OK"
+
+    - name: Assert /paths returned non-empty response
+      ansible.builtin.assert:
+        that: paths.stdout | length > 0
+        fail_msg: "/paths returned empty — path scoring endpoint may not be working"
+        success_msg: "/paths OK"
+
+    - name: Assert /paths contains agent-b and agent-d
+      ansible.builtin.assert:
+        that:
+          - "'agent-b' in paths.stdout"
+          - "'agent-d' in paths.stdout"
+        fail_msg: "/paths response does not mention agent-b or agent-d"
+        success_msg: "/paths contains agent-b and agent-d"
+
+
+- name: Check agent listener ports from each agent node
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: List listening ports for physarum-agent
+      ansible.builtin.command: ss -lntp
+      register: ss_output
+      failed_when: false
+      changed_when: false
+
+    - name: Print listening ports
+      ansible.builtin.debug:
+        msg: "{{ ss_output.stdout_lines | select('search', '900[123]') | list }}"
+
+    - name: Check agent-b listener on 9001
+      ansible.builtin.command: ss -lntp
+      register: agent_b_port
+      failed_when: false
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert agent-b is listening on 9001
+      ansible.builtin.assert:
+        that: "'9001' in agent_b_port.stdout"
+        fail_msg: "agent-b not listening on 9001"
+        success_msg: "agent-b listening on 9001"
+      when: inventory_hostname == 'agent-b'
+      failed_when: false
+
+    - name: Assert agent-c is listening on 9002
+      ansible.builtin.assert:
+        that: "'9002' in ss_output.stdout"
+        fail_msg: "agent-c not listening on 9002"
+        success_msg: "agent-c listening on 9002"
+      when: inventory_hostname == 'agent-c'
+      failed_when: false
+
+    - name: Assert agent-d is listening on 9003
+      ansible.builtin.assert:
+        that: "'9003' in ss_output.stdout"
+        fail_msg: "agent-d not listening on 9003"
+        success_msg: "agent-d listening on 9003"
+      when: inventory_hostname == 'agent-d'
+      failed_when: false

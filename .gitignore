@@ -43,3 +43,21 @@ dist/
 
 # ── Temporários locais (gerados por scripts internos, nunca commitados) ────────
 tmp/
+
+# ── AWS lab SSH keys (never commit private or public key material) ─────────────
+examples/aws-lab/.keys/
+examples/aws-lab/*.pem
+examples/aws-lab/*_rsa
+examples/aws-lab/*_ed25519
+examples/aws-lab/*_ecdsa
+
+# ── Ansible local inventory and live outputs (contain live IPs) ───────────────
+examples/aws-lab/ansible/*.local.ini
+examples/aws-lab/ansible/*.local.json
+examples/aws-lab/ansible/terraform-outputs.local.json
+
+# ── Terraform state and credentials (never commit) ────────────────────────────
+examples/aws-lab/terraform/terraform.tfstate
+examples/aws-lab/terraform/terraform.tfstate.backup
+examples/aws-lab/terraform/.terraform/
+examples/aws-lab/terraform/*.tfvars
