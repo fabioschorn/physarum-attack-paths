@@ -2,7 +2,7 @@
 
 This document defines the design for the AWS-based laboratory for `physarum-attack-paths`.
 
-**Status: Terraform skeleton implemented — bootstrap placeholder only.** S3 artifact delivery and EC2 runtime bootstrap design in progress (Issue #36). Runtime validation deferred until binary pipeline is implemented.
+**Status: Terraform skeleton implemented — bootstrap placeholder only.** S3 artifact delivery and EC2 runtime bootstrap design documented in section 16 (Issue #36); implementation deferred to the next gate. Runtime validation deferred until binary pipeline is implemented.
 
 ---
 
@@ -652,33 +652,50 @@ Three build options, in preference order:
 
 Build Linux x86_64 binaries in a Docker container running on the MacBook without requiring a separate EC2 builder. No GitHub Actions required yet.
 
+Use a pinned Rust image version for reproducibility — do not use `latest`. Replace `1.85-bookworm` with the current stable release if different:
+
+Primary target — `x86_64-unknown-linux-gnu` (dynamically linked, simpler build):
+
 ```bash
 docker run --rm \
   -v "$(pwd):/workspace" \
   -w /workspace \
-  rust:latest \
+  rust:1.85-bookworm \
   cargo build --release --target x86_64-unknown-linux-gnu \
     -p physarum-server -p physarum-agent
-```
-
-The `x86_64-unknown-linux-gnu` target requires `musl` or `glibc` linker. For a fully static binary (simpler deployment):
-
-```bash
-docker run --rm \
-  -v "$(pwd):/workspace" \
-  -w /workspace \
-  rust:latest \
-  sh -c "rustup target add x86_64-unknown-linux-musl && \
-         cargo build --release --target x86_64-unknown-linux-musl \
-           -p physarum-server -p physarum-agent"
 ```
 
 Output location:
 
 ```text
+target/x86_64-unknown-linux-gnu/release/physarum-server
+target/x86_64-unknown-linux-gnu/release/physarum-agent
+```
+
+Optional — `x86_64-unknown-linux-musl` (fully static binary, easier to deploy but requires musl tooling in the container). The command below is illustrative only; exact linker packages needed may vary by base image and have not yet been validated:
+
+```bash
+# Illustrative — validate in implementation gate before use
+docker run --rm \
+  -v "$(pwd):/workspace" \
+  -w /workspace \
+  rust:1.85-bookworm \
+  sh -c "apt-get install -y musl-tools && \
+         rustup target add x86_64-unknown-linux-musl && \
+         cargo build --release --target x86_64-unknown-linux-musl \
+           -p physarum-server -p physarum-agent"
+```
+
+Output location (if musl path is used):
+
+```text
 target/x86_64-unknown-linux-musl/release/physarum-server
 target/x86_64-unknown-linux-musl/release/physarum-agent
 ```
+
+The S3 `linux-x86_64/` prefix accepts binaries from either target. The build method (gnu vs musl) must be documented in the upload step during the implementation gate.
+
+**Exact Docker build commands must be validated in the implementation gate before use.**
 
 **Option B: build on temporary EC2 x86_64 builder**
 
@@ -775,7 +792,9 @@ These variables are not added to `variables.tf` at this design gate.
 
 ### 16.6 user_data bootstrap design
 
-**`user-data/server.sh` — future behavior:**
+The systemd unit templates below are design sketches only. **The exact `ExecStart` flags must be verified against `physarum-server --help` and `physarum-agent --help` in the implementation gate** — the current binary CLI interface takes precedence over anything shown here.
+
+**`user-data/server.sh` — future behavior (pseudocode):**
 
 ```bash
 # Download physarum-server binary from S3
@@ -802,7 +821,7 @@ systemctl enable physarum-server
 systemctl start physarum-server
 ```
 
-**`user-data/agent.sh` — future behavior:**
+**`user-data/agent.sh` — future behavior (pseudocode):**
 
 ```bash
 # Download physarum-agent binary from S3
@@ -835,7 +854,7 @@ systemctl enable physarum-agent
 systemctl start physarum-agent
 ```
 
-The current placeholder scripts in `user-data/` will be replaced with the above pattern in the implementation gate. The AWS CLI is available on Amazon Linux 2023 by default — no separate install required.
+The current placeholder scripts in `user-data/` will be replaced with the above pattern in the implementation gate. The implementation gate must verify whether the AWS CLI is present on the selected Amazon Linux 2023 AMI. If not available, `user_data` must install it (e.g., via `dnf install -y awscli2`) or use an alternative minimal download method before the `aws s3 cp` commands.
 
 ---
 
