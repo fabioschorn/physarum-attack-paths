@@ -2,7 +2,7 @@
 
 This document defines the design for the AWS-based laboratory for `physarum-attack-paths`.
 
-**Status: Terraform skeleton implemented — bootstrap placeholder only.** The binary artifact pipeline is not yet in place; runtime validation is deferred to a later gate.
+**Status: Terraform skeleton implemented — bootstrap placeholder only.** S3 artifact delivery and EC2 runtime bootstrap design documented in section 16 (Issue #36); implementation deferred to the next gate. Runtime validation deferred until binary pipeline is implemented.
 
 ---
 
@@ -328,7 +328,7 @@ Treat this as a controlled research lab, not a production system.
 Explicitly deferred to later phases:
 
 ```text
-Binary artifact pipeline (S3 upload or CI build — required for real deployment)
+Binary artifact pipeline implementation (S3 bucket, IAM role, real user_data) — design documented in section 16; implementation deferred to next gate
 Runtime validation of AWS lab (depends on binary pipeline)
 Segmented SG mode automation (Mode 2 — documented in security-groups.tf comments)
 S3 remote Terraform state backend (bootstrapped after skeleton is deployed)
@@ -513,10 +513,11 @@ This is deferred. A follow-up issue will implement the bootstrap when team colla
 ✔ 4. AWS lab design documented (this gate).
 ✔ 5. Terraform skeleton implemented — VPC, subnets, SGs, EC2 instances, user_data.
 ✔ 6. Terraform v0 smoke test — create/destroy validated, no runtime expected (Issue #32).
-  7. Add binary artifact pipeline (S3 or build-on-instance) and deploy for real.
-  8. Validate mode 1 (full mesh) — /health, /agents, /graph, /paths all pass.
-  9. Switch to mode 2 (segmented B→C→D) and validate /paths reasoning.
- 10. Optional: validate mode 3 (restore connectivity, observe d_ij recovery).
+  7. [Design — Issue #36] Design S3 artifact delivery, IAM role, and EC2 bootstrap (section 16).
+  8. Implement S3 artifact delivery + IAM role + real user_data and deploy binaries.
+  9. Validate mode 1 (full mesh) — /health, /agents, /graph, /paths all respond from EC2.
+ 10. Switch to mode 2 (segmented B→C→D) and validate /paths reasoning under real SG rules.
+ 11. Optional: validate mode 3 (restore connectivity, observe d_ij recovery).
 ```
 
 ---
@@ -597,3 +598,330 @@ AWS verify         →  0 instances running with project tag.
 ```
 
 **Result: PASS** — infrastructure skeleton creates and destroys cleanly with zero leftover resources.
+
+---
+
+## 16. S3 Artifact Delivery and EC2 Runtime Bootstrap — Design (Issue #36)
+
+**Status: design only. No S3 bucket, IAM role, artifact upload, or real user_data bootstrap is implemented yet. No runtime validation is claimed.**
+
+This section defines the intended path from Terraform skeleton to live binary deployment. The first target is `linux-x86_64`, aligned with the `t3.micro` default. An optional `linux-arm64` path is documented for future Graviton use.
+
+---
+
+### 16.1 Artifact strategy
+
+Intended S3 artifact layout:
+
+```text
+s3://<artifact-bucket>/physarum-attack-paths/dev/linux-x86_64/physarum-server
+s3://<artifact-bucket>/physarum-attack-paths/dev/linux-x86_64/physarum-agent
+```
+
+Future optional paths:
+
+```text
+s3://<artifact-bucket>/physarum-attack-paths/dev/linux-arm64/physarum-server
+s3://<artifact-bucket>/physarum-attack-paths/dev/linux-arm64/physarum-agent
+
+s3://<artifact-bucket>/physarum-attack-paths/releases/v0.1.0/linux-x86_64/physarum-server
+s3://<artifact-bucket>/physarum-attack-paths/releases/v0.1.0/linux-x86_64/physarum-agent
+```
+
+The `dev/` prefix is operator-uploaded during testing. The `releases/` prefix is reserved for versioned builds. These paths are not yet provisioned.
+
+---
+
+### 16.2 Build strategy
+
+Recommended Rust target for `t3.micro` (Intel/x86_64):
+
+```text
+x86_64-unknown-linux-gnu
+```
+
+Optional future Graviton target:
+
+```text
+aarch64-unknown-linux-gnu
+```
+
+Three build options, in preference order:
+
+**Option A (recommended): Docker-based cross-compile from Dev Lead machine**
+
+Build Linux x86_64 binaries in a Docker container running on the MacBook without requiring a separate EC2 builder. No GitHub Actions required yet.
+
+Use a pinned Rust image version for reproducibility — do not use `latest`. Replace `1.85-bookworm` with the current stable release if different:
+
+Primary target — `x86_64-unknown-linux-gnu` (dynamically linked, simpler build):
+
+```bash
+docker run --rm \
+  -v "$(pwd):/workspace" \
+  -w /workspace \
+  rust:1.85-bookworm \
+  cargo build --release --target x86_64-unknown-linux-gnu \
+    -p physarum-server -p physarum-agent
+```
+
+Output location:
+
+```text
+target/x86_64-unknown-linux-gnu/release/physarum-server
+target/x86_64-unknown-linux-gnu/release/physarum-agent
+```
+
+Optional — `x86_64-unknown-linux-musl` (fully static binary, easier to deploy but requires musl tooling in the container). The command below is illustrative only; exact linker packages needed may vary by base image and have not yet been validated:
+
+```bash
+# Illustrative — validate in implementation gate before use
+docker run --rm \
+  -v "$(pwd):/workspace" \
+  -w /workspace \
+  rust:1.85-bookworm \
+  sh -c "apt-get install -y musl-tools && \
+         rustup target add x86_64-unknown-linux-musl && \
+         cargo build --release --target x86_64-unknown-linux-musl \
+           -p physarum-server -p physarum-agent"
+```
+
+Output location (if musl path is used):
+
+```text
+target/x86_64-unknown-linux-musl/release/physarum-server
+target/x86_64-unknown-linux-musl/release/physarum-agent
+```
+
+The S3 `linux-x86_64/` prefix accepts binaries from either target. The build method (gnu vs musl) must be documented in the upload step during the implementation gate.
+
+**Exact Docker build commands must be validated in the implementation gate before use.**
+
+**Option B: build on temporary EC2 x86_64 builder**
+
+Launch a separate `t3.micro` EC2 instance, install Rust toolchain, clone the repo, build, upload to S3, terminate. Acceptable if Docker cross-compile is not viable.
+
+**Option C (fallback only): build on instance during bootstrap**
+
+Compile directly in `user_data` at instance launch. Not preferred — adds minutes of startup latency, requires internet access for `cargo`, and is fragile. Use only if Options A and B are not available.
+
+Exact Docker build commands are follow-up implementation details once the design gate is merged.
+
+---
+
+### 16.3 S3 artifact bucket requirements
+
+```text
+Visibility:        private — no public access
+Block public ACLs: enabled (BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets)
+Encryption:        server-side encryption enabled (SSE-S3 minimum; SSE-KMS optional)
+Versioning:        recommended — allows rollback of a bad binary without re-uploading
+Bucket name:       variable-driven, not hard-coded in Terraform
+No public object ACLs
+No AWS credentials stored in the bucket
+No secrets in object key names
+```
+
+Planned Terraform variable:
+
+```hcl
+variable "artifact_bucket" {
+  description = "Name of the private S3 bucket storing physarum-server and physarum-agent binaries"
+  type        = string
+}
+```
+
+---
+
+### 16.4 EC2 IAM Role requirements
+
+EC2 instances must use an IAM Role and Instance Profile — no static AWS keys in `user_data`, no environment variables with credentials on EC2.
+
+Minimum IAM permission:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "s3:GetObject",
+  "Resource": "arn:aws:s3:::<artifact-bucket>/physarum-attack-paths/dev/linux-x86_64/*"
+}
+```
+
+Scope is restricted to the artifact prefix only. Do not use `s3:*` or broad bucket-level access.
+
+The Instance Profile attaches the IAM Role to the EC2 instances so that the AWS CLI inside `user_data` can authenticate without static credentials.
+
+---
+
+### 16.5 Terraform variables (future)
+
+Variables required when the implementation gate begins:
+
+```hcl
+variable "artifact_bucket" {
+  description = "Private S3 bucket name for physarum binaries"
+  type        = string
+}
+
+variable "artifact_prefix" {
+  description = "S3 key prefix for binaries, e.g. physarum-attack-paths/dev/linux-x86_64"
+  type        = string
+  default     = "physarum-attack-paths/dev/linux-x86_64"
+}
+
+variable "artifact_region" {
+  description = "AWS region where the artifact bucket resides"
+  type        = string
+  default     = "us-east-1"
+}
+```
+
+Optional:
+
+```hcl
+variable "enable_artifact_download" {
+  description = "If true, user_data downloads binaries from S3 instead of using placeholder units"
+  type        = bool
+  default     = false
+}
+```
+
+These variables are not added to `variables.tf` at this design gate.
+
+---
+
+### 16.6 user_data bootstrap design
+
+The systemd unit templates below are design sketches only. **The exact `ExecStart` flags must be verified against `physarum-server --help` and `physarum-agent --help` in the implementation gate** — the current binary CLI interface takes precedence over anything shown here.
+
+**`user-data/server.sh` — future behavior (pseudocode):**
+
+```bash
+# Download physarum-server binary from S3
+aws s3 cp "s3://${artifact_bucket}/${artifact_prefix}/physarum-server" \
+  /usr/local/bin/physarum-server
+chmod +x /usr/local/bin/physarum-server
+
+# Create systemd unit
+cat > /etc/systemd/system/physarum-server.service <<EOF
+[Unit]
+Description=Physarum Server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/physarum-server --listen 0.0.0.0:8080
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable physarum-server
+systemctl start physarum-server
+```
+
+**`user-data/agent.sh` — future behavior (pseudocode):**
+
+```bash
+# Download physarum-agent binary from S3
+aws s3 cp "s3://${artifact_bucket}/${artifact_prefix}/physarum-agent" \
+  /usr/local/bin/physarum-agent
+chmod +x /usr/local/bin/physarum-agent
+
+# Create systemd unit (agent_id, listen_port, coordinator_ip, advertise_address
+# are injected by Terraform templatefile())
+cat > /etc/systemd/system/physarum-agent.service <<EOF
+[Unit]
+Description=Physarum Agent
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/physarum-agent \
+  --id ${agent_id} \
+  --coordinator http://${coordinator_ip}:8080 \
+  --listen 0.0.0.0:${listen_port} \
+  --advertise-address ${advertise_address} \
+  --probe-interval-seconds 5
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable physarum-agent
+systemctl start physarum-agent
+```
+
+The current placeholder scripts in `user-data/` will be replaced with the above pattern in the implementation gate. The implementation gate must verify whether the AWS CLI is present on the selected Amazon Linux 2023 AMI. If not available, `user_data` must install it (e.g., via `dnf install -y awscli2`) or use an alternative minimal download method before the `aws s3 cp` commands.
+
+---
+
+### 16.7 Runtime validation plan
+
+After binary deployment, validation commands must be run from `187.101.126.140/32` (Dev Lead workstation). The coordinator API (port 8080) is not yet authenticated — the Security Group is the only access control. Do not open `operator_cidr` to `0.0.0.0/0` for this validation.
+
+```bash
+SERVER_IP=$(terraform -chdir=examples/aws-lab/terraform output -raw server_public_ip)
+
+# Health check
+curl -s "http://${SERVER_IP}:8080/health" | jq
+
+# Agent registration — expect agent-b, agent-c, agent-d
+curl -s "http://${SERVER_IP}:8080/agents" | jq
+
+# Edge graph — Mode 1: expect 6 directed edges, all probe_success=true
+curl -s "http://${SERVER_IP}:8080/graph" | jq
+
+# Adaptive paths — Mode 1: expect both B→D and B→C→D
+curl -s "http://${SERVER_IP}:8080/paths?source=agent-b&target=agent-d" | jq
+```
+
+The `outputs.tf` already generates these commands with real IPs substituted. The commands above show the pattern for documentation purposes.
+
+---
+
+### 16.8 Success criteria (future runtime gate)
+
+The runtime gate passes when:
+
+```text
+Mode 1 — full mesh:
+  server-a systemd service active and healthy
+  agent-b, agent-c, agent-d systemd services active and registered
+  /health returns 200 OK
+  /agents lists agent-b, agent-c, agent-d
+  /graph shows 6 directed edges — all probe_success=true, q_ema>0, d_ij>0
+  /paths?source=agent-b&target=agent-d returns both B→D and B→C→D paths
+  terraform destroy succeeds after test — 0 resources remaining
+  no secrets committed
+
+Mode 2 — segmented B→C→D (subsequent gate):
+  B→D security group rule removed
+  B→D edge decays: probe_success=false, q_ema→0, d_ij→0
+  B→C and C→D edges remain healthy
+  /paths returns only B→C→D for source=agent-b target=agent-d
+  terraform destroy succeeds
+```
+
+---
+
+### 16.9 Out of scope for this design gate
+
+The following are documented above but must not be implemented until the next gate:
+
+```text
+S3 bucket Terraform resources
+IAM Role and Instance Profile Terraform resources
+artifact upload scripts or CI automation
+Docker build scripts for Linux x86_64
+real user_data download and systemd startup
+AWS runtime apply and endpoint testing
+GitHub Actions build/release pipeline
+segmented B→C→D runtime validation (Mode 2)
+remote Terraform state
+mTLS or API authentication
+persistence and replay
+WASM simulator
+```
