@@ -16,9 +16,9 @@ resource "aws_vpc" "lab" {
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = {
-    Name = "${var.name_prefix}-lab-vpc"
-  }
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-lab-vpc"
+  })
 }
 
 resource "aws_subnet" "lab" {
@@ -29,17 +29,17 @@ resource "aws_subnet" "lab" {
   availability_zone       = data.aws_availability_zones.available.names[each.value.az_index]
   map_public_ip_on_launch = true
 
-  tags = {
-    Name = "${var.name_prefix}-${each.key}"
-  }
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-${each.key}"
+  })
 }
 
 resource "aws_internet_gateway" "lab" {
   vpc_id = aws_vpc.lab.id
 
-  tags = {
-    Name = "${var.name_prefix}-igw"
-  }
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-igw"
+  })
 }
 
 resource "aws_route_table" "lab" {
@@ -52,9 +52,9 @@ resource "aws_route_table" "lab" {
     gateway_id = aws_internet_gateway.lab.id
   }
 
-  tags = {
-    Name = "${var.name_prefix}-rt-${each.key}"
-  }
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-rt-${each.key}"
+  })
 }
 
 resource "aws_route_table_association" "lab" {
