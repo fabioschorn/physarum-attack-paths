@@ -1,7 +1,7 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** AWS Phase Identity and Mode 2 Segmented B→C→D Validation  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · YELLOW (AWS Mode 2 readiness)  
+**Current gate:** AWS Mode 2 Segmented B→C→D Runtime Validation  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · YELLOW (AWS Mode 2 Runtime)  
 **Last updated:** 2026-05-07
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
@@ -83,7 +83,7 @@ Runtime endpoints     : NOT yet validated in AWS
 ## Active gate
 
 **AWS Mode 2 Segmented B→C→D Runtime Validation**  
-Tracked by: Issue #44 / PR #45  
+Tracked by: Issue #44  
 Entry criteria: PR #43 merged (Mode 1 validation evidence recorded). ✔ Phase identity (`lab_phase`) implemented (PR #45). ✔  
 Scope: Deploy with `lab_phase=phase2`; run Ansible playbook; confirm `/paths?source=agent-b&target=agent-d` routes exclusively through agent-c; `failed=0` on all nodes; destroy cleanly.  
 Exit criteria: Ansible recap `failed=0` for phase2; `/paths B→D` confirmed to route exclusively via C; `terraform destroy` completes cleanly.

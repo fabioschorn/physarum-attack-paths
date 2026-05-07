@@ -1185,7 +1185,7 @@ PR #45 added a first-class `lab_phase` variable that controls resource naming, t
 | Variable value | Mode | Topology |
 |---|---|---|
 | `phase1` (default) | Full mesh | B↔C, B↔D, C↔D all allowed; 6 directed edges form |
-| `phase2` | Segmented B→C→D | B↔D SG rules removed; direct B→D edge never forms or decays; `/paths` must route via C |
+| `phase2` | Segmented B→C→D | B↔D SG rules removed; direct B→D edge absent; `/paths` expected to route exclusively via C (runtime validation pending) |
 
 ### What the phase controls
 
@@ -1262,6 +1262,7 @@ terraform -chdir=examples/aws-lab/terraform destroy \
   -var="lab_phase=phase1" \
   -var="operator_cidr=$OPERATOR_CIDR" \
   -var="artifact_bucket=$ARTIFACT_BUCKET" \
+  -var="artifact_prefix=releases" \
   -var="enable_artifact_download=true"
 
 # Step 2: apply the new phase
@@ -1269,6 +1270,7 @@ terraform -chdir=examples/aws-lab/terraform apply \
   -var="lab_phase=phase2" \
   -var="operator_cidr=$OPERATOR_CIDR" \
   -var="artifact_bucket=$ARTIFACT_BUCKET" \
+  -var="artifact_prefix=releases" \
   -var="enable_artifact_download=true"
 ```
 
