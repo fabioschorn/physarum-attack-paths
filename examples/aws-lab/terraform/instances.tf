@@ -4,8 +4,19 @@ locals {
   agent_c_private_ip = cidrhost(local.subnets.middle.cidr, 10)
   agent_d_private_ip = cidrhost(local.subnets.inner.cidr, 10)
 
-  # Resolve artifact region: use artifact_region variable if set, otherwise fall back to aws_region.
   resolved_artifact_region = var.artifact_region != "" ? var.artifact_region : var.aws_region
+
+  # Phase-aware naming: physarum-phase1-* or physarum-phase2-*
+  effective_name_prefix = "${var.name_prefix}-${var.lab_phase}"
+
+  # Common tags applied to all taggable resources.
+  phase_tags = {
+    Project   = "physarum-attack-paths"
+    Lab       = "aws-lab"
+    Phase     = var.lab_phase
+    Mode      = var.lab_phase == "phase1" ? "full-mesh" : "segmented-b-c-d"
+    ManagedBy = "terraform"
+  }
 }
 
 resource "aws_instance" "server_a" {
@@ -26,10 +37,10 @@ resource "aws_instance" "server_a" {
     artifact_region          = local.resolved_artifact_region
   })
 
-  tags = {
-    Name = "${var.name_prefix}-server-a"
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-server-a"
     Role = "coordinator"
-  }
+  })
 }
 
 resource "aws_instance" "agent_b" {
@@ -54,10 +65,10 @@ resource "aws_instance" "agent_b" {
     artifact_region          = local.resolved_artifact_region
   })
 
-  tags = {
-    Name = "${var.name_prefix}-agent-b"
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-agent-b"
     Role = "agent"
-  }
+  })
 }
 
 resource "aws_instance" "agent_c" {
@@ -82,10 +93,10 @@ resource "aws_instance" "agent_c" {
     artifact_region          = local.resolved_artifact_region
   })
 
-  tags = {
-    Name = "${var.name_prefix}-agent-c"
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-agent-c"
     Role = "agent"
-  }
+  })
 }
 
 resource "aws_instance" "agent_d" {
@@ -110,8 +121,8 @@ resource "aws_instance" "agent_d" {
     artifact_region          = local.resolved_artifact_region
   })
 
-  tags = {
-    Name = "${var.name_prefix}-agent-d"
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-agent-d"
     Role = "agent"
-  }
+  })
 }

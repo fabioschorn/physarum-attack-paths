@@ -1,5 +1,5 @@
 resource "aws_iam_role" "physarum_ec2" {
-  name = "${var.name_prefix}-ec2-role"
+  name = "${local.effective_name_prefix}-ec2-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -10,9 +10,9 @@ resource "aws_iam_role" "physarum_ec2" {
     }]
   })
 
-  tags = {
-    Name = "${var.name_prefix}-ec2-role"
-  }
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-ec2-role"
+  })
 
   lifecycle {
     precondition {
@@ -23,7 +23,7 @@ resource "aws_iam_role" "physarum_ec2" {
 }
 
 resource "aws_iam_instance_profile" "physarum_ec2" {
-  name = "${var.name_prefix}-ec2-profile"
+  name = "${local.effective_name_prefix}-ec2-profile"
   role = aws_iam_role.physarum_ec2.name
 }
 
@@ -32,7 +32,7 @@ resource "aws_iam_instance_profile" "physarum_ec2" {
 resource "aws_iam_role_policy" "physarum_s3_artifact" {
   count = (var.enable_artifact_download && var.artifact_bucket != "") ? 1 : 0
 
-  name = "${var.name_prefix}-s3-artifact"
+  name = "${local.effective_name_prefix}-s3-artifact"
   role = aws_iam_role.physarum_ec2.id
 
   policy = jsonencode({

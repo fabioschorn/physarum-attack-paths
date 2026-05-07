@@ -1,3 +1,13 @@
+output "lab_phase" {
+  description = "Active lab phase (phase1 = full-mesh, phase2 = segmented B→C→D)"
+  value       = var.lab_phase
+}
+
+output "lab_mode" {
+  description = "Human-readable mode for the active lab phase"
+  value       = var.lab_phase == "phase1" ? "full-mesh" : "segmented-b-c-d"
+}
+
 output "server_public_ip" {
   description = "Public IP of physarum-server (A) — SSH access only, port 8080 not exposed"
   value       = aws_instance.server_a.public_ip

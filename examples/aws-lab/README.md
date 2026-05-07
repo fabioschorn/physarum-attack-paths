@@ -2,7 +2,7 @@
 
 This document defines the design for the AWS-based laboratory for `physarum-attack-paths`.
 
-**Status: AWS Mode 1 Runtime Validation PASSED (PR #43).** Full-mesh A/B/C/D validated in real EC2/VPC environment via SSH + Ansible. All endpoints confirmed, all agents registered. Mode 2 segmented B→C→D is the next gate.
+**Status: AWS Mode 1 Runtime Validation PASSED (PR #43). Terraform phase identity implemented (PR #45).** Full-mesh A/B/C/D validated in real EC2/VPC via SSH + Ansible. `lab_phase` variable controls resource naming, tagging, and SG topology. Mode 2 runtime validation (segmented B→C→D) is the active gate.
 
 ---
 
@@ -1172,4 +1172,106 @@ terraform destroy          39 resources destroyed cleanly
 
 ### Mode 2 next
 
-AWS Mode 2 (segmented B→C→D) is the next validation gate. Security group rules blocking direct B↔D traffic will be added; `/paths` must route exclusively through C.
+AWS Mode 2 (segmented B→C→D) is the next validation gate. Security group rules blocking direct B↔D traffic are implemented via the `lab_phase` variable (PR #45). Runtime validation — confirming that `/paths B→D` routes exclusively through C after direct edges are absent — is the active gate.
+
+---
+
+## 19. Terraform Phase Identity (`lab_phase`)
+
+PR #45 added a first-class `lab_phase` variable that controls resource naming, tagging, and security group topology for each AWS lab deployment.
+
+### Concept
+
+| Variable value | Mode | Topology |
+|---|---|---|
+| `phase1` (default) | Full mesh | B↔C, B↔D, C↔D all allowed; 6 directed edges form |
+| `phase2` | Segmented B→C→D | B↔D SG rules removed; direct B→D edge absent; `/paths` expected to route exclusively via C (runtime validation pending) |
+
+### What the phase controls
+
+The `lab_phase` value propagates automatically through all deployed AWS resources:
+
+```text
+Resource names   physarum-phase1-server-a   physarum-phase2-agent-b   etc.
+Name tags        Name = physarum-phase1-*   Name = physarum-phase2-*
+Phase tag        Phase = phase1             Phase = phase2
+Mode tag         Mode = full-mesh           Mode = segmented-b-c-d
+IAM role         physarum-phase1-ec2-role   physarum-phase2-ec2-role
+Key pair         physarum-phase1-lab-key    physarum-phase2-lab-key
+Terraform output lab_phase = phase1         lab_phase = phase2
+Terraform output lab_mode  = full-mesh      lab_mode  = segmented-b-c-d
+```
+
+Each resource is self-describing in the AWS Console without needing to open Terraform state.
+
+### Phase 1 — full mesh baseline
+
+```bash
+export ARTIFACT_BUCKET=<your-artifact-bucket>
+export OPERATOR_CIDR=<your-ip>/32
+
+terraform -chdir=examples/aws-lab/terraform plan \
+  -var="lab_phase=phase1" \
+  -var="operator_cidr=$OPERATOR_CIDR" \
+  -var="artifact_bucket=$ARTIFACT_BUCKET" \
+  -var="artifact_prefix=releases" \
+  -var="enable_artifact_download=true"
+
+terraform -chdir=examples/aws-lab/terraform apply \
+  -var="lab_phase=phase1" \
+  -var="operator_cidr=$OPERATOR_CIDR" \
+  -var="artifact_bucket=$ARTIFACT_BUCKET" \
+  -var="artifact_prefix=releases" \
+  -var="enable_artifact_download=true"
+```
+
+Expected: 6 directed edges in `/graph`; `/paths?source=agent-b&target=agent-d` returns both direct and 2-hop routes.
+
+### Phase 2 — segmented B→C→D
+
+```bash
+export ARTIFACT_BUCKET=<your-artifact-bucket>
+export OPERATOR_CIDR=<your-ip>/32
+
+terraform -chdir=examples/aws-lab/terraform plan \
+  -var="lab_phase=phase2" \
+  -var="operator_cidr=$OPERATOR_CIDR" \
+  -var="artifact_bucket=$ARTIFACT_BUCKET" \
+  -var="artifact_prefix=releases" \
+  -var="enable_artifact_download=true"
+
+terraform -chdir=examples/aws-lab/terraform apply \
+  -var="lab_phase=phase2" \
+  -var="operator_cidr=$OPERATOR_CIDR" \
+  -var="artifact_bucket=$ARTIFACT_BUCKET" \
+  -var="artifact_prefix=releases" \
+  -var="enable_artifact_download=true"
+```
+
+Expected Phase 2 behavior (not yet runtime validated): direct B→D edges are absent because B↔D SG rules are removed. `/paths?source=agent-b&target=agent-d` should route exclusively through agent-c. Phase 2 runtime validation is a future gate.
+
+### Safe phase switching
+
+Because `lab_phase` is embedded in resource names, switching from `phase1` to `phase2` (or back) in the **same local Terraform state** causes resource replacement: Terraform destroys the old named resources and creates new ones.
+
+**Recommended operational pattern (single state):**
+
+```bash
+# Step 1: destroy the current phase cleanly
+terraform -chdir=examples/aws-lab/terraform destroy \
+  -var="lab_phase=phase1" \
+  -var="operator_cidr=$OPERATOR_CIDR" \
+  -var="artifact_bucket=$ARTIFACT_BUCKET" \
+  -var="artifact_prefix=releases" \
+  -var="enable_artifact_download=true"
+
+# Step 2: apply the new phase
+terraform -chdir=examples/aws-lab/terraform apply \
+  -var="lab_phase=phase2" \
+  -var="operator_cidr=$OPERATOR_CIDR" \
+  -var="artifact_bucket=$ARTIFACT_BUCKET" \
+  -var="artifact_prefix=releases" \
+  -var="enable_artifact_download=true"
+```
+
+If concurrent phase1 and phase2 environments are needed in the future, use separate Terraform state backends (separate S3 keys or separate workspaces). Do not apply both phases into the same local state simultaneously.

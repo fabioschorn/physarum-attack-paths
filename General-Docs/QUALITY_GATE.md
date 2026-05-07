@@ -1,7 +1,7 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** AWS Phase Identity and Mode 2 Segmented B→C→D Validation  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · YELLOW (AWS Mode 2 readiness)  
+**Current gate:** AWS Mode 2 Segmented B→C→D Runtime Validation  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · YELLOW (AWS Mode 2 Runtime)  
 **Last updated:** 2026-05-07
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
@@ -25,14 +25,16 @@
 | AWS S3 artifact delivery + IAM role | GREEN | S3 bucket + least-privilege IAM role + Instance Profile provisioned | PR #38 |
 | AWS SSH + Ansible validation model | GREEN | Port 8080 removed from public SG; Ansible replaces curl for runtime validation | PR #42 |
 | AWS Mode 1 Runtime Validation | GREEN | failed=0 on all nodes; /health /agents /graph /paths confirmed; 39 resources destroyed | PR #43 |
-| AWS Mode 2 Segmented B→C→D Validation | YELLOW | Phase identity (`lab_phase`) and SG rules for B↔D removal not yet implemented | Active gate |
+| AWS Phase Identity (`lab_phase` variable) | GREEN | `lab_phase` variable, `effective_name_prefix`, phase tags, and SG `count` rules implemented | PR #45 |
+| AWS Mode 2 Segmented B→C→D Runtime Validation | YELLOW | Phase identity implemented; runtime validation (Ansible, `/paths` via C only) not yet run | Active gate |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
 
 **Overall GREEN** for the Adaptive Path Prototype gate — all Phase 1 milestones complete.  
 **GREEN** for AWS Mode 1 Runtime — full-mesh validated in real EC2/VPC, Ansible recap failed=0 on all nodes.  
-**YELLOW** for AWS Mode 2 — phase identity and segmented B→C→D validation is the active gate.
+**GREEN** for AWS Phase Identity — `lab_phase` variable, resource naming, tagging, and SG topology implemented (PR #45).  
+**YELLOW** for AWS Mode 2 Runtime — Terraform phase identity is implemented; runtime validation (Ansible `failed=0`, `/paths B→D` via C only) is the active gate.
 
 ---
 
@@ -74,16 +76,17 @@ Runtime endpoints     : NOT yet validated in AWS
 | AWS S3 Artifact Delivery and EC2 Runtime Bootstrap | COMPLETED — PR #38 |
 | AWS SSH + Ansible Validation Model | COMPLETED — PR #42 |
 | AWS Mode 1 Runtime Validation (full mesh) | COMPLETED — PR #43 |
+| AWS Phase Identity (`lab_phase` variable) | COMPLETED — PR #45 |
 
 ---
 
 ## Active gate
 
-**AWS Phase Identity and Mode 2 Segmented B→C→D Validation**  
+**AWS Mode 2 Segmented B→C→D Runtime Validation**  
 Tracked by: Issue #44  
-Entry criteria: PR #43 merged (Mode 1 validation evidence recorded). ✔  
-Scope: Add `lab_phase` variable to Terraform; resource names and tags reflect phase; implement SG rules that block direct B↔D for phase2; validate `/paths` routes exclusively through C in phase2.  
-Exit criteria: `lab_phase` accepted values `phase1` / `phase2`; resource names include phase; tags include `Phase` and `Mode`; Ansible recap `failed=0` for phase2; `/paths B→D` confirmed to route via C.
+Entry criteria: PR #43 merged (Mode 1 validation evidence recorded). ✔ Phase identity (`lab_phase`) implemented (PR #45). ✔  
+Scope: Deploy with `lab_phase=phase2`; run Ansible playbook; confirm `/paths?source=agent-b&target=agent-d` routes exclusively through agent-c; `failed=0` on all nodes; destroy cleanly.  
+Exit criteria: Ansible recap `failed=0` for phase2; `/paths B→D` confirmed to route exclusively via C; `terraform destroy` completes cleanly.
 
 ---
 
@@ -94,23 +97,24 @@ Exit criteria: `lab_phase` accepted values `phase1` / `phase2`; resource names i
 | A — Design S3 artifact delivery and EC2 bootstrap | Issue #36 | COMPLETED |
 | B — Implement S3 delivery + IAM role + real `user_data` | PR #38 | COMPLETED |
 | C — Validate AWS Mode 1 full mesh runtime | PR #43 | COMPLETED |
-| D — Phase identity + AWS Mode 2 segmented B→C→D | Issue #44 | Active gate |
-| E — Multi-Agent Formal Verification (TLA+) | Future issue | FUTURE |
+| D — Phase identity (`lab_phase` variable + SG rules) | PR #45 | COMPLETED |
+| E — AWS Mode 2 segmented B→C→D runtime validation | Issue #44 | Active gate |
+| F — Multi-Agent Formal Verification (TLA+) | Future issue | FUTURE |
 
 ---
 
 ## Next proposed gate
 
-**AWS Phase Identity and Mode 2 Segmented B→C→D Validation**  
-Entry criteria: PR #43 merged (Mode 1 evidence recorded). ✔  
-Scope: `lab_phase` Terraform variable; phase-aware resource naming and tagging; SG rules blocking direct B↔D in phase2; Ansible validation of segmented path behavior.
+**AWS Mode 2 Segmented B→C→D Runtime Validation**  
+Entry criteria: PR #43 merged (Mode 1 evidence recorded). ✔ Phase identity (`lab_phase`) implemented (PR #45). ✔  
+Scope: Deploy `lab_phase=phase2`; Ansible playbook; confirm `/paths B→D` routes exclusively via C; destroy cleanly.
 
 ---
 
 ## Open blockers
 
 ```text
-- AWS Mode 2 (segmented B→C→D) not yet validated — lab_phase variable and B↔D SG rules pending (Issue #44)
+- AWS Mode 2 runtime validation pending — lab_phase=phase2 deploy + Ansible + /paths B→D via C not yet run (Issue #44)
 - coordinator API (port 8080) unauthenticated — operator_cidr must remain a narrow /32
 ```
 

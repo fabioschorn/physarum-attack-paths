@@ -4,6 +4,17 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "lab_phase" {
+  description = "AWS lab validation phase. phase1 = Mode 1 full mesh (all agents probe all agents). phase2 = Mode 2 segmented B→C→D (direct B↔D traffic blocked)."
+  type        = string
+  default     = "phase1"
+
+  validation {
+    condition     = contains(["phase1", "phase2"], var.lab_phase)
+    error_message = "lab_phase must be phase1 or phase2."
+  }
+}
+
 variable "name_prefix" {
   description = "Prefix applied to all resource names and tags for easy identification and cleanup"
   type        = string

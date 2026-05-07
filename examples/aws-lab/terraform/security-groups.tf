@@ -3,18 +3,16 @@
 # Security groups are created first (no inline ingress rules) to avoid
 # circular dependencies. Rules are added separately via aws_security_group_rule.
 #
-# Current mode: Mode 1 — full mesh.
-# All agents can probe all other agents on their respective ports.
+# Phase identity is controlled by var.lab_phase:
+#   phase1 — Mode 1 full mesh: B↔C, B↔D, C↔D all allowed
+#   phase2 — Mode 2 segmented: B↔D rules omitted; only B↔C and C↔D allowed
 #
-# Mode 2 (segmented — B->D blocked, B->C->D only):
-#   Remove or comment out:
-#     aws_security_group_rule.agent_b_from_d (inbound to B from D)
-#     aws_security_group_rule.agent_d_from_b (inbound to D from B)
-#   This forces B->D probes to fail, decaying that edge, leaving only B->C->D.
+# The two B↔D rules (agent_b_from_d and agent_d_from_b) use
+# count = var.lab_phase == "phase1" ? 1 : 0 to enforce the phase boundary.
 
 resource "aws_security_group" "server_a" {
-  name        = "${var.name_prefix}-server-a"
-  description = "physarum-server coordinator (A)"
+  name        = "${local.effective_name_prefix}-server-a"
+  description = "physarum-server coordinator (A) — ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
 
   egress {
@@ -25,14 +23,14 @@ resource "aws_security_group" "server_a" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${var.name_prefix}-server-a"
-  }
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-server-a"
+  })
 }
 
 resource "aws_security_group" "agent_b" {
-  name        = "${var.name_prefix}-agent-b"
-  description = "physarum-agent-b (B, outer/perimeter)"
+  name        = "${local.effective_name_prefix}-agent-b"
+  description = "physarum-agent-b (B, outer/perimeter) — ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
 
   egress {
@@ -43,14 +41,14 @@ resource "aws_security_group" "agent_b" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${var.name_prefix}-agent-b"
-  }
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-agent-b"
+  })
 }
 
 resource "aws_security_group" "agent_c" {
-  name        = "${var.name_prefix}-agent-c"
-  description = "physarum-agent-c (C, middle/application)"
+  name        = "${local.effective_name_prefix}-agent-c"
+  description = "physarum-agent-c (C, middle/application) — ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
 
   egress {
@@ -61,14 +59,14 @@ resource "aws_security_group" "agent_c" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${var.name_prefix}-agent-c"
-  }
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-agent-c"
+  })
 }
 
 resource "aws_security_group" "agent_d" {
-  name        = "${var.name_prefix}-agent-d"
-  description = "physarum-agent-d (D, inner/crown-jewel)"
+  name        = "${local.effective_name_prefix}-agent-d"
+  description = "physarum-agent-d (D, inner/crown-jewel) — ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
 
   egress {
@@ -79,9 +77,9 @@ resource "aws_security_group" "agent_d" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${var.name_prefix}-agent-d"
-  }
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-agent-d"
+  })
 }
 
 # ── Server A ingress rules ────────────────────────────────────────────────────
@@ -142,8 +140,10 @@ resource "aws_security_group_rule" "agent_b_from_c" {
 }
 
 resource "aws_security_group_rule" "agent_b_from_d" {
+  count = var.lab_phase == "phase1" ? 1 : 0
+
   type                     = "ingress"
-  description              = "Probe from agent-d (Mode 1 only - remove for Mode 2)"
+  description              = "Probe from agent-d (phase1/full-mesh only)"
   from_port                = 9001
   to_port                  = 9001
   protocol                 = "tcp"
@@ -197,8 +197,10 @@ resource "aws_security_group_rule" "agent_c_ssh" {
 
 # Mode 2: remove agent_d_from_b to block B->D probes
 resource "aws_security_group_rule" "agent_d_from_b" {
+  count = var.lab_phase == "phase1" ? 1 : 0
+
   type                     = "ingress"
-  description              = "Probe from agent-b (Mode 1 only - remove for Mode 2)"
+  description              = "Probe from agent-b (phase1/full-mesh only)"
   from_port                = 9003
   to_port                  = 9003
   protocol                 = "tcp"
