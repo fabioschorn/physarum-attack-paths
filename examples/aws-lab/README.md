@@ -2,7 +2,7 @@
 
 This document defines the design for the AWS-based laboratory for `physarum-attack-paths`.
 
-**Status: S3 artifact delivery and EC2 runtime bootstrap implemented (Issue #38).** IAM Role/Instance Profile, artifact variables, and `enable_artifact_download` feature flag added to Terraform. `user_data` downloads real binaries and starts systemd services when `enable_artifact_download=true`; placeholder mode preserved as the safe default. Runtime validation (Mode 1 full mesh) is the next gate.
+**Status: AWS Mode 1 Runtime Validation PASSED (PR #43).** Full-mesh A/B/C/D validated in real EC2/VPC environment via SSH + Ansible. All endpoints confirmed, all agents registered. Mode 2 segmented B→C→D is the next gate.
 
 ---
 
@@ -1112,3 +1112,64 @@ aws_iam_role_policy     physarum-s3-artifact     — s3:GetObject scoped to arti
 ```
 
 EC2 instances authenticate to S3 via the Instance Profile. No static AWS credentials are placed in `user_data` or committed to this repository.
+
+---
+
+## 18. AWS Mode 1 Runtime Validation — PASS
+
+**Result: PASSED**
+**Date:** 2026-05-06
+**Region:** us-east-1
+**PR:** #43
+
+### Environment
+
+```text
+instance_type      = t3.micro
+architecture       = x86_64
+AMI                = Amazon Linux 2023 (ami-027a2644c5c1d0aff)
+artifact delivery  = S3 + EC2 IAM Instance Profile (no static credentials)
+operator access    = SSH only from 187.101.126.140/32
+public port 8080   = NOT exposed (removed in PR #42)
+validation method  = Ansible playbook via SSH (validate-runtime.yml)
+```
+
+### Root cause of first failed run
+
+```text
+user_data contained: dnf install -y jq curl
+AL2023 ships curl-minimal which conflicts with curl (full package)
+DNF exited non-zero
+set -euxo pipefail aborted the bootstrap script
+systemd units were never written; binaries never downloaded
+agents never registered
+fix: install jq only; curl-minimal already provides the curl binary
+```
+
+### Ansible recap
+
+```text
+server-a  ok=24  changed=0  unreachable=0  failed=0  skipped=0
+agent-b   ok=13  changed=0  unreachable=0  failed=0  skipped=2
+agent-c   ok=12  changed=0  unreachable=0  failed=0  skipped=3
+agent-d   ok=12  changed=0  unreachable=0  failed=0  skipped=3
+```
+
+### Assertions passed
+
+```text
+/health                    OK — non-empty response
+/agents                    agent-b registered
+/agents                    agent-c registered
+/agents                    agent-d registered
+/graph                     OK — non-empty response
+/paths?source=agent-b&target=agent-d  OK — non-empty, contains agent-b and agent-d
+agent-b listener port 9001 confirmed
+agent-c listener port 9002 confirmed
+agent-d listener port 9003 confirmed
+terraform destroy          39 resources destroyed cleanly
+```
+
+### Mode 2 next
+
+AWS Mode 2 (segmented B→C→D) is the next validation gate. Security group rules blocking direct B↔D traffic will be added; `/paths` must route exclusively through C.

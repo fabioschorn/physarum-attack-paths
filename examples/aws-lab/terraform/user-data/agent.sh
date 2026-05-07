@@ -28,7 +28,7 @@ ARTIFACT_REGION="${artifact_region}"
 
 # Install dependencies
 dnf update -y
-dnf install -y jq curl
+dnf install -y jq
 
 # Log bootstrap configuration for cloud-init diagnostics (no secrets logged)
 echo "physarum bootstrap: enable_artifact_download=$ENABLE_ARTIFACT_DOWNLOAD"

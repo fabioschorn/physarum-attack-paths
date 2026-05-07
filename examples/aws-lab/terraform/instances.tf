@@ -17,6 +17,7 @@ resource "aws_instance" "server_a" {
   key_name               = aws_key_pair.lab.key_name
   iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 
+  user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/server.sh", {
     name_prefix              = var.name_prefix
     enable_artifact_download = var.enable_artifact_download
@@ -40,6 +41,7 @@ resource "aws_instance" "agent_b" {
   key_name               = aws_key_pair.lab.key_name
   iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 
+  user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/agent.sh", {
     agent_id                 = "agent-b"
     listen_port              = 9001
@@ -67,6 +69,7 @@ resource "aws_instance" "agent_c" {
   key_name               = aws_key_pair.lab.key_name
   iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 
+  user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/agent.sh", {
     agent_id                 = "agent-c"
     listen_port              = 9002
@@ -94,6 +97,7 @@ resource "aws_instance" "agent_d" {
   key_name               = aws_key_pair.lab.key_name
   iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 
+  user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/agent.sh", {
     agent_id                 = "agent-d"
     listen_port              = 9003

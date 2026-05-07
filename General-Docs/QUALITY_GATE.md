@@ -1,8 +1,8 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** AWS Binary Artifact Delivery and EC2 Runtime Bootstrap  
-**Overall status:** GREEN (Adaptive Path Prototype) · YELLOW (AWS runtime readiness)  
-**Last updated:** 2026-05-06
+**Current gate:** AWS Phase Identity and Mode 2 Segmented B→C→D Validation  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · YELLOW (AWS Mode 2 readiness)  
+**Last updated:** 2026-05-07
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
 
@@ -22,14 +22,17 @@
 | AWS Terraform skeleton | GREEN | Skeleton implemented under `examples/aws-lab/terraform/` | PR #31 |
 | AWS v0 smoke test | GREEN | 32 resources created/destroyed; `terraform destroy` clean | PR #33 |
 | AWS default cost/security posture | GREEN | `t3.micro`/`x86_64` default; `187.101.126.140/32` documented | PR #35 |
-| AWS runtime validation | YELLOW | Binaries not deployed to EC2; `/health` `/agents` `/graph` `/paths` not validated in AWS | Active gate |
-| Artifact delivery (S3 + IAM role) | YELLOW | S3 bucket and `s3:GetObject` IAM role not provisioned yet | Active gate |
+| AWS S3 artifact delivery + IAM role | GREEN | S3 bucket + least-privilege IAM role + Instance Profile provisioned | PR #38 |
+| AWS SSH + Ansible validation model | GREEN | Port 8080 removed from public SG; Ansible replaces curl for runtime validation | PR #42 |
+| AWS Mode 1 Runtime Validation | GREEN | failed=0 on all nodes; /health /agents /graph /paths confirmed; 39 resources destroyed | PR #43 |
+| AWS Mode 2 Segmented B→C→D Validation | YELLOW | Phase identity (`lab_phase`) and SG rules for B↔D removal not yet implemented | Active gate |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
 
 **Overall GREEN** for the Adaptive Path Prototype gate — all Phase 1 milestones complete.  
-**YELLOW** for AWS runtime readiness — binary artifact pipeline is the active gate.
+**GREEN** for AWS Mode 1 Runtime — full-mesh validated in real EC2/VPC, Ansible recap failed=0 on all nodes.  
+**YELLOW** for AWS Mode 2 — phase identity and segmented B→C→D validation is the active gate.
 
 ---
 
@@ -68,16 +71,19 @@ Runtime endpoints     : NOT yet validated in AWS
 | AWS Lab Terraform skeleton implementation | COMPLETED — PR #31 |
 | AWS Lab Terraform v0 smoke test | COMPLETED — PR #33 |
 | AWS Lab Intel Default and Operator CIDR Hardening | COMPLETED — PR #35 |
+| AWS S3 Artifact Delivery and EC2 Runtime Bootstrap | COMPLETED — PR #38 |
+| AWS SSH + Ansible Validation Model | COMPLETED — PR #42 |
+| AWS Mode 1 Runtime Validation (full mesh) | COMPLETED — PR #43 |
 
 ---
 
 ## Active gate
 
-**AWS S3 Artifact Delivery and EC2 Runtime Bootstrap Design**  
-Tracked by: Issue #36  
-Entry criteria: PR #35 merged, Issue #34 closed. ✔  
-Scope: Design (documentation only) — define artifact layout, build strategy, S3 bucket requirements, EC2 IAM Role with least-privilege `s3:GetObject`, future `user_data` bootstrap behavior, and runtime validation plan. No Terraform resources added, no artifact pipeline implemented, no runtime validation claimed.  
-Exit criteria: Issue #36 merged with `examples/aws-lab/README.md` documenting artifact strategy, Linux x86_64 build direction, private S3 bucket requirements, IAM Role/Instance Profile design, future Terraform variables, `user_data` download/startup design, and runtime validation commands. No secrets committed.
+**AWS Phase Identity and Mode 2 Segmented B→C→D Validation**  
+Tracked by: Issue #44  
+Entry criteria: PR #43 merged (Mode 1 validation evidence recorded). ✔  
+Scope: Add `lab_phase` variable to Terraform; resource names and tags reflect phase; implement SG rules that block direct B↔D for phase2; validate `/paths` routes exclusively through C in phase2.  
+Exit criteria: `lab_phase` accepted values `phase1` / `phase2`; resource names include phase; tags include `Phase` and `Mode`; Ansible recap `failed=0` for phase2; `/paths B→D` confirmed to route via C.
 
 ---
 
@@ -85,28 +91,26 @@ Exit criteria: Issue #36 merged with `examples/aws-lab/README.md` documenting ar
 
 | Gate | Tracked by | Status |
 |---|---|---|
-| A — Design S3 artifact delivery and EC2 bootstrap | Issue #36 | Active |
-| B — Implement S3 delivery + IAM role + real `user_data` | Future issue | Not started |
-| C — Validate AWS Mode 1 full mesh runtime (`/health` `/agents` `/graph` `/paths`) | Future issue | Not started |
-| D — Validate AWS Mode 2 segmented B→C→D behavior | Future issue | Not started |
-| Research — Multi-Agent Formal Verification (TLA+) | Future issue | Future |
+| A — Design S3 artifact delivery and EC2 bootstrap | Issue #36 | COMPLETED |
+| B — Implement S3 delivery + IAM role + real `user_data` | PR #38 | COMPLETED |
+| C — Validate AWS Mode 1 full mesh runtime | PR #43 | COMPLETED |
+| D — Phase identity + AWS Mode 2 segmented B→C→D | Issue #44 | Active gate |
+| E — Multi-Agent Formal Verification (TLA+) | Future issue | FUTURE |
 
 ---
 
 ## Next proposed gate
 
-**Implement S3 Artifact Delivery and EC2 Runtime Bootstrap**  
-Entry criteria: Issue #36 merged (design complete).  
-Scope: Create S3 bucket Terraform resource, IAM Role/Instance Profile, real `user_data` scripts that download binaries and start systemd services for `physarum-server` and `physarum-agent`.
+**AWS Phase Identity and Mode 2 Segmented B→C→D Validation**  
+Entry criteria: PR #43 merged (Mode 1 evidence recorded). ✔  
+Scope: `lab_phase` Terraform variable; phase-aware resource naming and tagging; SG rules blocking direct B↔D in phase2; Ansible validation of segmented path behavior.
 
 ---
 
 ## Open blockers
 
 ```text
-- No runtime binaries deployed to EC2 yet
-- No AWS /health /agents /graph /paths validation yet
-- S3 artifact delivery not implemented (no bucket, no IAM role)
+- AWS Mode 2 (segmented B→C→D) not yet validated — lab_phase variable and B↔D SG rules pending (Issue #44)
 - coordinator API (port 8080) unauthenticated — operator_cidr must remain a narrow /32
 ```
 
