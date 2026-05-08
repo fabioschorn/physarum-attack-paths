@@ -249,6 +249,8 @@ Possible scope:
 
 ## 9. Future Research: MCTS/Self-Play Graph Traversal for Path Prioritization
 
+> This is not part of the core architecture. The core remains Physarum polycephalum-inspired adaptive graph formation and path scoring; MCTS/self-play is recorded only as a possible future research layer for validation prioritization.
+
 ### Source
 
 ```text
