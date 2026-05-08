@@ -25,11 +25,11 @@ CONSTANTS
 \* ─── Derived scaling coefficients ─────────────────────────────────────────
 \* All coefficients are exact for SCALE = 1000 (multiples of 10).
 
-Alpha    == 3 * SCALE \div 10   \* EMA weight alpha = 0.3
-OneAlpha == SCALE - Alpha       \* 1 - alpha = 0.7
-WSuc     == 7 * SCALE \div 10   \* Q_ij weight for success_rate: 0.7
-WLat     == 3 * SCALE \div 10   \* Q_ij weight for latency_score: 0.3
-Decay    == SCALE \div 10       \* Conductivity decay rate: 0.1
+Alpha    == (3 * SCALE) \div 10   \* EMA weight alpha = 0.3
+OneAlpha == SCALE - Alpha         \* 1 - alpha = 0.7
+WSuc     == (7 * SCALE) \div 10   \* Q_ij weight for success_rate: 0.7
+WLat     == (3 * SCALE) \div 10   \* Q_ij weight for latency_score: 0.3
+Decay    == SCALE \div 10         \* Conductivity decay rate: 0.1
 
 \* ─── Helper operators ──────────────────────────────────────────────────────
 
@@ -117,8 +117,8 @@ ReceiveReport(r) ==
     LET qij      == QijFor(r)
         new_qema == Clamp((Alpha * qij + OneAlpha * q_ema) \div SCALE)
         fsig     == FSig(new_qema)
-        growth   == fsig * (SCALE - d_ij) \div SCALE
-        decay_v  == Decay * d_ij \div SCALE
+        growth   == (fsig * (SCALE - d_ij)) \div SCALE
+        decay_v  == (Decay * d_ij) \div SCALE
         new_dij  == Clamp(d_ij + growth - decay_v)
     IN
     /\ q_ema' = new_qema

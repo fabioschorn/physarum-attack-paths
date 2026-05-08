@@ -237,6 +237,9 @@ Each edge carries its own `(q_ema, d_ij)` pair, evolved by the same
 pipeline as `PhysarumEdgeModel.tla`.  At each step, one edge
 non-deterministically receives a probe report; the other two are unchanged.
 
+This is a scoped formal model of the B→D path-selection property over three
+directed edges.  It is not a full formal model of all runtime behaviour.
+
 ### 8.2 State variables
 
 | Variable | Edge | Meaning |
@@ -268,12 +271,17 @@ are very small (e.g., both = 1 with SCALE = 10).  Those degenerate states
 are excluded — the invariant covers all states where the indirect path has
 meaningful conductivity.
 
+`PathSelectionSafety` formalises the binary Mode 2 case (blocked direct
+edge vs. live indirect path).  Weighted competing paths with multiple
+positive alternatives are tracked separately in Issue #52.
+
 ### 8.4 SCALE = 10
 
 With `SCALE = 10`, each of the six variables has 11 possible values:
 
 ```
-State space: 11^6 = 1,771,561 reachable states
+State-space upper bound: 11^6 = 1,771,561 (6 variables × 11 values each)
+Distinct states reachable from Init:        148,877
 ```
 
 TLC exhaustive checking completes in seconds.  The integer-rounding
@@ -301,6 +309,21 @@ Model checking completed. No error has been found.
 <N> states generated, <N> distinct states found, 0 states left on queue.
 The depth of the complete state graph search is <N>.
 Finished in <time>.
+```
+
+### Actual TLC verification result
+
+```text
+TLC result for PhysarumMultiAgentModel
+Command:           tlc PhysarumMultiAgentModel.tla -config PhysarumMultiAgentModel.cfg
+Result:            Model checking completed. No error has been found.
+Invariants:        TypeOK, Safety, PathSelectionSafety
+SCALE:             10
+States generated:  1,339,894
+Distinct states:   148,877  (reachable; upper bound 11^6 = 1,771,561)
+Search depth:      31
+Finished in:       10s
+TLC version:       TLC2 2026.05.04.141011
 ```
 
 ### 8.6 What the multi-agent model does NOT cover

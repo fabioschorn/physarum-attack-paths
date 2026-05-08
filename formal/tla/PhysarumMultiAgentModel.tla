@@ -34,9 +34,9 @@ CONSTANTS
     SCALE   \* Represents 1.0; set to 10 in PhysarumMultiAgentModel.cfg
 
 \* --- Derived scaling coefficients ----------------------------------------
-Alpha    == 3 * SCALE \div 10   \* EMA weight alpha = 0.3
-OneAlpha == SCALE - Alpha       \* 1 - alpha = 0.7
-Decay    == SCALE \div 10       \* Conductivity decay rate: 0.1
+Alpha    == (3 * SCALE) \div 10   \* EMA weight alpha = 0.3
+OneAlpha == SCALE - Alpha         \* 1 - alpha = 0.7
+Decay    == SCALE \div 10         \* Conductivity decay rate: 0.1
 
 \* --- Helper operators -----------------------------------------------------
 
@@ -90,8 +90,8 @@ NextEdge(old_qema, old_dij, r) ==
     LET qij      == QijFor(r)
         new_qema == Clamp((Alpha * qij + OneAlpha * old_qema) \div SCALE)
         fsig     == FSig(new_qema)
-        growth   == fsig * (SCALE - old_dij) \div SCALE
-        decay_v  == Decay * old_dij \div SCALE
+        growth   == (fsig * (SCALE - old_dij)) \div SCALE
+        decay_v  == (Decay * old_dij) \div SCALE
     IN <<new_qema, Clamp(old_dij + growth - decay_v)>>
 
 \* --- Transitions -----------------------------------------------------------
@@ -141,7 +141,7 @@ Safety ==
     PathScoreBCD = d_ij_bc * d_ij_cd / SCALE  (indirect two-hop path)
 *)
 PathScoreBD  == d_ij_bd
-PathScoreBCD == d_ij_bc * d_ij_cd \div SCALE
+PathScoreBCD == (d_ij_bc * d_ij_cd) \div SCALE
 
 \* --- PathSelectionSafety ---------------------------------------------------
 (*

@@ -1,7 +1,7 @@
 # Quality Gate — Physarum Attack Paths
 
 **Current gate:** Weighted Competing Paths Validation  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (Multi-Agent TLA+)  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model)  
 **Last updated:** 2026-05-08
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
@@ -18,7 +18,7 @@
 | Documentation workflow | GREEN | PR/issue templates + ownership guidelines merged | PR #23 |
 | Roadmap | GREEN | Trimmed to current status + next steps only | PR #25 |
 | Formal model (TLA+) — single edge | GREEN | `PhysarumEdgeModel.tla` TypeOK + Safety verified | PR #12 |
-| Formal model (TLA+) — multi-agent | GREEN | `PhysarumMultiAgentModel.tla` TypeOK + Safety + PathSelectionSafety verified; 3 edges, 11⁶ states | PR #56 |
+| B/C/D TLA+ Path-Selection Model | GREEN | TypeOK + Safety + PathSelectionSafety verified; 148,877 distinct states (upper bound 11⁶ = 1,771,561); parse fix included | PR #56 |
 | AWS lab design | GREEN | A/B/C/D Terraform skeleton designed | PR #29 |
 | AWS Terraform skeleton | GREEN | Skeleton implemented under `examples/aws-lab/terraform/` | PR #31 |
 | AWS v0 smoke test | GREEN | 32 resources created/destroyed; `terraform destroy` clean | PR #33 |
@@ -36,7 +36,7 @@
 **GREEN** for AWS Mode 1 Runtime — full-mesh validated in real EC2/VPC, Ansible recap failed=0 on all nodes.  
 **GREEN** for AWS Phase Identity — `lab_phase` variable, resource naming, tagging, and SG topology implemented (PR #45).  
 **GREEN** for AWS Mode 2 Runtime — segmented B→C→D topology validated in real EC2/VPC; `/paths B→D` routes exclusively via C; 37 resources destroyed cleanly (PR #51).  
-**GREEN** for Multi-Agent TLA+ — `PhysarumMultiAgentModel.tla` covers 3 directed edges (B→C, C→D, B→D); TypeOK, Safety, and PathSelectionSafety verified across 11⁶ states (PR #56).
+**GREEN** for B/C/D TLA+ Path-Selection Model — scoped model covers edges B→C, C→D, B→D; TypeOK, Safety, and PathSelectionSafety verified; 148,877 distinct states reachable (upper bound 11⁶ = 1,771,561); PathSelectionSafety formalises the binary Mode 2 case only (PR #56).
 
 ---
 
@@ -80,7 +80,7 @@ Runtime endpoints     : NOT yet validated in AWS
 | AWS Mode 1 Runtime Validation (full mesh) | COMPLETED — PR #43 |
 | AWS Phase Identity (`lab_phase` variable) | COMPLETED — PR #45 |
 | AWS Mode 2 Segmented B→C→D Runtime Validation | COMPLETED — PR #51 |
-| Multi-Agent Formal Verification (TLA+) | COMPLETED — PR #56 |
+| B/C/D TLA+ Path-Selection Model | COMPLETED — PR #56 |
 
 ---
 
@@ -103,7 +103,7 @@ Exit criteria: At least two valid competing paths; intentionally different obser
 | C — Validate AWS Mode 1 full mesh runtime | PR #43 | COMPLETED |
 | D — Phase identity (`lab_phase` variable + SG rules) | PR #45 | COMPLETED |
 | E — AWS Mode 2 segmented B→C→D runtime validation | PR #51 | COMPLETED |
-| F — Multi-Agent Formal Verification (TLA+) | Issue #55 / PR #56 | COMPLETED |
+| F — B/C/D TLA+ Path-Selection Model | Issue #55 / PR #56 | COMPLETED |
 | G — Weighted Competing Paths Validation | Issue #52 | Active gate |
 
 ---
