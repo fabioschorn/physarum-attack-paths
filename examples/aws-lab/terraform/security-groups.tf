@@ -12,7 +12,7 @@
 
 resource "aws_security_group" "server_a" {
   name        = "${local.effective_name_prefix}-server-a"
-  description = "physarum-server coordinator (A) — ${var.lab_phase}"
+  description = "physarum-server coordinator (A) - ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
 
   egress {
@@ -30,7 +30,7 @@ resource "aws_security_group" "server_a" {
 
 resource "aws_security_group" "agent_b" {
   name        = "${local.effective_name_prefix}-agent-b"
-  description = "physarum-agent-b (B, outer/perimeter) — ${var.lab_phase}"
+  description = "physarum-agent-b (B, outer/perimeter) - ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
 
   egress {
@@ -48,7 +48,7 @@ resource "aws_security_group" "agent_b" {
 
 resource "aws_security_group" "agent_c" {
   name        = "${local.effective_name_prefix}-agent-c"
-  description = "physarum-agent-c (C, middle/application) — ${var.lab_phase}"
+  description = "physarum-agent-c (C, middle/application) - ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
 
   egress {
@@ -66,7 +66,7 @@ resource "aws_security_group" "agent_c" {
 
 resource "aws_security_group" "agent_d" {
   name        = "${local.effective_name_prefix}-agent-d"
-  description = "physarum-agent-d (D, inner/crown-jewel) — ${var.lab_phase}"
+  description = "physarum-agent-d (D, inner/crown-jewel) - ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
 
   egress {

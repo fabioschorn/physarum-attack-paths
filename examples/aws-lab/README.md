@@ -2,7 +2,7 @@
 
 This document defines the design for the AWS-based laboratory for `physarum-attack-paths`.
 
-**Status: AWS Mode 1 Runtime Validation PASSED (PR #43). Terraform phase identity implemented (PR #45).** Full-mesh A/B/C/D validated in real EC2/VPC via SSH + Ansible. `lab_phase` variable controls resource naming, tagging, and SG topology. Mode 2 runtime validation (segmented B→C→D) is the active gate.
+**Status: AWS Mode 1 Runtime Validation PASSED (PR #43). Terraform phase identity implemented (PR #45). AWS Mode 2 Runtime Validation PASSED (PR #51).** Full-mesh A/B/C/D validated in real EC2/VPC (Mode 1). Segmented B→C→D topology validated in real EC2/VPC (Mode 2): `/paths B→D` routes exclusively via C; direct B→D edge scored 0.0. Both phases destroyed cleanly.
 
 ---
 
@@ -1275,3 +1275,110 @@ terraform -chdir=examples/aws-lab/terraform apply \
 ```
 
 If concurrent phase1 and phase2 environments are needed in the future, use separate Terraform state backends (separate S3 keys or separate workspaces). Do not apply both phases into the same local state simultaneously.
+
+---
+
+## 20. AWS Mode 2 Runtime Validation — Phase 2 Test Report
+
+**Date:** 2026-05-08  
+**Region:** us-east-1  
+**lab_phase:** phase2  
+**lab_mode:** segmented-b-c-d  
+**instance_type:** t3.micro  
+**architecture:** x86_64  
+**operator_cidr:** 187.101.126.140/32  
+**artifact_prefix:** physarum-attack-paths/dev/linux-x86_64 (reused from Phase 1; no code changes since PR #43)
+
+### Terraform plan
+
+```text
+Plan: 37 to add, 0 to change, 0 to destroy.
+lab_phase output  = phase2
+lab_mode output   = segmented-b-c-d
+agent_b_from_d SG rule: absent (phase2)
+agent_d_from_b SG rule: absent (phase2)
+B↔C rules: present
+C↔D rules: present
+SSH ingress: 187.101.126.140/32 only
+server-a:8080 public ingress: absent
+```
+
+Note: Terraform apply required `AWS_PROFILE=physarum-lab` (the `fs.terraform` IAM user lacks `ssm:GetParameter` for the dynamic AMI lookup). A Terraform bug was also fixed during this run: em dash characters (—) in Security Group descriptions caused `InvalidParameterValue` errors from the AWS EC2 API, which only allows ASCII in `GroupDescription`. Fixed by replacing em dashes with ASCII hyphens in `security-groups.tf`.
+
+### Terraform apply
+
+```text
+Apply complete! Resources: 37 added, 0 changed, 0 destroyed.
+```
+
+### Ansible recap
+
+```text
+agent-b   : ok=13   changed=0   unreachable=0   failed=0   skipped=2
+agent-c   : ok=12   changed=0   unreachable=0   failed=0   skipped=3
+agent-d   : ok=12   changed=0   unreachable=0   failed=0   skipped=3
+server-a  : ok=24   changed=0   unreachable=0   failed=0   skipped=0
+```
+
+### /health
+
+```json
+{"status": "ok"}
+```
+
+### /agents
+
+```text
+agent-b registered (10.50.20.10:9001)
+agent-c registered (10.50.30.10:9002)
+agent-d registered (10.50.40.10:9003)
+```
+
+### /graph — Phase 2 segmentation evidence
+
+```text
+agent-b → agent-c  success=true   d_ij=0.833  q_ema=0.9996  sample_count=20
+agent-c → agent-b  success=true   d_ij=0.833  q_ema=0.9998  sample_count=20
+agent-c → agent-d  success=true   d_ij=0.833  q_ema=0.9998  sample_count=20
+agent-d → agent-c  success=true   d_ij=0.833  q_ema=0.9998  sample_count=20
+agent-b → agent-d  success=false  d_ij=0.0    q_ema=0.0     sample_count=20  ← blocked by SG
+agent-d → agent-b  success=false  d_ij=0.0    q_ema=0.0     sample_count=20  ← blocked by SG
+```
+
+Agent probe logs confirmed consistent failure from first probe:
+- agent-b: `target=agent-d success=false` (every probe cycle)
+- agent-d: `target=agent-b success=false` (every probe cycle)
+
+### /paths?source=agent-b&target=agent-d
+
+```json
+{
+  "source": "agent-b",
+  "target": "agent-d",
+  "paths": [
+    {
+      "nodes": ["agent-b", "agent-c", "agent-d"],
+      "score": 0.6943840360079503
+    },
+    {
+      "nodes": ["agent-b", "agent-d"],
+      "score": 0.0
+    }
+  ]
+}
+```
+
+**Top path: agent-b → agent-c → agent-d (score 0.694)**  
+**Direct path: agent-b → agent-d (score 0.0) — blocked, not dominant**
+
+This is the core proof: when the network topology changes (B↔D SG rules removed), the observed graph changes (B→D and D→B edges carry d_ij=0.0), and the path selection changes (top path routes exclusively via C).
+
+### Terraform destroy
+
+```text
+Destroy complete! Resources: 37 destroyed.
+```
+
+State after destroy: empty (verified with `terraform show`).
+
+AWS verification: 0 running phase2 lab instances.
