@@ -61,3 +61,6 @@ examples/aws-lab/terraform/terraform.tfstate
 examples/aws-lab/terraform/terraform.tfstate.backup
 examples/aws-lab/terraform/.terraform/
 examples/aws-lab/terraform/*.tfvars
+
+# ── TLA+ toolchain binaries (download locally to run TLC) ────────────────────
+formal/tla/tla2tools.jar

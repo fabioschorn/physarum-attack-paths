@@ -1,6 +1,11 @@
-# TLA+ Formal Model — Adaptive Edge Dynamics
+# TLA+ Formal Models — Adaptive Edge Dynamics
 
-This directory contains the first formal specification for `physarum-attack-paths`.
+This directory contains two formal specifications for `physarum-attack-paths`:
+
+| Module | Scope | SCALE (cfg) |
+|---|---|---|
+| `PhysarumEdgeModel.tla` | Single directed edge (original) | 1000 |
+| `PhysarumMultiAgentModel.tla` | Three directed edges: B→C, C→D, B→D | 10 |
 
 ---
 
@@ -211,3 +216,119 @@ Those extensions are planned in subsequent phases of the project (see
 `General-Docs/INSIGHTS_AND_BRAINSTORM.md`).  The current model isolates
 the adaptive edge dynamics so they can be verified and kept stable as the
 system grows.
+
+---
+
+## 8. Multi-agent model — `PhysarumMultiAgentModel.tla`
+
+### 8.1 What it models
+
+`PhysarumMultiAgentModel.tla` extends the single-edge model to the three
+directed edges relevant to path selection from agent-b to agent-d in the
+B/C/D lab topology:
+
+```
+B -> C   (edge bc)
+C -> D   (edge cd)
+B -> D   (edge bd — direct path, degraded in Mode 2)
+```
+
+Each edge carries its own `(q_ema, d_ij)` pair, evolved by the same
+pipeline as `PhysarumEdgeModel.tla`.  At each step, one edge
+non-deterministically receives a probe report; the other two are unchanged.
+
+This is a scoped formal model of the B→D path-selection property over three
+directed edges.  It is not a full formal model of all runtime behaviour.
+
+### 8.2 State variables
+
+| Variable | Edge | Meaning |
+|---|---|---|
+| `q_ema_bc`, `d_ij_bc` | B→C | EMA signal and conductivity for edge B→C |
+| `q_ema_cd`, `d_ij_cd` | C→D | EMA signal and conductivity for edge C→D |
+| `q_ema_bd`, `d_ij_bd` | B→D | EMA signal and conductivity for edge B→D (direct) |
+
+### 8.3 Invariants
+
+| Invariant | Property |
+|---|---|
+| `TypeOK` | All 6 variables ∈ 0..SCALE |
+| `Safety` | All 6 variables bounded in [0, SCALE] — verified simultaneously across all edges |
+| `PathSelectionSafety` | When `d_ij_bd = 0` and `PathScoreBCD > 0`, the indirect path B→C→D outscores the direct path B→D |
+
+`PathSelectionSafety` formalises the Mode 2 segmentation observation:
+
+```
+PathScoreBD  = d_ij_bd
+PathScoreBCD = d_ij_bc × d_ij_cd ÷ SCALE
+
+(d_ij_bd = 0 ∧ PathScoreBCD > 0) ⇒ PathScoreBCD > PathScoreBD
+```
+
+The guard `PathScoreBCD > 0` is required because integer division
+truncates `d_ij_bc × d_ij_cd ÷ SCALE` to 0 when both edge conductivities
+are very small (e.g., both = 1 with SCALE = 10).  Those degenerate states
+are excluded — the invariant covers all states where the indirect path has
+meaningful conductivity.
+
+`PathSelectionSafety` formalises the binary Mode 2 case (blocked direct
+edge vs. live indirect path).  Weighted competing paths with multiple
+positive alternatives are tracked separately in Issue #52.
+
+### 8.4 SCALE = 10
+
+With `SCALE = 10`, each of the six variables has 11 possible values:
+
+```
+State-space upper bound: 11^6 = 1,771,561 (6 variables × 11 values each)
+Distinct states reachable from Init:        148,877
+```
+
+TLC exhaustive checking completes in seconds.  The integer-rounding
+artefact documented in section 4 (decay stalls before d_ij reaches 0)
+applies to all three edges equally.
+
+### 8.5 How to run
+
+```bash
+cd formal/tla
+tlc PhysarumMultiAgentModel.tla -config PhysarumMultiAgentModel.cfg
+```
+
+Or using the JAR:
+
+```bash
+java -jar /path/to/tla2tools.jar PhysarumMultiAgentModel.tla -config PhysarumMultiAgentModel.cfg
+```
+
+Expected output:
+
+```
+Model checking completed. No error has been found.
+  ...
+<N> states generated, <N> distinct states found, 0 states left on queue.
+The depth of the complete state graph search is <N>.
+Finished in <time>.
+```
+
+### Actual TLC verification result
+
+```text
+TLC result for PhysarumMultiAgentModel
+Command:           tlc PhysarumMultiAgentModel.tla -config PhysarumMultiAgentModel.cfg
+Result:            Model checking completed. No error has been found.
+Invariants:        TypeOK, Safety, PathSelectionSafety
+SCALE:             10
+States generated:  1,339,894
+Distinct states:   148,877  (reachable; upper bound 11^6 = 1,771,561)
+Search depth:      31
+Finished in:       10s
+TLC version:       TLC2 2026.05.04.141011
+```
+
+### 8.6 What the multi-agent model does NOT cover
+
+- Reverse edges (C→B, D→C, D→B) — not needed to verify path B→D selection
+- Coordinator (server A) — not an edge endpoint in the probe topology
+- Concurrent scheduling, message delays, or observation windows
+- The `/paths` endpoint DFS logic, MCPM, or MCTS
