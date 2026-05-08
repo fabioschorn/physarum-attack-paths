@@ -28,14 +28,14 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | A/B/C/D Docker lab (Agent D) | ✔ implemented |
 | TLA+ edge dynamics model (`formal/tla`) | ✔ implemented |
 | `GET /paths` endpoint (adaptive path scoring) | ✔ implemented |
-| `examples/aws-lab` | docs / planned |
+| `examples/aws-lab` | ✔ implemented — AWS Mode 1 runtime validated; Mode 2 pending |
 | `examples/wasm-lab` | docs / planned |
 | `physarum-graph` crate | planned |
 | `physarum-ebpf` crate | planned |
 | `physarum-coordinator` crate (full) | planned |
 | `physarum-cli` crate | planned |
 | `/path-density` endpoint | planned |
-| AWS Terraform | planned |
+| AWS Terraform | ✔ implemented — Phase 1 validated; Phase 2 pending |
 | WASM visual simulator | planned |
 | mTLS / Ed25519 / attestation | planned |
 | Persistence / ClickHouse | planned |
@@ -225,7 +225,7 @@ physarum-attack-paths/
 ├── examples/
 │   ├── local-lab/                   ✔    # manual A/B/C lab + check-local-lab.sh
 │   ├── docker-lab/                  ✔    # Docker Compose A/B/C lab + check-docker-lab.sh
-│   ├── aws-lab/                     ◌    # future EC2/VPC test plan — docs only
+│   ├── aws-lab/                     ✔    # AWS EC2/VPC lab — Terraform + S3 artifacts + SSH/Ansible; Mode 1 validated
 │   └── wasm-lab/                    ◌    # future visual simulator plan — docs only
 │
 ├── formal/
@@ -263,7 +263,7 @@ physarum-attack-paths/
 |---|---|---|
 | `examples/local-lab` | A/B/C agents + server on localhost, manual setup | ✔ implemented |
 | `examples/docker-lab` | A/B/C agents + server in Docker Compose | ✔ implemented |
-| `examples/aws-lab` | EC2/VPC test plan | docs / planned |
+| `examples/aws-lab` | EC2/VPC AWS lab — Terraform, S3 artifact delivery, SSH/Ansible validation | ✔ Mode 1 validated; Mode 2 pending |
 | `examples/wasm-lab` | Browser-based visual simulator | docs / planned |
 | `formal/tla` | TLA+ model of the adaptive edge dynamics | ✔ implemented |
 
@@ -420,7 +420,7 @@ Summary:
 |---|---|---|
 | 0 | Protocol + coordinator scaffold + CI | ✔ done |
 | 1 | Agent probing + A/B/C lab + Docker lab + TLA+ model | ✔ done |
-| 2 | Agent D + `/paths` endpoint + MCPM traversal | planned |
+| 2 | Agent D + `/paths` endpoint + AWS Mode 1 runtime validation | ✔ done — Mode 2 (segmented B→C→D) pending |
 | 3 | eBPF flow capture | planned |
 | 4 | Production hardening (mTLS, attestation, ClickHouse) | planned |
 | 5 | TOON export + upstream integration | planned |
