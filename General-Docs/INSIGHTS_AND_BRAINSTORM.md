@@ -245,3 +245,112 @@ Possible scope:
 - Keep this as research only until the A/B/C/D prototype and /paths endpoint are stable.
 ```
 
+---
+
+## 9. Future Research: MCTS/Self-Play Graph Traversal for Path Prioritization
+
+> This is not part of the core architecture. The core remains Physarum polycephalum-inspired adaptive graph formation and path scoring; MCTS/self-play is recorded only as a possible future research layer for validation prioritization.
+
+### Source
+
+```text
+"Learning to traverse over graphs with a Monte Carlo tree search-based self-play framework"
+Engineering Applications of Artificial Intelligence, 2021
+https://www.sciencedirect.com/science/article/abs/pii/S0952197621002700
+```
+
+The paper proposes an OmegaZero-style framework (graph representation learning + trajectory memory + MCTS + reinforcement learning + self-play) to learn graph traversal and combinatorial optimization heuristics.
+
+### Why it is relevant
+
+The current prototype answers: *what paths exist and how well do they score?*
+
+A future MCTS/self-play layer could answer: *which path or edge should an autonomous validation agent probe next?*
+
+This is a qualitatively different capability — moving from passive scoring to active, learned prioritization.
+
+### Mapping to this project
+
+The paper and this project both operate over graph traversal problems, but from different starting points:
+
+| Paper | This project |
+|---|---|
+| Graph = combinatorial optimization (TSP/VRP) | Graph = observed cyber reachability (live D_ij / q_ema) |
+| Objective = learn an efficient traversal/search policy | Objective = discover, rank, and validate attack paths |
+| Method = GAT/GRU + MCTS + RL + self-play | Method today = Physarum conductivity + adaptive path scoring |
+| Output = optimized tour/route | Output today = ranked paths via `/paths` |
+
+### Proposed future component
+
+```text
+MCTS Path Prioritizer
+```
+
+Possible inputs:
+
+```text
+GraphSnapshot
+EdgeSnapshot: source, target, d_ij, q_ema, sample_count
+Agent metadata: layer, role, criticality, exposure, historical probe outcomes
+Target objective: crown jewel / protected node / target layer
+Recent validation outcomes
+```
+
+Possible outputs:
+
+```text
+next edge to validate
+next path to probe
+top-k candidate paths with exploration score
+uncertainty-driven validation queue
+```
+
+Possible reward signals for self-play:
+
+```text
+successful probe → positive
+new edge discovery → positive
+path to target found → positive
+increase in D_ij after validation → positive
+proximity to high-value target → positive
+failed or redundant validation → negative or zero
+confirmation of segmentation drift → strong positive
+```
+
+### Relationship to existing `/paths`
+
+This should not replace `/paths`. The proposed evolution is staged:
+
+```text
+Stage 1 (current):  /paths — deterministic adaptive path scoring over observed graph
+Stage 2 (future):   add path features suitable for learning (visit count, uncertainty, target distance)
+Stage 3 (future):   offline simulator/replay environment using saved GraphSnapshots
+Stage 4 (future):   MCTS prototype for path/edge prioritization
+Stage 5 (future):   optional learned policy from simulated/self-play trajectories
+```
+
+### Why not implement now
+
+MCTS/self-play is premature until the graph and path behavior are proven under at least two AWS topologies:
+
+```text
+Phase 1 — full mesh (validated, PR #43)
+Phase 2 — segmented B→C→D (pending runtime validation, Issue #47)
+```
+
+After Phase 2 confirms that removing B↔D edges causes edge decay and forces `/paths` to reroute via C, the graph substrate is proven stable enough to serve as the ground truth environment for a learned traversal policy.
+
+### Out of scope until prerequisites are met
+
+```text
+new crate
+new endpoint
+RL model training
+MCTS runtime engine
+Graph neural network (GAT/GRU)
+Python ML pipeline
+GPU training
+```
+
+This note is research positioning only.
+
