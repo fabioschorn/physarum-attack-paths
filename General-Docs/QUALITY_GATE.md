@@ -1,8 +1,8 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** AWS Mode 2 Segmented B→C→D Runtime Validation  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · YELLOW (AWS Mode 2 Runtime)  
-**Last updated:** 2026-05-07
+**Current gate:** Multi-Agent Formal Verification (TLA+)  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime)  
+**Last updated:** 2026-05-08
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
 
@@ -26,7 +26,7 @@
 | AWS SSH + Ansible validation model | GREEN | Port 8080 removed from public SG; Ansible replaces curl for runtime validation | PR #42 |
 | AWS Mode 1 Runtime Validation | GREEN | failed=0 on all nodes; /health /agents /graph /paths confirmed; 39 resources destroyed | PR #43 |
 | AWS Phase Identity (`lab_phase` variable) | GREEN | `lab_phase` variable, `effective_name_prefix`, phase tags, and SG `count` rules implemented | PR #45 |
-| AWS Mode 2 Segmented B→C→D Runtime Validation | YELLOW | Phase identity implemented; runtime validation (Ansible, `/paths` via C only) not yet run | Active gate |
+| AWS Mode 2 Segmented B→C→D Runtime Validation | GREEN | failed=0 on all nodes; `/paths B→D` routes exclusively via C; 37 resources destroyed | PR #51 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
@@ -34,7 +34,7 @@
 **Overall GREEN** for the Adaptive Path Prototype gate — all Phase 1 milestones complete.  
 **GREEN** for AWS Mode 1 Runtime — full-mesh validated in real EC2/VPC, Ansible recap failed=0 on all nodes.  
 **GREEN** for AWS Phase Identity — `lab_phase` variable, resource naming, tagging, and SG topology implemented (PR #45).  
-**YELLOW** for AWS Mode 2 Runtime — Terraform phase identity is implemented; runtime validation (Ansible `failed=0`, `/paths B→D` via C only) is the active gate.
+**GREEN** for AWS Mode 2 Runtime — segmented B→C→D topology validated in real EC2/VPC; `/paths B→D` routes exclusively via C; 37 resources destroyed cleanly (PR #51).
 
 ---
 
@@ -77,16 +77,17 @@ Runtime endpoints     : NOT yet validated in AWS
 | AWS SSH + Ansible Validation Model | COMPLETED — PR #42 |
 | AWS Mode 1 Runtime Validation (full mesh) | COMPLETED — PR #43 |
 | AWS Phase Identity (`lab_phase` variable) | COMPLETED — PR #45 |
+| AWS Mode 2 Segmented B→C→D Runtime Validation | COMPLETED — PR #51 |
 
 ---
 
 ## Active gate
 
-**AWS Mode 2 Segmented B→C→D Runtime Validation**  
-Tracked by: Issue #44  
-Entry criteria: PR #43 merged (Mode 1 validation evidence recorded). ✔ Phase identity (`lab_phase`) implemented (PR #45). ✔  
-Scope: Deploy with `lab_phase=phase2`; run Ansible playbook; confirm `/paths?source=agent-b&target=agent-d` routes exclusively through agent-c; `failed=0` on all nodes; destroy cleanly.  
-Exit criteria: Ansible recap `failed=0` for phase2; `/paths B→D` confirmed to route exclusively via C; `terraform destroy` completes cleanly.
+**Multi-Agent Formal Verification (TLA+)**  
+Tracked by: Future issue  
+Entry criteria: AWS Mode 2 runtime validation passed (PR #51). ✔  
+Scope: Extend TLA+ model from single-edge to multi-agent; verify adaptive graph convergence and path-selection properties across the full B/C/D topology.  
+Exit criteria: TLA+ model covers all four agents; TypeOK and Safety verified for multi-agent scenario.
 
 ---
 
@@ -98,24 +99,24 @@ Exit criteria: Ansible recap `failed=0` for phase2; `/paths B→D` confirmed to 
 | B — Implement S3 delivery + IAM role + real `user_data` | PR #38 | COMPLETED |
 | C — Validate AWS Mode 1 full mesh runtime | PR #43 | COMPLETED |
 | D — Phase identity (`lab_phase` variable + SG rules) | PR #45 | COMPLETED |
-| E — AWS Mode 2 segmented B→C→D runtime validation | Issue #44 | Active gate |
-| F — Multi-Agent Formal Verification (TLA+) | Future issue | FUTURE |
+| E — AWS Mode 2 segmented B→C→D runtime validation | PR #51 | COMPLETED |
+| F — Multi-Agent Formal Verification (TLA+) | Future issue | Active gate |
 
 ---
 
 ## Next proposed gate
 
-**AWS Mode 2 Segmented B→C→D Runtime Validation**  
-Entry criteria: PR #43 merged (Mode 1 evidence recorded). ✔ Phase identity (`lab_phase`) implemented (PR #45). ✔  
-Scope: Deploy `lab_phase=phase2`; Ansible playbook; confirm `/paths B→D` routes exclusively via C; destroy cleanly.
+**Multi-Agent Formal Verification (TLA+)**  
+Entry criteria: AWS Mode 2 runtime validation passed (PR #51). ✔  
+Scope: Extend TLA+ model from single-edge to multi-agent; verify adaptive graph convergence and path-selection properties across the full B/C/D topology.
 
 ---
 
 ## Open blockers
 
 ```text
-- AWS Mode 2 runtime validation pending — lab_phase=phase2 deploy + Ansible + /paths B→D via C not yet run (Issue #44)
 - coordinator API (port 8080) unauthenticated — operator_cidr must remain a narrow /32
+- TLA+ model covers only one edge; multi-agent formal properties are unverified (next gate)
 ```
 
 ---
