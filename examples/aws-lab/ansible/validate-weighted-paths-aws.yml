@@ -1,0 +1,329 @@
+---
+# physarum AWS lab — weighted competing paths validation (Issue #58).
+#
+# Validates that the Physarum model selects the highest-quality path when
+# multiple valid competing paths exist in real AWS EC2/VPC, using tc/netem
+# to inject latency/loss degradation rather than synthetic failure injection.
+#
+# Topology (agent-b configured with --probe-targets agent-c,agent-e):
+#   Path 1: agent-b → agent-c → agent-d   (two-hop via C)
+#   Path 2: agent-b → agent-e → agent-d   (two-hop via E)
+#
+# The direct B→D edge is absent because agent-b's user_data sets
+# --probe-targets agent-c,agent-e, so B never acquires a d_ij for agent-d.
+#
+# Phase 1: degrade agent-e with tc/netem delay+loss → expect B→C→D as top path
+# Phase 2: degrade agent-c with tc/netem delay+loss → expect B→E→D as top path
+#
+# tc/netem changes are temporary and cleaned up after each phase.
+#
+# Usage (from repo root):
+#   ansible-playbook -i examples/aws-lab/ansible/inventory.local.ini \
+#     examples/aws-lab/ansible/validate-weighted-paths-aws.yml
+
+- name: Pre-flight — verify all agents are registered and graph is populated
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /agents
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/agents
+      register: agents
+      changed_when: false
+
+    - name: Print /agents
+      ansible.builtin.debug:
+        msg: "{{ agents.stdout }}"
+
+    - name: Assert all five agents are registered
+      ansible.builtin.assert:
+        that:
+          - "'agent-b' in agents.stdout"
+          - "'agent-c' in agents.stdout"
+          - "'agent-d' in agents.stdout"
+          - "'agent-e' in agents.stdout"
+        fail_msg: "Not all agents registered — cannot proceed with weighted-paths validation"
+        success_msg: "All four agents registered (B, C, D, E)"
+
+    - name: GET /graph (initial state before degradation)
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/graph
+      register: graph_initial
+      changed_when: false
+
+    - name: Print /graph initial state
+      ansible.builtin.debug:
+        msg: "{{ graph_initial.stdout }}"
+
+    - name: GET /paths B→D (initial state)
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d'
+      register: paths_initial
+      changed_when: false
+
+    - name: Print /paths B→D initial state
+      ansible.builtin.debug:
+        msg: "{{ paths_initial.stdout }}"
+
+    - name: Assert initial /paths contains no direct B→D edge
+      ansible.builtin.assert:
+        that: >
+          (paths_initial.stdout | from_json).paths
+          | selectattr('nodes', 'equalto', ['agent-b', 'agent-d'])
+          | list | length == 0
+        fail_msg: "Direct B→D path found — agent-b probe-targets may not be set correctly"
+        success_msg: "No direct B→D path — topology is correct"
+      failed_when: false
+
+
+# ─── Phase 1: degrade agent-e ────────────────────────────────────────────────
+
+- name: Phase 1 — apply tc/netem degradation to agent-e
+  hosts: agent-e
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Get primary network interface
+      ansible.builtin.shell: |
+        ip route get 8.8.8.8 | grep -oP 'dev \K\S+' | head -1
+      register: iface
+      changed_when: false
+
+    - name: Print interface name
+      ansible.builtin.debug:
+        msg: "Primary interface: {{ iface.stdout }}"
+
+    - name: Remove any existing tc qdisc (idempotent cleanup)
+      ansible.builtin.command: tc qdisc del dev {{ iface.stdout }} root
+      failed_when: false
+      changed_when: false
+
+    - name: Apply tc/netem — 100ms delay ±20ms with 5% packet loss on agent-e egress
+      ansible.builtin.command: >
+        tc qdisc add dev {{ iface.stdout }} root netem delay 100ms 20ms loss 5%
+      changed_when: true
+
+    - name: Verify tc qdisc is set
+      ansible.builtin.command: tc qdisc show dev {{ iface.stdout }}
+      register: qdisc_phase1
+      changed_when: false
+
+    - name: Print tc qdisc state (Phase 1)
+      ansible.builtin.debug:
+        msg: "{{ qdisc_phase1.stdout }}"
+
+
+- name: Phase 1 — wait for convergence and validate top path is B→C→D
+  hosts: server
+  gather_facts: false
+  become: true
+
+  vars:
+    converge_seconds: 240
+
+  tasks:
+    - name: "Wait {{ converge_seconds }}s for observation window to re-converge (probe-interval=10s × 20 samples)"
+      ansible.builtin.wait_for:
+        timeout: "{{ converge_seconds }}"
+      delegate_to: localhost
+
+    - name: GET /graph after Phase 1 convergence
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/graph
+      register: graph_phase1
+      changed_when: false
+
+    - name: Print /graph Phase 1
+      ansible.builtin.debug:
+        msg: "{{ graph_phase1.stdout }}"
+
+    - name: GET /paths B→D after Phase 1 convergence
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d'
+      register: paths_phase1
+      changed_when: false
+
+    - name: Print /paths B→D Phase 1
+      ansible.builtin.debug:
+        msg: "{{ paths_phase1.stdout }}"
+
+    - name: Extract top path Phase 1
+      ansible.builtin.set_fact:
+        top_path_phase1: >-
+          {{ (paths_phase1.stdout | from_json).paths[0].nodes | join('→') }}
+
+    - name: Print top path Phase 1
+      ansible.builtin.debug:
+        msg: "Top path Phase 1: {{ top_path_phase1 }}"
+
+    - name: Assert Phase 1 top path is B→C→D
+      ansible.builtin.assert:
+        that: top_path_phase1 == 'agent-b→agent-c→agent-d'
+        fail_msg: >
+          Phase 1 FAIL: expected top path agent-b→agent-c→agent-d,
+          got {{ top_path_phase1 }} (E degraded with tc/netem — C path should dominate)
+        success_msg: "Phase 1 PASS: top path is B→C→D (E degraded by tc/netem)"
+
+
+# ─── Clean up Phase 1 tc/netem ────────────────────────────────────────────────
+
+- name: Phase 1 cleanup — remove tc/netem from agent-e
+  hosts: agent-e
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Get primary network interface
+      ansible.builtin.shell: |
+        ip route get 8.8.8.8 | grep -oP 'dev \K\S+' | head -1
+      register: iface
+      changed_when: false
+
+    - name: Remove tc qdisc from agent-e
+      ansible.builtin.command: tc qdisc del dev {{ iface.stdout }} root
+      failed_when: false
+      changed_when: true
+
+    - name: Verify tc qdisc is removed
+      ansible.builtin.command: tc qdisc show dev {{ iface.stdout }}
+      register: qdisc_clean
+      changed_when: false
+
+    - name: Print tc qdisc state after cleanup
+      ansible.builtin.debug:
+        msg: "{{ qdisc_clean.stdout }}"
+
+
+# ─── Phase 2: degrade agent-c ────────────────────────────────────────────────
+
+- name: Phase 2 — apply tc/netem degradation to agent-c
+  hosts: agent-c
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Get primary network interface
+      ansible.builtin.shell: |
+        ip route get 8.8.8.8 | grep -oP 'dev \K\S+' | head -1
+      register: iface
+      changed_when: false
+
+    - name: Print interface name
+      ansible.builtin.debug:
+        msg: "Primary interface: {{ iface.stdout }}"
+
+    - name: Remove any existing tc qdisc (idempotent cleanup)
+      ansible.builtin.command: tc qdisc del dev {{ iface.stdout }} root
+      failed_when: false
+      changed_when: false
+
+    - name: Apply tc/netem — 100ms delay ±20ms with 5% packet loss on agent-c egress
+      ansible.builtin.command: >
+        tc qdisc add dev {{ iface.stdout }} root netem delay 100ms 20ms loss 5%
+      changed_when: true
+
+    - name: Verify tc qdisc is set
+      ansible.builtin.command: tc qdisc show dev {{ iface.stdout }}
+      register: qdisc_phase2
+      changed_when: false
+
+    - name: Print tc qdisc state (Phase 2)
+      ansible.builtin.debug:
+        msg: "{{ qdisc_phase2.stdout }}"
+
+
+- name: Phase 2 — wait for convergence and validate top path is B→E→D
+  hosts: server
+  gather_facts: false
+  become: true
+
+  vars:
+    converge_seconds: 240
+
+  tasks:
+    - name: "Wait {{ converge_seconds }}s for observation window to re-converge (probe-interval=10s × 20 samples)"
+      ansible.builtin.wait_for:
+        timeout: "{{ converge_seconds }}"
+      delegate_to: localhost
+
+    - name: GET /graph after Phase 2 convergence
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/graph
+      register: graph_phase2
+      changed_when: false
+
+    - name: Print /graph Phase 2
+      ansible.builtin.debug:
+        msg: "{{ graph_phase2.stdout }}"
+
+    - name: GET /paths B→D after Phase 2 convergence
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d'
+      register: paths_phase2
+      changed_when: false
+
+    - name: Print /paths B→D Phase 2
+      ansible.builtin.debug:
+        msg: "{{ paths_phase2.stdout }}"
+
+    - name: Extract top path Phase 2
+      ansible.builtin.set_fact:
+        top_path_phase2: >-
+          {{ (paths_phase2.stdout | from_json).paths[0].nodes | join('→') }}
+
+    - name: Print top path Phase 2
+      ansible.builtin.debug:
+        msg: "Top path Phase 2: {{ top_path_phase2 }}"
+
+    - name: Assert Phase 2 top path is B→E→D
+      ansible.builtin.assert:
+        that: top_path_phase2 == 'agent-b→agent-e→agent-d'
+        fail_msg: >
+          Phase 2 FAIL: expected top path agent-b→agent-e→agent-d,
+          got {{ top_path_phase2 }} (C degraded with tc/netem — E path should dominate)
+        success_msg: "Phase 2 PASS: top path re-selected to B→E→D (C degraded by tc/netem)"
+
+
+# ─── Clean up Phase 2 tc/netem ────────────────────────────────────────────────
+
+- name: Phase 2 cleanup — remove tc/netem from agent-c
+  hosts: agent-c
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Get primary network interface
+      ansible.builtin.shell: |
+        ip route get 8.8.8.8 | grep -oP 'dev \K\S+' | head -1
+      register: iface
+      changed_when: false
+
+    - name: Remove tc qdisc from agent-c
+      ansible.builtin.command: tc qdisc del dev {{ iface.stdout }} root
+      failed_when: false
+      changed_when: true
+
+    - name: Verify tc qdisc is removed
+      ansible.builtin.command: tc qdisc show dev {{ iface.stdout }}
+      register: qdisc_clean2
+      changed_when: false
+
+    - name: Print tc qdisc state after Phase 2 cleanup
+      ansible.builtin.debug:
+        msg: "{{ qdisc_clean2.stdout }}"
+
+
+# ─── Final summary ────────────────────────────────────────────────────────────
+
+- name: Summary — print Phase 1 and Phase 2 top paths
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Print validation summary
+      ansible.builtin.debug:
+        msg:
+          - "=== AWS Weighted Competing Paths Validation Summary ==="
+          - "Phase 1 (E degraded — tc/netem 100ms+20ms / 5% loss): top path = {{ hostvars[groups['server'][0]]['top_path_phase1'] }}"
+          - "Phase 2 (C degraded — tc/netem 100ms+20ms / 5% loss): top path = {{ hostvars[groups['server'][0]]['top_path_phase2'] }}"
+          - "tc/netem parameters: delay 100ms 20ms loss 5%"
+          - "All tc qdiscs removed after each phase."
