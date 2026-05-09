@@ -2,7 +2,7 @@
 
 **Current gate:** Weighted Competing Paths Validation — COMPLETED  
 **Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths)  
-**Last updated:** 2026-05-08
+**Last updated:** 2026-05-09
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
 
@@ -12,7 +12,7 @@
 
 | Area | Status | Evidence | Notes |
 |---|---|---|---|
-| Build / test health | GREEN | 47 tests passing | `cargo test --workspace` — 14 agent + 5 protocol + 28 server; last verified PR #35 |
+| Build / test health | GREEN | 51 tests passing | `cargo test --workspace` — 18 agent + 5 protocol + 28 server; last verified PR #57 |
 | Docker A/B/C/D lab | GREEN | `check-docker-lab.sh`: 34 passed, 0 failed | PR #19 |
 | GET /paths endpoint | GREEN | Docker `/paths` validation posted | PR #20 |
 | Documentation workflow | GREEN | PR/issue templates + ownership guidelines merged | PR #23 |
@@ -28,7 +28,7 @@
 | AWS Mode 1 Runtime Validation | GREEN | failed=0 on all nodes; /health /agents /graph /paths confirmed; 39 resources destroyed | PR #43 |
 | AWS Phase Identity (`lab_phase` variable) | GREEN | `lab_phase` variable, `effective_name_prefix`, phase tags, and SG `count` rules implemented | PR #45 |
 | AWS Mode 2 Segmented B→C→D Runtime Validation | GREEN | failed=0 on all nodes; `/paths B→D` routes exclusively via C; 37 resources destroyed | PR #51 |
-| Weighted Competing Paths Validation | GREEN | 2 phases PASS; B→C→D ranks above B→E→D (Phase 1); B→E→D re-ranks above B→C→D after C degrades (Phase 2); score gap ~8%; evidence in weighted-paths-evidence.txt | PR #57 |
+| Weighted Competing Paths Validation | GREEN | 2 phases PASS; B→C→D is top selected path (score 0.693) when E degraded 50% (Phase 1); B→E→D becomes top selected path (score 0.694) when C degraded 50% (Phase 2); top path changes; no direct B→D; evidence in weighted-paths-evidence.txt | PR #57 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
@@ -38,7 +38,7 @@
 **GREEN** for AWS Phase Identity — `lab_phase` variable, resource naming, tagging, and SG topology implemented (PR #45).  
 **GREEN** for AWS Mode 2 Runtime — segmented B→C→D topology validated in real EC2/VPC; `/paths B→D` routes exclusively via C; 37 resources destroyed cleanly (PR #51).  
 **GREEN** for B/C/D TLA+ Path-Selection Model — scoped model covers edges B→C, C→D, B→D; TypeOK, Safety, and PathSelectionSafety verified; 148,877 distinct states reachable (upper bound 11⁶ = 1,771,561); PathSelectionSafety formalises the binary Mode 2 case only (PR #56).  
-**GREEN** for Weighted Competing Paths — 2-phase Docker validation passed: Phase 1 B→C→D (score 0.694) outranks B→E→D (0.642) when E has 50% failure rate; Phase 2 B→E→D (0.693) re-ranks above B→C→D (0.610) after swapping degradation; success_rate-based scoring distinguishes ~50% quality difference with ~8% score separation (PR #57).
+**GREEN** for Weighted Competing Paths — 2-phase Docker validation passed with true top-path re-selection: no direct B→D edge (agent-b uses `--probe-targets agent-c,agent-e`); Phase 1 top path = B→C→D (score 0.693, E degraded 50%); Phase 2 top path re-selects to B→E→D (score 0.694, C degraded 50%); the selected top path changes between phases; success_rate-based scoring produces ~20% score separation between degraded and healthy multi-hop alternatives (PR #57).
 
 ---
 

@@ -29,6 +29,8 @@ services:
       - agent-b
       - --probe-interval-seconds
       - "5"
+      - --probe-targets
+      - "agent-c,agent-e"
     depends_on:
       physarum-server:
         condition: service_healthy

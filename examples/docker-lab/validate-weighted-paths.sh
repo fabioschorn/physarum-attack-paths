@@ -2,19 +2,21 @@
 # Weighted Competing Paths Validation — Issue #52
 #
 # Validates that the Physarum model selects the highest-quality path when
-# multiple competing paths exist, and re-ranks dynamically when quality changes.
+# multiple competing paths exist, and re-selects dynamically when quality changes.
 #
-# Topology (full mesh — B, C, D, E all probe each other):
+# Topology (agent-b probes only C and E — no direct B→D edge):
 #   Path 1: agent-b → agent-c → agent-d   (two-hop via C)
 #   Path 2: agent-b → agent-e → agent-d   (two-hop via E)
-#   Path 0: agent-b → agent-d             (direct one-hop)
 #
-# Quality injection (application-level, no tc/netem):
+# The direct B→D path is absent because agent-b is configured with
+# --probe-targets agent-c,agent-e, so B never acquires a d_ij for agent-d.
+#
+# Quality injection (application-level synthetic failure rate, no tc/netem):
 #   AGENT_E_FAILURE_RATE — fraction of agent-e outgoing probes forced to fail
 #   AGENT_C_FAILURE_RATE — fraction of agent-c outgoing probes forced to fail
 #
-# Phase 1: E degraded (50% failure) → expect B→C→D ranks above B→E→D
-# Phase 2: C degraded (50% failure) → expect B→E→D re-ranks above B→C→D
+# Phase 1: E degraded (50% failure) → expect B→C→D is the top selected path
+# Phase 2: C degraded (50% failure) → expect B→E→D becomes the top selected path
 #
 # Usage:
 #   cd examples/docker-lab
@@ -80,7 +82,7 @@ trap teardown EXIT
 
 log "========================================================"
 log "Phase 1: E degraded (50% failure rate), C healthy (0%)"
-log "Expected: B→C→D ranks above B→E→D"
+log "Expected: B→C→D is the top selected path (rank 1)"
 log "========================================================"
 
 cd "$COMPOSE_DIR"
@@ -101,32 +103,10 @@ all_paths_ranked || log "(paths not yet available)"
 TOP1=$(top_path_nodes)
 log "Top-ranked path (Phase 1): ${TOP1}"
 
-# The direct B→D path will likely rank #1; we check that B→C→D outranks B→E→D
-BCD_RANK=$(query_paths | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for i, p in enumerate(data.get('paths', [])):
-    if p['nodes'] == ['agent-b', 'agent-c', 'agent-d']:
-        print(i + 1)
-        sys.exit(0)
-print(99)
-")
-BED_RANK=$(query_paths | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for i, p in enumerate(data.get('paths', [])):
-    if p['nodes'] == ['agent-b', 'agent-e', 'agent-d']:
-        print(i + 1)
-        sys.exit(0)
-print(99)
-")
-
-log "B→C→D rank: ${BCD_RANK}   B→E→D rank: ${BED_RANK}"
-
-if [ "$BCD_RANK" -lt "$BED_RANK" ]; then
-    pass "Phase 1: B→C→D (rank ${BCD_RANK}) outranks B→E→D (rank ${BED_RANK})"
+if [ "$TOP1" = "agent-b→agent-c→agent-d" ]; then
+    pass "Phase 1: top selected path is B→C→D (C healthy, E degraded)"
 else
-    fail "Phase 1: B→C→D (rank ${BCD_RANK}) does NOT outrank B→E→D (rank ${BED_RANK})"
+    fail "Phase 1: expected top path B→C→D, got '${TOP1}'"
 fi
 
 teardown
@@ -136,7 +116,7 @@ teardown
 log ""
 log "========================================================"
 log "Phase 2: C degraded (50% failure rate), E healthy (0%)"
-log "Expected: B→E→D re-ranks above B→C→D"
+log "Expected: B→E→D becomes the top selected path (rank 1)"
 log "========================================================"
 
 AGENT_E_FAILURE_RATE=0.0 AGENT_C_FAILURE_RATE=0.5 \
@@ -154,31 +134,10 @@ all_paths_ranked || log "(paths not yet available)"
 TOP2=$(top_path_nodes)
 log "Top-ranked path (Phase 2): ${TOP2}"
 
-BCD_RANK2=$(query_paths | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for i, p in enumerate(data.get('paths', [])):
-    if p['nodes'] == ['agent-b', 'agent-c', 'agent-d']:
-        print(i + 1)
-        sys.exit(0)
-print(99)
-")
-BED_RANK2=$(query_paths | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for i, p in enumerate(data.get('paths', [])):
-    if p['nodes'] == ['agent-b', 'agent-e', 'agent-d']:
-        print(i + 1)
-        sys.exit(0)
-print(99)
-")
-
-log "B→C→D rank: ${BCD_RANK2}   B→E→D rank: ${BED_RANK2}"
-
-if [ "$BED_RANK2" -lt "$BCD_RANK2" ]; then
-    pass "Phase 2: B→E→D (rank ${BED_RANK2}) re-ranked above B→C→D (rank ${BCD_RANK2})"
+if [ "$TOP2" = "agent-b→agent-e→agent-d" ]; then
+    pass "Phase 2: top selected path re-selected to B→E→D (E healthy, C degraded)"
 else
-    fail "Phase 2: B→E→D (rank ${BED_RANK2}) did NOT re-rank above B→C→D (rank ${BCD_RANK2})"
+    fail "Phase 2: expected top path B→E→D, got '${TOP2}'"
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
