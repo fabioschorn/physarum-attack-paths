@@ -4,6 +4,7 @@ locals {
     outer      = { cidr = "10.50.20.0/24", az_index = 0 }
     middle     = { cidr = "10.50.30.0/24", az_index = 0 }
     inner      = { cidr = "10.50.40.0/24", az_index = 0 }
+    secondary  = { cidr = "10.50.50.0/24", az_index = 0 }
   }
 }
 

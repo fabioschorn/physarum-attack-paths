@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-# Bootstrap script for physarum-agent (nodes B, C, D).
+# Bootstrap script for physarum-agent (nodes B, C, D, E).
 # Parameterized via Terraform templatefile — variables injected at apply time.
 # Runs on Amazon Linux 2023.
 #
@@ -10,6 +10,7 @@ set -euxo pipefail
 #   listen_port              = ${listen_port}
 #   coordinator_ip           = ${coordinator_ip}
 #   advertise_address        = ${advertise_address}
+#   probe_targets            = ${probe_targets}   (empty = probe all peers)
 #   name_prefix              = ${name_prefix}
 #   enable_artifact_download = ${enable_artifact_download}
 #   artifact_bucket          = ${artifact_bucket}
@@ -20,15 +21,22 @@ AGENT_ID="${agent_id}"
 LISTEN_PORT="${listen_port}"
 COORDINATOR_IP="${coordinator_ip}"
 ADVERTISE_ADDRESS="${advertise_address}"
+PROBE_TARGETS="${probe_targets}"
 NAME_PREFIX="${name_prefix}"
 ENABLE_ARTIFACT_DOWNLOAD="${enable_artifact_download}"
 ARTIFACT_BUCKET="${artifact_bucket}"
 ARTIFACT_PREFIX="${artifact_prefix}"
 ARTIFACT_REGION="${artifact_region}"
 
+# Build optional --probe-targets flag (lab-only topology control; empty = probe all)
+PROBE_TARGETS_FLAG=""
+if [ -n "$PROBE_TARGETS" ]; then
+  PROBE_TARGETS_FLAG="--probe-targets $PROBE_TARGETS"
+fi
+
 # Install dependencies
 dnf update -y
-dnf install -y jq
+dnf install -y jq iproute-tc
 
 # Log bootstrap configuration for cloud-init diagnostics (no secrets logged)
 echo "physarum bootstrap: enable_artifact_download=$ENABLE_ARTIFACT_DOWNLOAD"
@@ -60,6 +68,7 @@ if [ "$ENABLE_ARTIFACT_DOWNLOAD" = "true" ]; then
   #   --listen <LISTEN>                  (required)
   #   --advertise-address <ADDR>         (required)
   #   --probe-interval-seconds <N>       [default: 10]
+  #   --probe-targets <IDS>              [default: probe all; lab-only]
   cat > /etc/systemd/system/physarum-agent.service << UNIT
 [Unit]
 Description=physarum-agent ($AGENT_ID)
@@ -67,7 +76,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/physarum-agent --id $AGENT_ID --coordinator http://$COORDINATOR_IP:8080 --listen 0.0.0.0:$LISTEN_PORT --advertise-address $ADVERTISE_ADDRESS --probe-interval-seconds 10
+ExecStart=/usr/local/bin/physarum-agent --id $AGENT_ID --coordinator http://$COORDINATOR_IP:8080 --listen 0.0.0.0:$LISTEN_PORT --advertise-address $ADVERTISE_ADDRESS --probe-interval-seconds 10 $PROBE_TARGETS_FLAG
 Restart=on-failure
 RestartSec=10
 Environment=AGENT_ID=$AGENT_ID
@@ -86,7 +95,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/bin/bash -c 'echo "physarum-agent binary not installed — artifact download disabled (enable_artifact_download=false) — would run: physarum-agent --id $AGENT_ID --coordinator http://$COORDINATOR_IP:8080 --listen 0.0.0.0:$LISTEN_PORT --advertise-address $ADVERTISE_ADDRESS --probe-interval-seconds 10" && sleep infinity'
+ExecStart=/bin/bash -c 'echo "physarum-agent binary not installed — artifact download disabled (enable_artifact_download=false) — would run: physarum-agent --id $AGENT_ID --coordinator http://$COORDINATOR_IP:8080 --listen 0.0.0.0:$LISTEN_PORT --advertise-address $ADVERTISE_ADDRESS --probe-interval-seconds 10 $PROBE_TARGETS_FLAG" && sleep infinity'
 Restart=on-failure
 RestartSec=10
 Environment=AGENT_ID=$AGENT_ID

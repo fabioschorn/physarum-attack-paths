@@ -5,7 +5,7 @@ output "lab_phase" {
 
 output "lab_mode" {
   description = "Human-readable mode for the active lab phase"
-  value       = var.lab_phase == "phase1" ? "full-mesh" : "segmented-b-c-d"
+  value       = local.phase_mode[var.lab_phase]
 }
 
 output "server_public_ip" {
@@ -48,6 +48,16 @@ output "agent_d_private_ip" {
   value       = aws_instance.agent_d.private_ip
 }
 
+output "agent_e_public_ip" {
+  description = "Public IP of agent-e — SSH access for Ansible"
+  value       = aws_instance.agent_e.public_ip
+}
+
+output "agent_e_private_ip" {
+  description = "Private IP of agent-e"
+  value       = aws_instance.agent_e.private_ip
+}
+
 output "ssh_server_a" {
   description = "SSH command to connect to server-a"
   value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@${aws_instance.server_a.public_ip}"
@@ -61,4 +71,9 @@ output "ssh_tunnel_8080" {
 output "ansible_run" {
   description = "Ansible validation command after generating inventory from terraform output"
   value       = "ansible-playbook -i examples/aws-lab/ansible/inventory.local.ini examples/aws-lab/ansible/validate-runtime.yml"
+}
+
+output "ansible_weighted_paths" {
+  description = "Ansible weighted-paths validation command (weighted-paths phase only)"
+  value       = "ansible-playbook -i examples/aws-lab/ansible/inventory.local.ini examples/aws-lab/ansible/validate-weighted-paths-aws.yml"
 }

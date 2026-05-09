@@ -5,14 +5,20 @@ variable "aws_region" {
 }
 
 variable "lab_phase" {
-  description = "AWS lab validation phase. phase1 = Mode 1 full mesh (all agents probe all agents). phase2 = Mode 2 segmented B→C→D (direct B↔D traffic blocked)."
+  description = "AWS lab validation phase. phase1 = Mode 1 full mesh. phase2 = Mode 2 segmented B→C→D. weighted-paths = competing B→C→D vs B→E→D with tc/netem degradation (Issue #58)."
   type        = string
   default     = "phase1"
 
   validation {
-    condition     = contains(["phase1", "phase2"], var.lab_phase)
-    error_message = "lab_phase must be phase1 or phase2."
+    condition     = contains(["phase1", "phase2", "weighted-paths"], var.lab_phase)
+    error_message = "lab_phase must be phase1, phase2, or weighted-paths."
   }
+}
+
+variable "agent_b_probe_targets" {
+  description = "Comma-separated list of agent IDs that agent-b will probe. Empty = probe all peers (default for phase1/phase2). Set to 'agent-c,agent-e' for weighted-paths gate to prevent a direct B→D edge."
+  type        = string
+  default     = ""
 }
 
 variable "name_prefix" {

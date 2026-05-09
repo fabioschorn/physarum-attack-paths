@@ -136,6 +136,14 @@
         fail_msg: "agent-d not found in /agents response"
         success_msg: "agent-d registered"
 
+    - name: Assert /agents lists agent-e (weighted-paths phase only)
+      ansible.builtin.assert:
+        that: "'agent-e' in agents.stdout"
+        fail_msg: "agent-e not found in /agents response"
+        success_msg: "agent-e registered"
+      when: "'agent-e' in groups['agents'] | map(attribute='inventory_hostname') | list"
+      failed_when: false
+
     - name: Assert /graph returned non-empty response
       ansible.builtin.assert:
         that: graph.stdout | length > 0
@@ -202,4 +210,12 @@
         fail_msg: "agent-d not listening on 9003"
         success_msg: "agent-d listening on 9003"
       when: inventory_hostname == 'agent-d'
+      failed_when: false
+
+    - name: Assert agent-e is listening on 9004
+      ansible.builtin.assert:
+        that: "'9004' in ss_output.stdout"
+        fail_msg: "agent-e not listening on 9004"
+        success_msg: "agent-e listening on 9004"
+      when: inventory_hostname == 'agent-e'
       failed_when: false

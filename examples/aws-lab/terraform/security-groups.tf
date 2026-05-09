@@ -1,11 +1,12 @@
-# Security groups for the physarum A/B/C/D lab.
+# Security groups for the physarum A/B/C/D/E lab.
 #
 # Security groups are created first (no inline ingress rules) to avoid
 # circular dependencies. Rules are added separately via aws_security_group_rule.
 #
 # Phase identity is controlled by var.lab_phase:
-#   phase1 — Mode 1 full mesh: B↔C, B↔D, C↔D all allowed
-#   phase2 — Mode 2 segmented: B↔D rules omitted; only B↔C and C↔D allowed
+#   phase1          — Mode 1 full mesh: B↔C, B↔D, C↔D all allowed
+#   phase2          — Mode 2 segmented: B↔D rules omitted; only B↔C and C↔D allowed
+#   weighted-paths  — B↔C, B↔E, C↔D, E↔D; agent-b restricted via --probe-targets (no SG block needed)
 #
 # The two B↔D rules (agent_b_from_d and agent_d_from_b) use
 # count = var.lab_phase == "phase1" ? 1 : 0 to enforce the phase boundary.
@@ -218,6 +219,16 @@ resource "aws_security_group_rule" "agent_d_from_c" {
   security_group_id        = aws_security_group.agent_d.id
 }
 
+resource "aws_security_group_rule" "agent_d_from_e" {
+  type                     = "ingress"
+  description              = "Probe from agent-e"
+  from_port                = 9003
+  to_port                  = 9003
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.agent_e.id
+  security_group_id        = aws_security_group.agent_d.id
+}
+
 resource "aws_security_group_rule" "agent_d_ssh" {
   type              = "ingress"
   description       = "SSH from operator (Dev Lead workstation only)"
@@ -226,4 +237,102 @@ resource "aws_security_group_rule" "agent_d_ssh" {
   protocol          = "tcp"
   cidr_blocks       = [var.operator_cidr]
   security_group_id = aws_security_group.agent_d.id
+}
+
+# ── Agent E security group ────────────────────────────────────────────────────
+
+resource "aws_security_group" "agent_e" {
+  name        = "${local.effective_name_prefix}-agent-e"
+  description = "physarum-agent-e (E, secondary/alternate path) - ${var.lab_phase}"
+  vpc_id      = aws_vpc.lab.id
+
+  egress {
+    description = "All outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.phase_tags, {
+    Name = "${local.effective_name_prefix}-agent-e"
+  })
+}
+
+# ── Agent E ingress rules ─────────────────────────────────────────────────────
+
+resource "aws_security_group_rule" "agent_e_from_b" {
+  type                     = "ingress"
+  description              = "Probe from agent-b"
+  from_port                = 9004
+  to_port                  = 9004
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.agent_b.id
+  security_group_id        = aws_security_group.agent_e.id
+}
+
+resource "aws_security_group_rule" "agent_e_from_d" {
+  type                     = "ingress"
+  description              = "Probe from agent-d"
+  from_port                = 9004
+  to_port                  = 9004
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.agent_d.id
+  security_group_id        = aws_security_group.agent_e.id
+}
+
+resource "aws_security_group_rule" "agent_e_from_c" {
+  type                     = "ingress"
+  description              = "Probe from agent-c"
+  from_port                = 9004
+  to_port                  = 9004
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.agent_c.id
+  security_group_id        = aws_security_group.agent_e.id
+}
+
+resource "aws_security_group_rule" "agent_e_ssh" {
+  type              = "ingress"
+  description       = "SSH from operator (Dev Lead workstation only)"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.operator_cidr]
+  security_group_id = aws_security_group.agent_e.id
+}
+
+# ── Server A ← Agent E reports ────────────────────────────────────────────────
+
+resource "aws_security_group_rule" "server_a_from_agent_e" {
+  type                     = "ingress"
+  description              = "Agent reports from agent-e"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.agent_e.id
+  security_group_id        = aws_security_group.server_a.id
+}
+
+# ── Agent B ← Agent E probes ──────────────────────────────────────────────────
+
+resource "aws_security_group_rule" "agent_b_from_e" {
+  type                     = "ingress"
+  description              = "Probe from agent-e"
+  from_port                = 9001
+  to_port                  = 9001
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.agent_e.id
+  security_group_id        = aws_security_group.agent_b.id
+}
+
+# ── Agent C ← Agent E probes ──────────────────────────────────────────────────
+
+resource "aws_security_group_rule" "agent_c_from_e" {
+  type                     = "ingress"
+  description              = "Probe from agent-e"
+  from_port                = 9002
+  to_port                  = 9002
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.agent_e.id
+  security_group_id        = aws_security_group.agent_c.id
 }
