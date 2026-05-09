@@ -2,6 +2,7 @@ use axum::{routing::get, Json, Router};
 use chrono::Utc;
 use clap::Parser;
 use physarum_protocol::{PeerInfo, ProbeReport, RegisterRequest};
+use rand::Rng;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,6 +26,17 @@ struct Cli {
 
     #[arg(long, default_value = "10", env = "PHYSARUM_PROBE_INTERVAL_SECONDS")]
     probe_interval_seconds: u64,
+
+    /// Fraction of outgoing probes to report as failed, regardless of actual result.
+    /// Range [0.0, 1.0]. 0.0 disables injection. Lab-only — not a production signal.
+    #[arg(long, default_value = "0.0", env = "PHYSARUM_SYNTHETIC_FAILURE_RATE")]
+    synthetic_failure_rate: f64,
+
+    /// Comma-separated list of agent IDs this agent will probe. Empty means probe all
+    /// registered peers (default behaviour). Use in lab environments to restrict the
+    /// probe topology (e.g. to remove a direct edge). Lab-only — not a production signal.
+    #[arg(long, default_value = "", env = "PHYSARUM_PROBE_TARGETS")]
+    probe_targets: String,
 }
 
 #[derive(serde::Serialize)]
@@ -221,13 +233,25 @@ async fn send_report(
 async fn probe_loop(cli: Arc<Cli>, client: Arc<reqwest::Client>) {
     let interval = Duration::from_secs(cli.probe_interval_seconds);
     let mut observations: HashMap<String, PeerObservation> = HashMap::new();
+    let target_filter = build_target_filter(&cli.probe_targets);
     loop {
         match fetch_peers(&cli, &client).await {
             Ok(peers) => {
-                tracing::debug!(count = peers.len(), "fetched peers");
-                for peer in &peers {
+                let active_peers: Vec<&PeerInfo> = peers
+                    .iter()
+                    .filter(|p| target_filter.is_empty() || target_filter.contains(&p.agent_id))
+                    .collect();
+                tracing::debug!(count = active_peers.len(), "fetched peers");
+                for peer in &active_peers {
                     let url = build_peer_probe_url(peer);
-                    let (success, rtt_ms) = probe_peer(&client, &url).await;
+                    let (raw_success, raw_rtt_ms) = probe_peer(&client, &url).await;
+                    let (success, rtt_ms) = if cli.synthetic_failure_rate > 0.0
+                        && rand::thread_rng().gen_bool(cli.synthetic_failure_rate)
+                    {
+                        (false, None)
+                    } else {
+                        (raw_success, raw_rtt_ms)
+                    };
                     let obs = observations
                         .entry(peer.agent_id.clone())
                         .or_insert_with(PeerObservation::new);
@@ -249,6 +273,15 @@ async fn probe_loop(cli: Arc<Cli>, client: Arc<reqwest::Client>) {
         }
         tokio::time::sleep(interval).await;
     }
+}
+
+fn build_target_filter(probe_targets: &str) -> Vec<String> {
+    probe_targets
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 #[tokio::main]
@@ -298,6 +331,8 @@ mod tests {
             listen: "127.0.0.1:9001".parse().unwrap(),
             advertise_address: "127.0.0.1".to_string(),
             probe_interval_seconds: 10,
+            synthetic_failure_rate: 0.0,
+            probe_targets: String::new(),
         }
     }
 
@@ -440,6 +475,54 @@ mod tests {
         assert!((obs.avg_rtt_ms() - 150.0).abs() < 1e-12);
         // jitter: MAD of [100, 200] around mean 150 = (50+50)/2 = 50
         assert!((obs.jitter_ms() - 50.0).abs() < 1e-12);
+    }
+
+    // ── probe_targets filter tests ────────────────────────────────────────────
+
+    #[test]
+    fn target_filter_empty_means_no_restriction() {
+        let filter = build_target_filter("");
+        assert!(filter.is_empty());
+    }
+
+    #[test]
+    fn target_filter_parses_comma_separated_ids() {
+        let filter = build_target_filter("agent-c,agent-e");
+        assert_eq!(filter, vec!["agent-c", "agent-e"]);
+    }
+
+    #[test]
+    fn target_filter_trims_whitespace() {
+        let filter = build_target_filter(" agent-c , agent-e ");
+        assert_eq!(filter, vec!["agent-c", "agent-e"]);
+    }
+
+    #[test]
+    fn target_filter_excludes_unlisted_peer() {
+        let filter = build_target_filter("agent-c,agent-e");
+        let peers = [
+            PeerInfo {
+                agent_id: "agent-c".to_string(),
+                address: "127.0.0.1".to_string(),
+                probe_port: 9002,
+            },
+            PeerInfo {
+                agent_id: "agent-d".to_string(),
+                address: "127.0.0.1".to_string(),
+                probe_port: 9003,
+            },
+            PeerInfo {
+                agent_id: "agent-e".to_string(),
+                address: "127.0.0.1".to_string(),
+                probe_port: 9004,
+            },
+        ];
+        let active: Vec<&PeerInfo> = peers
+            .iter()
+            .filter(|p| filter.is_empty() || filter.contains(&p.agent_id))
+            .collect();
+        let ids: Vec<&str> = active.iter().map(|p| p.agent_id.as_str()).collect();
+        assert_eq!(ids, ["agent-c", "agent-e"]);
     }
 
     // ── probe_report integration ──────────────────────────────────────────────

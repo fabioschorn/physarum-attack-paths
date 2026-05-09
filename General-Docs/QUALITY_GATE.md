@@ -1,8 +1,8 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** Weighted Competing Paths Validation  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model)  
-**Last updated:** 2026-05-08
+**Current gate:** Weighted Competing Paths Validation — COMPLETED  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths)  
+**Last updated:** 2026-05-09
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
 
@@ -12,7 +12,7 @@
 
 | Area | Status | Evidence | Notes |
 |---|---|---|---|
-| Build / test health | GREEN | 47 tests passing | `cargo test --workspace` — 14 agent + 5 protocol + 28 server; last verified PR #35 |
+| Build / test health | GREEN | 51 tests passing | `cargo test --workspace` — 18 agent + 5 protocol + 28 server; last verified PR #57 |
 | Docker A/B/C/D lab | GREEN | `check-docker-lab.sh`: 34 passed, 0 failed | PR #19 |
 | GET /paths endpoint | GREEN | Docker `/paths` validation posted | PR #20 |
 | Documentation workflow | GREEN | PR/issue templates + ownership guidelines merged | PR #23 |
@@ -28,6 +28,7 @@
 | AWS Mode 1 Runtime Validation | GREEN | failed=0 on all nodes; /health /agents /graph /paths confirmed; 39 resources destroyed | PR #43 |
 | AWS Phase Identity (`lab_phase` variable) | GREEN | `lab_phase` variable, `effective_name_prefix`, phase tags, and SG `count` rules implemented | PR #45 |
 | AWS Mode 2 Segmented B→C→D Runtime Validation | GREEN | failed=0 on all nodes; `/paths B→D` routes exclusively via C; 37 resources destroyed | PR #51 |
+| Weighted Competing Paths Validation | GREEN | 2 phases PASS; B→C→D is top selected path (score 0.693) when E degraded 50% (Phase 1); B→E→D becomes top selected path (score 0.694) when C degraded 50% (Phase 2); top path changes; no direct B→D; evidence in weighted-paths-evidence.txt | PR #57 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
@@ -36,7 +37,8 @@
 **GREEN** for AWS Mode 1 Runtime — full-mesh validated in real EC2/VPC, Ansible recap failed=0 on all nodes.  
 **GREEN** for AWS Phase Identity — `lab_phase` variable, resource naming, tagging, and SG topology implemented (PR #45).  
 **GREEN** for AWS Mode 2 Runtime — segmented B→C→D topology validated in real EC2/VPC; `/paths B→D` routes exclusively via C; 37 resources destroyed cleanly (PR #51).  
-**GREEN** for B/C/D TLA+ Path-Selection Model — scoped model covers edges B→C, C→D, B→D; TypeOK, Safety, and PathSelectionSafety verified; 148,877 distinct states reachable (upper bound 11⁶ = 1,771,561); PathSelectionSafety formalises the binary Mode 2 case only (PR #56).
+**GREEN** for B/C/D TLA+ Path-Selection Model — scoped model covers edges B→C, C→D, B→D; TypeOK, Safety, and PathSelectionSafety verified; 148,877 distinct states reachable (upper bound 11⁶ = 1,771,561); PathSelectionSafety formalises the binary Mode 2 case only (PR #56).  
+**GREEN** for Weighted Competing Paths — 2-phase Docker validation passed with true top-path re-selection: no direct B→D edge (agent-b uses `--probe-targets agent-c,agent-e`); Phase 1 top path = B→C→D (score 0.693, E degraded 50%); Phase 2 top path re-selects to B→E→D (score 0.694, C degraded 50%); the selected top path changes between phases; success_rate-based scoring produces ~20% score separation between degraded and healthy multi-hop alternatives (PR #57).
 
 ---
 
@@ -81,10 +83,17 @@ Runtime endpoints     : NOT yet validated in AWS
 | AWS Phase Identity (`lab_phase` variable) | COMPLETED — PR #45 |
 | AWS Mode 2 Segmented B→C→D Runtime Validation | COMPLETED — PR #51 |
 | B/C/D TLA+ Path-Selection Model | COMPLETED — PR #56 |
+| Weighted Competing Paths Validation | COMPLETED — PR #57 |
 
 ---
 
 ## Active gate
+
+None — all gates in the current sequence are complete. Next gate to be defined.
+
+---
+
+## Previous active gate (now completed)
 
 **Weighted Competing Paths Validation**  
 Tracked by: Issue #52  
@@ -104,15 +113,13 @@ Exit criteria: At least two valid competing paths; intentionally different obser
 | D — Phase identity (`lab_phase` variable + SG rules) | PR #45 | COMPLETED |
 | E — AWS Mode 2 segmented B→C→D runtime validation | PR #51 | COMPLETED |
 | F — B/C/D TLA+ Path-Selection Model | Issue #55 / PR #56 | COMPLETED |
-| G — Weighted Competing Paths Validation | Issue #52 | Active gate |
+| G — Weighted Competing Paths Validation | Issue #52 / PR #57 | COMPLETED |
 
 ---
 
 ## Next proposed gate
 
-**Weighted Competing Paths Validation**  
-Entry criteria: Multi-Agent TLA+ formal verification passed (PR #56). ✔  
-Scope: Validate weighted competing path selection and adaptive re-ranking. See Issue #52 for full design.
+To be defined. All current validation gates are complete.
 
 ---
 
@@ -120,7 +127,6 @@ Scope: Validate weighted competing path selection and adaptive re-ranking. See I
 
 ```text
 - coordinator API (port 8080) unauthenticated — operator_cidr must remain a narrow /32
-- weighted competing path validation not yet executed (Issue #52, active gate)
 ```
 
 ---
@@ -132,7 +138,7 @@ Scope: Validate weighted competing path selection and adaptive re-ranking. See I
 - Documentation can drift if PROTOTYPE_ROADMAP.md starts tracking issue history again
 - operator_cidr must remain a narrow /32 until coordinator API authentication is added
 - arm64 binary cross-compilation requires additional CI toolchain setup if Graviton path is validated
-- weighted competing paths gate requires confirming current edge scoring distinguishes quality differences before AWS validation
+- latency-based quality discrimination requires AWS with tc/netem; Docker localhost RTTs are indistinguishable (sub-ms)
 ```
 
 ---

@@ -29,6 +29,8 @@ services:
       - agent-b
       - --probe-interval-seconds
       - "5"
+      - --probe-targets
+      - "agent-c,agent-e"
     depends_on:
       physarum-server:
         condition: service_healthy
@@ -49,6 +51,8 @@ services:
       - agent-c
       - --probe-interval-seconds
       - "5"
+      - --synthetic-failure-rate
+      - "${AGENT_C_FAILURE_RATE:-0.0}"
     depends_on:
       physarum-server:
         condition: service_healthy
@@ -69,6 +73,28 @@ services:
       - agent-d
       - --probe-interval-seconds
       - "5"
+    depends_on:
+      physarum-server:
+        condition: service_healthy
+
+  agent-e:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command:
+      - physarum-agent
+      - --id
+      - agent-e
+      - --coordinator
+      - http://physarum-server:8080
+      - --listen
+      - 0.0.0.0:9004
+      - --advertise-address
+      - agent-e
+      - --probe-interval-seconds
+      - "5"
+      - --synthetic-failure-rate
+      - "${AGENT_E_FAILURE_RATE:-0.0}"
     depends_on:
       physarum-server:
         condition: service_healthy
