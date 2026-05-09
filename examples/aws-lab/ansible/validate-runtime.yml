@@ -141,8 +141,7 @@
         that: "'agent-e' in agents.stdout"
         fail_msg: "agent-e not found in /agents response"
         success_msg: "agent-e registered"
-      when: "'agent-e' in groups['agents'] | map(attribute='inventory_hostname') | list"
-      failed_when: false
+      when: "'agent-e' in groups.get('agents', [])"
 
     - name: Assert /graph returned non-empty response
       ansible.builtin.assert:

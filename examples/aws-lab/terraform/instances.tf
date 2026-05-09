@@ -24,6 +24,14 @@ locals {
     Mode      = local.phase_mode[var.lab_phase]
     ManagedBy = "terraform"
   }
+
+  # For weighted-paths: default to agent-c,agent-e if operator did not override.
+  # Prevents a direct B→D edge from forming when the operator forgets to pass the variable.
+  effective_probe_targets = (
+    var.lab_phase == "weighted-paths" && var.agent_b_probe_targets == ""
+    ? "agent-c,agent-e"
+    : var.agent_b_probe_targets
+  )
 }
 
 resource "aws_instance" "server_a" {
@@ -65,7 +73,7 @@ resource "aws_instance" "agent_b" {
     listen_port              = 9001
     coordinator_ip           = local.server_private_ip
     advertise_address        = local.agent_b_private_ip
-    probe_targets            = var.agent_b_probe_targets
+    probe_targets            = local.effective_probe_targets
     name_prefix              = var.name_prefix
     enable_artifact_download = var.enable_artifact_download
     artifact_bucket          = var.artifact_bucket
@@ -138,11 +146,13 @@ resource "aws_instance" "agent_d" {
 }
 
 resource "aws_instance" "agent_e" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   ami                    = local.ami_id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.lab["secondary"].id
   private_ip             = local.agent_e_private_ip
-  vpc_security_group_ids = [aws_security_group.agent_e.id]
+  vpc_security_group_ids = [aws_security_group.agent_e[0].id]
   key_name               = aws_key_pair.lab.key_name
   iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 

@@ -220,12 +220,14 @@ resource "aws_security_group_rule" "agent_d_from_c" {
 }
 
 resource "aws_security_group_rule" "agent_d_from_e" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   type                     = "ingress"
-  description              = "Probe from agent-e"
+  description              = "Probe from agent-e (weighted-paths only)"
   from_port                = 9003
   to_port                  = 9003
   protocol                 = "tcp"
-  source_security_group_id = aws_security_group.agent_e.id
+  source_security_group_id = aws_security_group.agent_e[0].id
   security_group_id        = aws_security_group.agent_d.id
 }
 
@@ -239,9 +241,11 @@ resource "aws_security_group_rule" "agent_d_ssh" {
   security_group_id = aws_security_group.agent_d.id
 }
 
-# ── Agent E security group ────────────────────────────────────────────────────
+# ── Agent E security group (weighted-paths only) ─────────────────────────────
 
 resource "aws_security_group" "agent_e" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   name        = "${local.effective_name_prefix}-agent-e"
   description = "physarum-agent-e (E, secondary/alternate path) - ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
@@ -259,80 +263,94 @@ resource "aws_security_group" "agent_e" {
   })
 }
 
-# ── Agent E ingress rules ─────────────────────────────────────────────────────
+# ── Agent E ingress rules (weighted-paths only) ───────────────────────────────
 
 resource "aws_security_group_rule" "agent_e_from_b" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   type                     = "ingress"
-  description              = "Probe from agent-b"
+  description              = "Probe from agent-b (weighted-paths only)"
   from_port                = 9004
   to_port                  = 9004
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.agent_b.id
-  security_group_id        = aws_security_group.agent_e.id
+  security_group_id        = aws_security_group.agent_e[0].id
 }
 
 resource "aws_security_group_rule" "agent_e_from_d" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   type                     = "ingress"
-  description              = "Probe from agent-d"
+  description              = "Probe from agent-d (weighted-paths only)"
   from_port                = 9004
   to_port                  = 9004
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.agent_d.id
-  security_group_id        = aws_security_group.agent_e.id
+  security_group_id        = aws_security_group.agent_e[0].id
 }
 
 resource "aws_security_group_rule" "agent_e_from_c" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   type                     = "ingress"
-  description              = "Probe from agent-c"
+  description              = "Probe from agent-c (weighted-paths only)"
   from_port                = 9004
   to_port                  = 9004
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.agent_c.id
-  security_group_id        = aws_security_group.agent_e.id
+  security_group_id        = aws_security_group.agent_e[0].id
 }
 
 resource "aws_security_group_rule" "agent_e_ssh" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   type              = "ingress"
-  description       = "SSH from operator (Dev Lead workstation only)"
+  description       = "SSH from operator (Dev Lead workstation only) - weighted-paths only"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
   cidr_blocks       = [var.operator_cidr]
-  security_group_id = aws_security_group.agent_e.id
+  security_group_id = aws_security_group.agent_e[0].id
 }
 
-# ── Server A ← Agent E reports ────────────────────────────────────────────────
+# ── Server A ← Agent E reports (weighted-paths only) ─────────────────────────
 
 resource "aws_security_group_rule" "server_a_from_agent_e" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   type                     = "ingress"
-  description              = "Agent reports from agent-e"
+  description              = "Agent reports from agent-e (weighted-paths only)"
   from_port                = 8080
   to_port                  = 8080
   protocol                 = "tcp"
-  source_security_group_id = aws_security_group.agent_e.id
+  source_security_group_id = aws_security_group.agent_e[0].id
   security_group_id        = aws_security_group.server_a.id
 }
 
-# ── Agent B ← Agent E probes ──────────────────────────────────────────────────
+# ── Agent B ← Agent E probes (weighted-paths only) ───────────────────────────
 
 resource "aws_security_group_rule" "agent_b_from_e" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   type                     = "ingress"
-  description              = "Probe from agent-e"
+  description              = "Probe from agent-e (weighted-paths only)"
   from_port                = 9001
   to_port                  = 9001
   protocol                 = "tcp"
-  source_security_group_id = aws_security_group.agent_e.id
+  source_security_group_id = aws_security_group.agent_e[0].id
   security_group_id        = aws_security_group.agent_b.id
 }
 
-# ── Agent C ← Agent E probes ──────────────────────────────────────────────────
+# ── Agent C ← Agent E probes (weighted-paths only) ───────────────────────────
 
 resource "aws_security_group_rule" "agent_c_from_e" {
+  count = var.lab_phase == "weighted-paths" ? 1 : 0
+
   type                     = "ingress"
-  description              = "Probe from agent-e"
+  description              = "Probe from agent-e (weighted-paths only)"
   from_port                = 9002
   to_port                  = 9002
   protocol                 = "tcp"
-  source_security_group_id = aws_security_group.agent_e.id
+  source_security_group_id = aws_security_group.agent_e[0].id
   security_group_id        = aws_security_group.agent_c.id
 }
