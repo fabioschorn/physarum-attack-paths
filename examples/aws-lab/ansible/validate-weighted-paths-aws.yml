@@ -127,6 +127,7 @@
       ansible.builtin.wait_for:
         timeout: "{{ converge_seconds }}"
       delegate_to: localhost
+      become: false
 
     - name: GET /graph after Phase 1 convergence
       ansible.builtin.command: curl -s http://127.0.0.1:8080/graph
@@ -245,6 +246,7 @@
       ansible.builtin.wait_for:
         timeout: "{{ converge_seconds }}"
       delegate_to: localhost
+      become: false
 
     - name: GET /graph after Phase 2 convergence
       ansible.builtin.command: curl -s http://127.0.0.1:8080/graph

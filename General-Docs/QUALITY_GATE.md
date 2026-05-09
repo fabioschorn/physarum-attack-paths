@@ -1,7 +1,7 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** AWS tc/netem Weighted Competing Paths Validation — IN PROGRESS  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · YELLOW (AWS tc/netem Weighted Paths)  
+**Current gate:** AWS tc/netem Weighted Competing Paths Validation — COMPLETE  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths)  
 **Last updated:** 2026-05-09
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
@@ -29,7 +29,7 @@
 | AWS Phase Identity (`lab_phase` variable) | GREEN | `lab_phase` variable, `effective_name_prefix`, phase tags, and SG `count` rules implemented | PR #45 |
 | AWS Mode 2 Segmented B→C→D Runtime Validation | GREEN | failed=0 on all nodes; `/paths B→D` routes exclusively via C; 37 resources destroyed | PR #51 |
 | Weighted Competing Paths Validation | GREEN | 2 phases PASS; B→C→D is top selected path (score 0.693) when E degraded 50% (Phase 1); B→E→D becomes top selected path (score 0.694) when C degraded 50% (Phase 2); top path changes; no direct B→D; evidence in weighted-paths-evidence.txt | PR #57 |
-| AWS tc/netem Weighted Competing Paths | YELLOW | Terraform + Ansible changes implemented; awaiting runtime validation in EC2/VPC | Issue #58 |
+| AWS tc/netem Weighted Competing Paths | GREEN | 2 phases PASS in real EC2/VPC; Phase 1 top=B→C→D (score 0.694, E degraded); Phase 2 top=B→E→D (score 0.688, C degraded); top path switches; 50 resources destroyed clean; evidence in weighted-paths-aws-evidence.txt | Issue #58 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
@@ -39,7 +39,8 @@
 **GREEN** for AWS Phase Identity — `lab_phase` variable, resource naming, tagging, and SG topology implemented (PR #45).  
 **GREEN** for AWS Mode 2 Runtime — segmented B→C→D topology validated in real EC2/VPC; `/paths B→D` routes exclusively via C; 37 resources destroyed cleanly (PR #51).  
 **GREEN** for B/C/D TLA+ Path-Selection Model — scoped model covers edges B→C, C→D, B→D; TypeOK, Safety, and PathSelectionSafety verified; 148,877 distinct states reachable (upper bound 11⁶ = 1,771,561); PathSelectionSafety formalises the binary Mode 2 case only (PR #56).  
-**GREEN** for Weighted Competing Paths — 2-phase Docker validation passed with true top-path re-selection: no direct B→D edge (agent-b uses `--probe-targets agent-c,agent-e`); Phase 1 top path = B→C→D (score 0.693, E degraded 50%); Phase 2 top path re-selects to B→E→D (score 0.694, C degraded 50%); the selected top path changes between phases; success_rate-based scoring produces ~20% score separation between degraded and healthy multi-hop alternatives (PR #57).
+**GREEN** for Weighted Competing Paths — 2-phase Docker validation passed with true top-path re-selection: no direct B→D edge (agent-b uses `--probe-targets agent-c,agent-e`); Phase 1 top path = B→C→D (score 0.693, E degraded 50%); Phase 2 top path re-selects to B→E→D (score 0.694, C degraded 50%); the selected top path changes between phases; success_rate-based scoring produces ~20% score separation between degraded and healthy multi-hop alternatives (PR #57).  
+**GREEN** for AWS tc/netem Weighted Competing Paths — 2-phase real EC2/VPC validation passed; 50 resources (us-east-1, lab_phase=weighted-paths); Phase 1: B→C→D top (score 0.694) when E degraded via tc/netem (100ms±20ms / 5% loss); Phase 2: B→E→D top (score 0.688) when C degraded; top path switches between phases; tc qdiscs cleaned up; terraform destroy clean (50 resources); score separation Δ~5–7%; evidence in weighted-paths-aws-evidence.txt (Issue #58).
 
 ---
 
@@ -85,26 +86,23 @@ Runtime endpoints     : NOT yet validated in AWS
 | AWS Mode 2 Segmented B→C→D Runtime Validation | COMPLETED — PR #51 |
 | B/C/D TLA+ Path-Selection Model | COMPLETED — PR #56 |
 | Weighted Competing Paths Validation | COMPLETED — PR #57 |
+| AWS tc/netem Weighted Competing Paths Validation | COMPLETED — Issue #58 |
 
 ---
 
 ## Active gate
 
-**AWS tc/netem Weighted Competing Paths Validation**  
-Tracked by: Issue #58  
-Entry criteria: Docker weighted competing paths gate complete (PR #57). ✔  
-Scope: Validate in real AWS EC2/VPC that the Physarum model selects and re-selects the best path among two competing multi-hop paths (B→C→D vs B→E→D) when quality differences arise from network-level degradation (tc/netem latency+loss), not only synthetic application-level failure injection.  
-Exit criteria: agent-e added to AWS lab; agent-b configured with `--probe-targets agent-c,agent-e`; Phase 1 selects B→C→D when E is degraded via tc/netem; Phase 2 re-selects B→E→D when C is degraded; tc qdiscs cleaned up; Terraform destroy clean; no AWS resources remain; evidence documented.
+No active gate — all gate-H milestones complete. Next gate to be defined.
 
 ---
 
 ## Previous active gate (now completed)
 
-**Weighted Competing Paths Validation**  
-Tracked by: Issue #52  
-Entry criteria: Multi-Agent TLA+ formal verification passed (PR #56). ✔  
-Scope: Validate that when multiple valid competing paths exist with different observed quality, the system selects the highest-quality path by score and re-ranks dynamically when quality changes.  
-Exit criteria: At least two valid competing paths; intentionally different observed quality; `/paths` ranks the higher-quality path first; after degrading the preferred path, `/paths` re-ranks to the better alternative; results documented with before/after evidence.
+**AWS tc/netem Weighted Competing Paths Validation**  
+Tracked by: Issue #58  
+Entry criteria: Docker weighted competing paths gate complete (PR #57). ✔  
+Scope: Validate in real AWS EC2/VPC that the Physarum model selects and re-selects the best path among two competing multi-hop paths (B→C→D vs B→E→D) when quality differences arise from network-level degradation (tc/netem latency+loss), not only synthetic application-level failure injection.  
+Exit criteria met: agent-e added to AWS lab; SG topology enforces B→D block (agent_d_from_b disabled in weighted-paths); Phase 1 selects B→C→D (score 0.694) when E degraded via tc/netem; Phase 2 re-selects B→E→D (score 0.688) when C degraded; tc qdiscs cleaned up after each phase; Terraform destroy clean (50 resources); no AWS resources remain from this run; evidence in weighted-paths-aws-evidence.txt.
 
 ---
 
@@ -119,7 +117,7 @@ Exit criteria: At least two valid competing paths; intentionally different obser
 | E — AWS Mode 2 segmented B→C→D runtime validation | PR #51 | COMPLETED |
 | F — B/C/D TLA+ Path-Selection Model | Issue #55 / PR #56 | COMPLETED |
 | G — Weighted Competing Paths Validation | Issue #52 / PR #57 | COMPLETED |
-| H — AWS tc/netem Weighted Competing Paths Validation | Issue #58 | IN PROGRESS |
+| H — AWS tc/netem Weighted Competing Paths Validation | Issue #58 | COMPLETED |
 
 ---
 

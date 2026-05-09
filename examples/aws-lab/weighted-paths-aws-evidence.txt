@@ -1,0 +1,100 @@
+AWS tc/netem Weighted Competing Paths Validation Evidence
+Issue #58 — gate H
+Date: 2026-05-09
+Playbook: examples/aws-lab/ansible/validate-weighted-paths-aws.yml
+Terraform: lab_phase=weighted-paths (50 resources, us-east-1)
+
+Topology
+--------
+  Competing paths:  B→C→D  vs  B→E→D
+  Direct B→D edge:  absent (SG rule agent_d_from_b disabled for non-phase1;
+                    B→D probes blocked at network layer, q_ema=0.0)
+  tc/netem applied: egress of degraded agent (ens5 interface)
+  Parameters:       delay 100ms 20ms loss 5%
+  Convergence wait: 240s (probe-interval=10s × 20-sample window)
+
+Instance IPs
+------------
+  server-a  public=184.72.117.139   private=10.50.10.10
+  agent-b   public=52.87.191.224    private=10.50.20.10
+  agent-c   public=34.238.155.77    private=10.50.30.10
+  agent-d   public=13.220.206.215   private=10.50.40.10
+  agent-e   public=44.212.65.196    private=10.50.50.10
+
+validate-runtime.yml PLAY RECAP
+--------------------------------
+  agent-b   ok=13  failed=0
+  agent-c   ok=12  failed=0
+  agent-d   ok=12  failed=0
+  agent-e   ok=12  failed=0
+  server-a  ok=25  failed=0
+
+Pre-flight /agents (all four registered)
+-----------------------------------------
+  agent-b  10.50.20.10:9001
+  agent-c  10.50.30.10:9002
+  agent-d  10.50.40.10:9003
+  agent-e  10.50.50.10:9004
+
+Initial /graph (before degradation) — key edges
+-------------------------------------------------
+  agent-b → agent-c  q_ema=0.9999967  success_rate=1.0  d_ij=0.8333327
+  agent-b → agent-e  q_ema=0.9999973  success_rate=1.0  d_ij=0.8333328
+  agent-b → agent-d  q_ema=0.0        success_rate=0.0  d_ij=0.0  (SG blocked)
+  agent-c → agent-d  q_ema=1.0        success_rate=1.0  d_ij=0.8333333
+  agent-e → agent-d  q_ema=1.0        success_rate=1.0  d_ij=0.8333333
+
+Phase 1 — agent-e degraded (tc/netem delay 100ms±20ms loss 5%)
+---------------------------------------------------------------
+  tc qdisc: qdisc netem 8001: root refcnt 3 limit 1000 delay 100ms 20ms loss 5%
+
+  /paths B→D after 240s convergence:
+    #1  B→C→D  score=0.6944  (agent-b→agent-c q_ema=0.9999999998, agent-c→agent-d q_ema=0.9997877)
+    #2  B→E→D  score=0.6471  (agent-b→agent-e q_ema=0.8269900,    agent-e→agent-d q_ema=0.8415237)
+
+  TOP PATH: agent-b→agent-c→agent-d
+  ASSERT Phase 1: PASS — top path is B→C→D (E degraded by tc/netem)
+
+  tc/netem removed from agent-e after Phase 1.
+
+Phase 2 — agent-c degraded (tc/netem delay 100ms±20ms loss 5%)
+---------------------------------------------------------------
+  tc qdisc: qdisc netem 8001: root refcnt 3 limit 1000 delay 100ms 20ms loss 5%
+
+  /paths B→D after 240s convergence:
+    #1  B→E→D  score=0.6883  (agent-b→agent-e q_ema=0.9596389, agent-e→agent-d q_ema=0.9990154)
+    #2  B→C→D  score=0.6525  (agent-b→agent-c q_ema=0.8578850, agent-c→agent-d q_ema=0.8411126)
+
+  TOP PATH: agent-b→agent-e→agent-d
+  ASSERT Phase 2: PASS — top path re-selected to B→E→D (C degraded by tc/netem)
+
+  tc/netem removed from agent-c after Phase 2.
+
+Final Summary (Ansible)
+-----------------------
+  Phase 1 (E degraded — tc/netem 100ms+20ms / 5% loss): top path = agent-b→agent-c→agent-d
+  Phase 2 (C degraded — tc/netem 100ms+20ms / 5% loss): top path = agent-b→agent-e→agent-d
+  All tc qdiscs removed after each phase.
+
+PLAY RECAP (validate-weighted-paths-aws.yml)
+--------------------------------------------
+  agent-c   ok=10  changed=2  failed=0
+  agent-e   ok=10  changed=2  failed=0
+  localhost  ok=1  changed=0  failed=0
+  server-a  ok=24  changed=0  failed=0
+
+Score separation
+----------------
+  Phase 1: B→C→D score=0.6944 vs B→E→D score=0.6471  (Δ=0.0473, ~7%)
+  Phase 2: B→E→D score=0.6883 vs B→C→D score=0.6525  (Δ=0.0358, ~5%)
+  Top path switched between phases: YES
+
+Infrastructure cleanup
+----------------------
+  terraform destroy: 50 resources destroyed (Destroy complete! Resources: 50 destroyed.)
+  Leftover EC2 instances: NONE
+  Leftover physarum VPCs: vpc-00080c1408e7aae32 (physarum-lab-vpc) — pre-existing orphan
+    from a prior gate session with lost Terraform state; NOT created by this execution
+    (this run used vpc-0d93bb51326c99907, now destroyed). Separate cleanup item.
+
+RESULT: Gate H PASS — all exit criteria met.
