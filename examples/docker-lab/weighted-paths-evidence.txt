@@ -1,0 +1,72 @@
+[21:57:45] ========================================================
+[21:57:45] Phase 1: E degraded (50% failure rate), C healthy (0%)
+[21:57:45] Expected: B→C→D ranks above B→E→D
+[21:57:45] ========================================================
+[21:57:45] Tearing down Docker lab...
+ Container docker-lab-agent-c-1 Starting 
+ Container docker-lab-agent-e-1 Started 
+ Container docker-lab-agent-d-1 Started 
+ Container docker-lab-agent-b-1 Started 
+ Container docker-lab-agent-c-1 Started 
+[22:01:19] Waiting 100s for observation windows to fill...
+[22:02:59] --- Edge state after Phase 1 convergence ---
+  agent-b→agent-e  d_ij=0.8329  q_ema=0.9974  success_rate=1.000
+  agent-b→agent-c  d_ij=0.8328  q_ema=0.9967  success_rate=1.000
+  agent-b→agent-d  d_ij=0.8330  q_ema=0.9978  success_rate=1.000
+  agent-c→agent-d  d_ij=0.8330  q_ema=0.9976  success_rate=1.000
+  agent-c→agent-b  d_ij=0.8330  q_ema=0.9978  success_rate=1.000
+  agent-c→agent-e  d_ij=0.8330  q_ema=0.9977  success_rate=1.000
+  agent-d→agent-c  d_ij=0.8328  q_ema=0.9964  success_rate=1.000
+  agent-d→agent-b  d_ij=0.8327  q_ema=0.9959  success_rate=1.000
+  agent-d→agent-e  d_ij=0.8329  q_ema=0.9974  success_rate=1.000
+  agent-e→agent-c  d_ij=0.7713  q_ema=0.7158  success_rate=0.579
+  agent-e→agent-d  d_ij=0.7728  q_ema=0.7146  success_rate=0.579
+  agent-e→agent-b  d_ij=0.7562  q_ema=0.6803  success_rate=0.579
+[22:02:59] --- All paths agent-b → agent-d (Phase 1) ---
+  #1  agent-b→agent-d  score=0.833025
+  #2  agent-b→agent-c→agent-d  score=0.693802
+  #3  agent-b→agent-e→agent-d  score=0.642149
+  #4  agent-b→agent-e→agent-c→agent-d  score=0.535503
+  #5  agent-b→agent-c→agent-e→agent-d  score=0.534857
+[22:03:00] Top-ranked path (Phase 1): agent-b→agent-d
+[22:03:00] B→C→D rank: 2   B→E→D rank: 3
+[22:03:00] PASS  Phase 1: B→C→D (rank 2) outranks B→E→D (rank 3)
+[22:03:00] Tearing down Docker lab...
+[22:03:03] 
+[22:03:03] ========================================================
+[22:03:03] Phase 2: C degraded (50% failure rate), E healthy (0%)
+[22:03:03] Expected: B→E→D re-ranks above B→C→D
+[22:03:03] ========================================================
+ Container docker-lab-agent-e-1 Starting 
+ Container docker-lab-agent-b-1 Started 
+ Container docker-lab-agent-e-1 Started 
+ Container docker-lab-agent-d-1 Started 
+ Container docker-lab-agent-c-1 Started 
+[22:03:10] Waiting 100s for observation windows to fill...
+[22:04:50] --- Edge state after Phase 2 convergence ---
+  agent-b→agent-e  d_ij=0.8326  q_ema=0.9956  success_rate=1.000
+  agent-b→agent-d  d_ij=0.8326  q_ema=0.9950  success_rate=1.000
+  agent-b→agent-c  d_ij=0.8328  q_ema=0.9965  success_rate=1.000
+  agent-c→agent-b  d_ij=0.6574  q_ema=0.5255  success_rate=0.350
+  agent-c→agent-d  d_ij=0.7320  q_ema=0.6155  success_rate=0.450
+  agent-c→agent-e  d_ij=0.7541  q_ema=0.6537  success_rate=0.500
+  agent-d→agent-c  d_ij=0.8328  q_ema=0.9967  success_rate=1.000
+  agent-d→agent-e  d_ij=0.8329  q_ema=0.9973  success_rate=1.000
+  agent-d→agent-b  d_ij=0.8328  q_ema=0.9969  success_rate=1.000
+  agent-e→agent-c  d_ij=0.8328  q_ema=0.9965  success_rate=1.000
+  agent-e→agent-b  d_ij=0.8329  q_ema=0.9970  success_rate=1.000
+  agent-e→agent-d  d_ij=0.8327  q_ema=0.9961  success_rate=1.000
+[22:04:50] --- All paths agent-b → agent-d (Phase 2) ---
+  #1  agent-b→agent-d  score=0.832563
+  #2  agent-b→agent-e→agent-d  score=0.693360
+  #3  agent-b→agent-c→agent-d  score=0.609584
+  #4  agent-b→agent-c→agent-e→agent-d  score=0.522915
+  #5  agent-b→agent-e→agent-c→agent-d  score=0.507572
+[22:04:50] Top-ranked path (Phase 2): agent-b→agent-d
+[22:04:50] B→C→D rank: 3   B→E→D rank: 2
+[22:04:50] PASS  Phase 2: B→E→D (rank 2) re-ranked above B→C→D (rank 3)
+[22:04:50] 
+[22:04:50] ========================================================
+[22:04:50] Results: 2 passed, 0 failed
+[22:04:50] ========================================================
+[22:04:50] Tearing down Docker lab...

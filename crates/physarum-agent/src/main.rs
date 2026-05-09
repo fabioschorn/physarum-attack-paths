@@ -2,6 +2,7 @@ use axum::{routing::get, Json, Router};
 use chrono::Utc;
 use clap::Parser;
 use physarum_protocol::{PeerInfo, ProbeReport, RegisterRequest};
+use rand::Rng;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,6 +26,11 @@ struct Cli {
 
     #[arg(long, default_value = "10", env = "PHYSARUM_PROBE_INTERVAL_SECONDS")]
     probe_interval_seconds: u64,
+
+    /// Fraction of outgoing probes to report as failed, regardless of actual result.
+    /// Range [0.0, 1.0]. 0.0 disables injection. For lab quality-discrimination tests only.
+    #[arg(long, default_value = "0.0", env = "PHYSARUM_SYNTHETIC_FAILURE_RATE")]
+    synthetic_failure_rate: f64,
 }
 
 #[derive(serde::Serialize)]
@@ -227,7 +233,15 @@ async fn probe_loop(cli: Arc<Cli>, client: Arc<reqwest::Client>) {
                 tracing::debug!(count = peers.len(), "fetched peers");
                 for peer in &peers {
                     let url = build_peer_probe_url(peer);
-                    let (success, rtt_ms) = probe_peer(&client, &url).await;
+                    let (raw_success, raw_rtt_ms) = probe_peer(&client, &url).await;
+                    let (success, rtt_ms) =
+                        if cli.synthetic_failure_rate > 0.0
+                            && rand::thread_rng().gen_bool(cli.synthetic_failure_rate)
+                        {
+                            (false, None)
+                        } else {
+                            (raw_success, raw_rtt_ms)
+                        };
                     let obs = observations
                         .entry(peer.agent_id.clone())
                         .or_insert_with(PeerObservation::new);
@@ -298,6 +312,7 @@ mod tests {
             listen: "127.0.0.1:9001".parse().unwrap(),
             advertise_address: "127.0.0.1".to_string(),
             probe_interval_seconds: 10,
+            synthetic_failure_rate: 0.0,
         }
     }
 
