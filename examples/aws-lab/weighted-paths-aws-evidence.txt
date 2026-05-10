@@ -15,11 +15,11 @@ Topology
 
 Instance IPs
 ------------
-  server-a  public=184.72.117.139   private=10.50.10.10
-  agent-b   public=52.87.191.224    private=10.50.20.10
-  agent-c   public=34.238.155.77    private=10.50.30.10
-  agent-d   public=13.220.206.215   private=10.50.40.10
-  agent-e   public=44.212.65.196    private=10.50.50.10
+  server-a  public=<redacted>  private=10.50.10.10
+  agent-b   public=<redacted>  private=10.50.20.10
+  agent-c   public=<redacted>  private=10.50.30.10
+  agent-d   public=<redacted>  private=10.50.40.10
+  agent-e   public=<redacted>  private=10.50.50.10
 
 validate-runtime.yml PLAY RECAP
 --------------------------------
