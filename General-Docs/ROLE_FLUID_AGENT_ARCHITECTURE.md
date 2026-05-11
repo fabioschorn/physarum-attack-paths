@@ -18,21 +18,24 @@ This document captures the architectural direction of the physarum-attack-paths 
 Gates A through H established that the core reinforcement mechanism works under real network conditions before anything autonomous is attempted.
 
 ```text
-Gate A–C    Docker weighted competing paths — Physarum scoring validated in controlled containers
-Gate D–F    AWS Mode 1 runtime — agent ↔ server over real EC2 infrastructure
-Gate G      AWS Mode 2 runtime — segmented lab with designated probe targets
-            TLA+ B/C/D path-selection model — formal verification of autonomous path re-selection
-Gate H      AWS tc/netem weighted competing paths — real network degradation, convergence in ~240 s,
-            score separation Δ~5–7 % with no operator intervention
+Gate A   Design S3 artifact delivery and EC2 bootstrap
+Gate B   Implement S3 delivery + IAM role + real user_data
+Gate C   Validate AWS Mode 1 full mesh runtime — agent ↔ server over real EC2/VPC
+Gate D   AWS Phase Identity — lab_phase variable, resource naming, SG topology
+Gate E   AWS Mode 2 segmented B→C→D runtime validation
+Gate F   B/C/D TLA+ Path-Selection Model — formal verification of path re-selection under degradation
+Gate G   Docker Weighted Competing Paths Validation — Physarum scoring in controlled containers
+Gate H   AWS tc/netem Weighted Competing Paths Validation — real network degradation, convergence in ~240 s,
+         score separation Δ~5–7 %
 ```
 
 Gate H was the critical validation:
 
 ```text
 two competing paths (B→C→D vs B→E→D) with real tc/netem degradation applied at C
-system converged and re-selected the correct path autonomously
-q_ema and D_ij reinforcement/decay cycle proven under real conditions
-no central coordination required
+path re-selection emerged from the scoring state after network quality changed,
+without manual path override by the operator
+q_ema and D_ij reinforcement/decay cycle proven under real AWS conditions
 ```
 
 This proven foundation is the prerequisite for everything that follows. The scoring mechanism does not change — the input signals generalize.
@@ -98,7 +101,7 @@ The unified binary carries all core capabilities and switches roles at runtime b
 
 ## 4. Role-fluid agent model
 
-The future agent is **role-fluid**: its role is not permanently fixed but adapts to the network state it observes.
+The future agent is **role-fluid**: its role is not permanently fixed but adapts to the network state it observes. This role-fluid behavior is future architecture intent; it has not yet been implemented or validated.
 
 ### Roles an agent may assume
 
@@ -235,7 +238,7 @@ eBPF code                  → defined in EBPF_FLOW_OBSERVATION_DESIGN.md, imple
 RustScan integration       → future gate, not implemented in eBPF Stage 0/1
 Role-fluid runtime         → future gate, not implemented in eBPF Stage 0/1
 Scoring changes            → Stage 4 only, after passive evidence is validated
-Uncontrolled propagation   → never; expansion is always operator-scoped
+Uncontrolled expansion     → out of scope; future expansion work is intended for controlled environments
 ```
 
 ---
