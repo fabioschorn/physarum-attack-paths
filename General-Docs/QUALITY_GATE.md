@@ -1,8 +1,8 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** AWS tc/netem Weighted Competing Paths Validation — COMPLETE  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths)  
-**Last updated:** 2026-05-09
+**Current gate:** Gate I — FlowObservation Model and Server Endpoints — COMPLETE  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints)  
+**Last updated:** 2026-05-11
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
 
@@ -12,7 +12,7 @@
 
 | Area | Status | Evidence | Notes |
 |---|---|---|---|
-| Build / test health | GREEN | 51 tests passing | `cargo test --workspace` — 18 agent + 5 protocol + 28 server; last verified PR #57 |
+| Build / test health | GREEN | 64 tests passing | `cargo test --workspace` — 18 agent + 13 protocol + 33 server; last verified PR #68 |
 | Docker A/B/C/D lab | GREEN | `check-docker-lab.sh`: 34 passed, 0 failed | PR #19 |
 | GET /paths endpoint | GREEN | Docker `/paths` validation posted | PR #20 |
 | Documentation workflow | GREEN | PR/issue templates + ownership guidelines merged | PR #23 |
@@ -30,10 +30,12 @@
 | AWS Mode 2 Segmented B→C→D Runtime Validation | GREEN | failed=0 on all nodes; `/paths B→D` routes exclusively via C; 37 resources destroyed | PR #51 |
 | Weighted Competing Paths Validation | GREEN | 2 phases PASS; B→C→D is top selected path (score 0.693) when E degraded 50% (Phase 1); B→E→D becomes top selected path (score 0.694) when C degraded 50% (Phase 2); top path changes; no direct B→D; evidence in weighted-paths-evidence.txt | PR #57 |
 | AWS tc/netem Weighted Competing Paths | GREEN | 2 phases PASS in real EC2/VPC; Phase 1 top=B→C→D (score 0.694, E degraded); Phase 2 top=B→E→D (score 0.688, C degraded); top path switches; 50 resources destroyed clean; evidence in weighted-paths-aws-evidence.txt | Issue #58 |
+| FlowObservation model + POST/GET /flow-observations | GREEN | 64 tests passing; ring buffer eviction validated; no eBPF runtime | PR #68 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
 
+**GREEN** for Gate I — FlowObservation Model and Server Endpoints — `FlowObservation` struct + `FlowDirection`/`FlowEvent`/`FlowProtocol` enums (snake_case serde) added to `physarum-protocol`; `POST /flow-observations` (201 Created, in-memory VecDeque ring buffer, capacity 1000, oldest evicted on overflow); `GET /flow-observations` (limit + agent_id filter); 14 new tests (8 protocol + 6 endpoint); 64 total tests pass; no eBPF runtime, Aya, kernel tracepoint, RustScan, or scoring integration (PR #68). Scope: protocol model, server endpoints, in-memory bounded buffer, tests. Next gate: Gate J — physarum-ebpf-observer runtime prototype and AWS EC2 validation.  
 **Overall GREEN** for the Adaptive Path Prototype gate — all Phase 1 milestones complete.  
 **GREEN** for AWS Mode 1 Runtime — full-mesh validated in real EC2/VPC, Ansible recap failed=0 on all nodes.  
 **GREEN** for AWS Phase Identity — `lab_phase` variable, resource naming, tagging, and SG topology implemented (PR #45).  
@@ -87,12 +89,13 @@ Runtime endpoints     : NOT yet validated in AWS
 | B/C/D TLA+ Path-Selection Model | COMPLETED — PR #56 |
 | Weighted Competing Paths Validation | COMPLETED — PR #57 |
 | AWS tc/netem Weighted Competing Paths Validation | COMPLETED — Issue #58 |
+| Gate I — FlowObservation Model and Server Endpoints | COMPLETED — PR #68 |
 
 ---
 
 ## Active gate
 
-No active gate — all gate-H milestones complete. Next gate to be defined.
+No active gate — Gate I complete (PR #68). Next gate: Gate J — `physarum-ebpf-observer` runtime prototype and AWS EC2 validation.
 
 ---
 
@@ -118,6 +121,7 @@ Exit criteria met: agent-e added to AWS lab; SG topology enforces B→D block (a
 | F — B/C/D TLA+ Path-Selection Model | Issue #55 / PR #56 | COMPLETED |
 | G — Weighted Competing Paths Validation | Issue #52 / PR #57 | COMPLETED |
 | H — AWS tc/netem Weighted Competing Paths Validation | Issue #58 | COMPLETED |
+| I — FlowObservation Model and Server Endpoints | Issue #66 / PR #68 | COMPLETED |
 
 ---
 

@@ -35,7 +35,7 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | `physarum-coordinator` crate (full) | planned |
 | `physarum-cli` crate | planned |
 | `/path-density` endpoint | planned |
-| `POST /flow-observations` · `GET /flow-observations` | next — Gate I |
+| `POST /flow-observations` · `GET /flow-observations` | implemented — Gate I |
 | AWS Terraform | ✔ implemented — Phase 1, Phase 2, and weighted-paths lab validated |
 | WASM visual simulator | planned |
 | mTLS / Ed25519 / attestation | planned |
@@ -425,7 +425,7 @@ Summary:
 | 0 | Protocol + coordinator scaffold + CI | ✔ done |
 | 1 | Agent probing + A/B/C lab + Docker lab + TLA+ model | ✔ done |
 | 2 | Agent D + `/paths` endpoint + AWS Mode 1, Mode 2, tc/netem weighted paths | ✔ done |
-| 3 — Gate I | FlowObservation model + `POST /flow-observations` + `GET /flow-observations` + unit tests | next |
+| 3 — Gate I | FlowObservation model + `POST /flow-observations` + `GET /flow-observations` + unit tests | implemented |
 | 4 — Gate J | `physarum-ebpf-observer` crate + TCP state tracepoint + AWS EC2 validation | planned |
 | 5 — Gate K | Scoring integration — combine active probes + passive eBPF flows into `D_ij` / `q_ema` | planned |
 | Future | RustScan-backed service discovery + role-fluid unified agent runtime | planned |
