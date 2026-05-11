@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired adaptive attack-path graph prototype.** Rust agents perform peer probes, summarize short-term local observations, and send stimulus-oriented reports to a coordinator. The coordinator updates Q_ij, q_ema, and D_ij to maintain a living directed graph. AWS cloud labs (Mode 1, Mode 2, and tc/netem weighted competing paths) are implemented and validated. eBPF flow observation is designed and implementation has begun. Signatures, persistence, TOON, and the full role-fluid unified runtime are planned future phases.
+> **Bio-inspired adaptive attack-path graph prototype.** Rust agents perform peer probes, summarize short-term local observations, and send stimulus-oriented reports to a coordinator. The coordinator updates Q_ij, q_ema, and D_ij to maintain a living directed graph. AWS cloud labs (Mode 1, Mode 2, and tc/netem weighted competing paths) are implemented and validated. eBPF flow observation has completed Stage 0 design; the first implementation gate is the FlowObservation data model and server endpoints. Signatures, persistence, TOON, and the full role-fluid unified runtime are planned future phases.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
@@ -35,7 +35,7 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | `physarum-coordinator` crate (full) | planned |
 | `physarum-cli` crate | planned |
 | `/path-density` endpoint | planned |
-| `POST /flow-observations` · `GET /flow-observations` | in progress — Gate I |
+| `POST /flow-observations` · `GET /flow-observations` | next — Gate I |
 | AWS Terraform | ✔ implemented — Phase 1, Phase 2, and weighted-paths lab validated |
 | WASM visual simulator | planned |
 | mTLS / Ed25519 / attestation | planned |
