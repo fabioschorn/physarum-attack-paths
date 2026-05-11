@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired adaptive attack-path graph prototype.** Rust agents perform peer probes, summarize short-term local observations, and send stimulus-oriented reports to a coordinator. The coordinator updates Q_ij, q_ema, and D_ij to maintain a living directed graph. eBPF, signatures, persistence, TOON, and cloud labs are planned future phases.
+> **Bio-inspired adaptive attack-path graph prototype.** Rust agents perform peer probes, summarize short-term local observations, and send stimulus-oriented reports to a coordinator. The coordinator updates Q_ij, q_ema, and D_ij to maintain a living directed graph. AWS cloud labs (Mode 1, Mode 2, and tc/netem weighted competing paths) are implemented and validated. eBPF flow observation has completed Stage 0 design; the first implementation gate is the FlowObservation data model and server endpoints. Signatures, persistence, TOON, and the full role-fluid unified runtime are planned future phases.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
@@ -28,20 +28,21 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | A/B/C/D Docker lab (Agent D) | ✔ implemented |
 | TLA+ edge dynamics model (`formal/tla`) | ✔ implemented |
 | `GET /paths` endpoint (adaptive path scoring) | ✔ implemented |
-| `examples/aws-lab` | ✔ implemented — AWS Mode 1 and Mode 2 runtime validated |
+| `examples/aws-lab` | ✔ implemented — Mode 1, Mode 2, and AWS tc/netem weighted paths validated |
 | `examples/wasm-lab` | docs / planned |
 | `physarum-graph` crate | planned |
-| `physarum-ebpf` crate | planned |
+| `physarum-ebpf-observer` crate | designed — Stage 0 complete, implementation planned (Gate J) |
 | `physarum-coordinator` crate (full) | planned |
 | `physarum-cli` crate | planned |
 | `/path-density` endpoint | planned |
-| AWS Terraform | ✔ implemented — Phase 1 and Phase 2 validated |
+| `POST /flow-observations` · `GET /flow-observations` | next — Gate I |
+| AWS Terraform | ✔ implemented — Phase 1, Phase 2, and weighted-paths lab validated |
 | WASM visual simulator | planned |
 | mTLS / Ed25519 / attestation | planned |
 | Persistence / ClickHouse | planned |
 | TOON export | planned |
 
-See [General-Docs/PROTOTYPE_ROADMAP.md](./General-Docs/PROTOTYPE_ROADMAP.md) for the full phased plan.
+See [General-Docs/PROTOTYPE_ROADMAP.md](./General-Docs/PROTOTYPE_ROADMAP.md) for the full phased plan and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria.
 
 ---
 
@@ -236,6 +237,9 @@ physarum-attack-paths/
 │
 ├── General-Docs/
 │   ├── PROTOTYPE_ROADMAP.md             # full phased implementation plan
+│   ├── QUALITY_GATE.md                  # gate definitions and acceptance criteria
+│   ├── EBPF_FLOW_OBSERVATION_DESIGN.md  # eBPF Stage 0 design — sidecar, Aya, TCP state tracepoint
+│   ├── ROLE_FLUID_AGENT_ARCHITECTURE.md # role-fluid unified agent roadmap
 │   ├── INSIGHTS_AND_BRAINSTORM.md       # research notes and future directions
 │   └── README.md
 │
@@ -263,7 +267,7 @@ physarum-attack-paths/
 |---|---|---|
 | `examples/local-lab` | A/B/C agents + server on localhost, manual setup | ✔ implemented |
 | `examples/docker-lab` | A/B/C agents + server in Docker Compose | ✔ implemented |
-| `examples/aws-lab` | EC2/VPC AWS lab — Terraform, S3 artifact delivery, SSH/Ansible validation | ✔ Mode 1 and Mode 2 validated |
+| `examples/aws-lab` | EC2/VPC AWS lab — Terraform, S3 artifact delivery, SSH/Ansible validation | ✔ Mode 1, Mode 2, and tc/netem weighted paths validated |
 | `examples/wasm-lab` | Browser-based visual simulator | docs / planned |
 | `formal/tla` | TLA+ model of the adaptive edge dynamics | ✔ implemented |
 
@@ -420,17 +424,33 @@ Summary:
 |---|---|---|
 | 0 | Protocol + coordinator scaffold + CI | ✔ done |
 | 1 | Agent probing + A/B/C lab + Docker lab + TLA+ model | ✔ done |
-| 2 | Agent D + `/paths` endpoint + AWS Mode 1 and Mode 2 runtime validation | ✔ done |
-| 3 | eBPF flow capture | planned |
-| 4 | Production hardening (mTLS, attestation, ClickHouse) | planned |
-| 5 | TOON export + upstream integration | planned |
-| 6 | Multi-coordinator federation | planned |
+| 2 | Agent D + `/paths` endpoint + AWS Mode 1, Mode 2, tc/netem weighted paths | ✔ done |
+| 3 — Gate I | FlowObservation model + `POST /flow-observations` + `GET /flow-observations` + unit tests | next |
+| 4 — Gate J | `physarum-ebpf-observer` crate + TCP state tracepoint + AWS EC2 validation | planned |
+| 5 — Gate K | Scoring integration — combine active probes + passive eBPF flows into `D_ij` / `q_ema` | planned |
+| Future | RustScan-backed service discovery + role-fluid unified agent runtime | planned |
+| Future | Production hardening (mTLS, attestation, ClickHouse, TOON) | planned |
 
 ---
 
 ## Future architecture
 
-> The sections below describe the **planned full architecture**. None of these components are implemented yet.
+> The sections below describe the **planned full architecture**. None of these components are implemented yet unless explicitly noted.
+
+### Role-fluid unified agent *(planned — design captured)*
+
+The current eBPF design uses a separate `physarum-ebpf-observer` sidecar alongside `physarum-agent` as a transitional validation design. This keeps the stable agent binary untouched while eBPF is proven on AWS EC2.
+
+The long-term roadmap is a **unified, role-fluid `physarum-agent` runtime** in which a single agent binary may act as coordinator/server, client/reporter, flow observer, service-discovery worker, path scorer, or local recovery unit depending on runtime conditions. If an agent loses its upstream coordinator connection, it may assume a local coordinator role and continue expansion from its current position.
+
+A future gate will add **RustScan-backed service discovery** as a library capability inside the agent, feeding port discovery results directly into the physarum graph as candidate edges and nodes.
+
+> *Agents are not only observers of paths; agents are the computational substance that occupies and reinforces paths.*
+
+The full architectural roadmap is documented in [General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md](./General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md).
+The eBPF Stage 0 design is documented in [General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md](./General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md).
+
+---
 
 ### Full agent lifecycle *(planned)*
 
