@@ -425,7 +425,7 @@ Summary:
 | 0 | Protocol + coordinator scaffold + CI | ✔ done |
 | 1 | Agent probing + A/B/C lab + Docker lab + TLA+ model | ✔ done |
 | 2 | Agent D + `/paths` endpoint + AWS Mode 1, Mode 2, tc/netem weighted paths | ✔ done |
-| 3 — Gate I | FlowObservation model + `POST /flow-observations` + `GET /flow-observations` + unit tests | in progress |
+| 3 — Gate I | FlowObservation model + `POST /flow-observations` + `GET /flow-observations` + unit tests | next |
 | 4 — Gate J | `physarum-ebpf-observer` crate + TCP state tracepoint + AWS EC2 validation | planned |
 | 5 — Gate K | Scoring integration — combine active probes + passive eBPF flows into `D_ij` / `q_ema` | planned |
 | Future | RustScan-backed service discovery + role-fluid unified agent runtime | planned |
