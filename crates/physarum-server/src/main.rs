@@ -28,6 +28,11 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/report", post(routes::reports::ingest_report))
         .route("/graph", get(routes::graph::get_graph))
         .route("/paths", get(routes::paths::get_paths))
+        .route(
+            "/flow-observations",
+            post(routes::flow_observations::ingest_flow_observation)
+                .get(routes::flow_observations::list_flow_observations),
+        )
         .with_state(state)
 }
 

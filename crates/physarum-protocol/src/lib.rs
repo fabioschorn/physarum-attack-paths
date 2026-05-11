@@ -1,3 +1,8 @@
+pub mod flow_observation;
+pub use flow_observation::{
+    FlowDirection, FlowEvent, FlowObservation, FlowObservationAck, FlowProtocol,
+};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
