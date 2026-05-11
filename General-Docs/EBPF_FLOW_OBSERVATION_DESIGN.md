@@ -1,6 +1,6 @@
 # eBPF Passive Flow Observation — Design and Test Strategy
 
-**Status:** Design agreed — awaiting Stage 1 implementation PR  
+**Status:** Proposed design — pending review  
 **Issue:** #61  
 **Author:** Dev Lead  
 **Date:** 2026-05-10
@@ -94,6 +94,14 @@ u8   daddr[4]      // destination IPv4
 
 PID and process name (`comm`) are read from the current task context (`bpf_get_current_pid_tgid` / `bpf_get_current_comm`).
 
+**Tracepoint format validation (Stage 2/3 requirement):** Before relying on the field layout above, capture and document the actual format on the target AL2023 kernel:
+
+```bash
+sudo cat /sys/kernel/tracing/events/sock/inet_sock_set_state/format
+```
+
+Record the kernel version and tracepoint format as a short evidence block in the Stage 2/3 validation evidence file. Do not commit the full raw output unless fields diverge from what is listed here.
+
 ---
 
 ### 4. Exact metadata collected
@@ -151,7 +159,7 @@ Evidence files: public IPs must be redacted before commit (`<redacted>`). Privat
 The signal quality and reliability of passive eBPF flows is unvalidated. We need to observe the data in production conditions (AWS EC2) before assuming it is a reliable input to scoring. Premature integration risks instability in the scoring model.
 
 **Stage 1:** `POST /flow-observations` ingests events. `GET /flow-observations` exposes them. Scoring unchanged.  
-**Stage 2 (future, separate gate):** After passive evidence is validated and reliable, define a reinforcement formula that combines active probe quality and observed flow frequency.
+**Stage 4 / future gate:** After passive evidence is validated and reliable (Stages 2–3), define a reinforcement formula that combines active probe quality and observed flow frequency into `D_ij` / `q_ema`.
 
 ---
 
@@ -228,7 +236,7 @@ AWS lab: add observer bootstrap to `agent.sh` when `enable_ebpf_observer=true` (
 | BTF not available on target kernel | Low — AL2023 ships BTF | Verify `ls /sys/kernel/btf/vmlinux` at bootstrap; fail fast |
 | `bpf-linker` / BPF toolchain build complexity in CI | Medium | CI needs privileged Linux runner; keep eBPF crate gated behind feature or separate job |
 | macOS dev cannot run eBPF integration tests | Certain | Unit tests only on Mac; integration tests require Linux runner or EC2 SSH |
-| Observer drops events under high throughput | Low for lab scale | Use a BPF ring buffer (`BPF_MAP_TYPE_RINGBUF`) not a perf array; ring buffer is safer for high-rate events |
+| Observer drops events under high throughput | Low for lab scale | Use a BPF ring buffer (`BPF_MAP_TYPE_RINGBUF`) as the preferred prototype transport; expose dropped-event counters in observer logs so losses are visible |
 | Port → agent-id mapping requires configuration | Medium | Observer is configured with `--listen-ports` at startup; coordinator must expose port registry in future |
 | Accidental payload capture in a future eBPF program | Low but high impact | Mandatory review rule: no reads from `skb` data pointers; BPF verifier rejects most payload reads anyway |
 | Signal latency — eBPF events arrive after scoring | Medium | Stage 1 collects separately; scoring integration is Stage 2 after signal reliability is confirmed |
@@ -242,8 +250,14 @@ AWS lab: add observer bootstrap to `agent.sh` when `enable_ebpf_observer=true` (
 COLLECT    timestamp, src/dst IP, src/dst port, protocol, event, pid, comm (15 chars)
 DO NOT     read packet payload, socket buffers, process environment, credentials
 REDACT     public IPs in evidence files before commit
-PRIVILEGE  CAP_BPF + CAP_PERFMON only; no CAP_SYS_ADMIN required on modern kernels
+PRIVILEGE  Prefer least privilege with CAP_BPF + CAP_PERFMON where supported; first AWS
+           prototype may run as root/systemd while we verify AL2023 requirements. Do not
+           assume CAP_SYS_ADMIN is never required until validated on the target kernel.
+           Record exact privileges used on EC2 in Stage 2/3 evidence.
 BINARY     observer is a separate binary; physarum-agent unchanged
+TELEMETRY  Flow observations are telemetry, not authorization truth. They must not be used
+           to infer permission or access control guarantees without corroborating active
+           probes or policy evidence.
 ```
 
 ---
