@@ -79,6 +79,7 @@ resource "aws_instance" "agent_b" {
     artifact_bucket          = var.artifact_bucket
     artifact_prefix          = var.artifact_prefix
     artifact_region          = local.resolved_artifact_region
+    enable_observer          = var.enable_observer
   })
 
   tags = merge(local.phase_tags, {
@@ -108,6 +109,7 @@ resource "aws_instance" "agent_c" {
     artifact_bucket          = var.artifact_bucket
     artifact_prefix          = var.artifact_prefix
     artifact_region          = local.resolved_artifact_region
+    enable_observer          = false
   })
 
   tags = merge(local.phase_tags, {
@@ -137,6 +139,7 @@ resource "aws_instance" "agent_d" {
     artifact_bucket          = var.artifact_bucket
     artifact_prefix          = var.artifact_prefix
     artifact_region          = local.resolved_artifact_region
+    enable_observer          = false
   })
 
   tags = merge(local.phase_tags, {
@@ -168,6 +171,7 @@ resource "aws_instance" "agent_e" {
     artifact_bucket          = var.artifact_bucket
     artifact_prefix          = var.artifact_prefix
     artifact_region          = local.resolved_artifact_region
+    enable_observer          = false
   })
 
   tags = merge(local.phase_tags, {
