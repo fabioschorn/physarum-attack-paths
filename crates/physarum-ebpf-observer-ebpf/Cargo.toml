@@ -9,7 +9,7 @@ publish = false
 # Build via: cargo xtask build-ebpf [--release]
 
 [[bin]]
-name = "physarum-ebpf-observer"
+name = "physarum-ebpf-observer-ebpf"
 path = "src/main.rs"
 
 [dependencies]
