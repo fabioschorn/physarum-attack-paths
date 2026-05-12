@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired adaptive attack-path graph prototype.** Rust agents perform peer probes, summarize short-term local observations, and send stimulus-oriented reports to a coordinator. The coordinator updates Q_ij, q_ema, and D_ij to maintain a living directed graph. AWS cloud labs (Mode 1, Mode 2, and tc/netem weighted competing paths) are implemented and validated. eBPF flow observation has completed Stage 0 design; the first implementation gate is the FlowObservation data model and server endpoints. Signatures, persistence, TOON, and the full role-fluid unified runtime are planned future phases.
+> **Bio-inspired adaptive attack-path graph prototype.** Rust agents perform peer probes, summarize short-term local observations, and send stimulus-oriented reports to a coordinator. The coordinator updates Q_ij, q_ema, and D_ij to maintain a living directed graph. AWS cloud labs (Mode 1, Mode 2, and tc/netem weighted competing paths) are implemented and validated. eBPF passive flow observation is implemented and AWS EC2 validated (Gate J) — `physarum-ebpf-observer` attaches to `tracepoint/sock/inet_sock_set_state` on kernel 6.18 and posts metadata-only FlowObservation events to the coordinator. Signatures, persistence, TOON, and the full role-fluid unified runtime are planned future phases.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
@@ -31,7 +31,7 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | `examples/aws-lab` | ✔ implemented — Mode 1, Mode 2, and AWS tc/netem weighted paths validated |
 | `examples/wasm-lab` | docs / planned |
 | `physarum-graph` crate | planned |
-| `physarum-ebpf-observer` crate | designed — Stage 0 complete, implementation planned (Gate J) |
+| `physarum-ebpf-observer` crate | implemented + AWS EC2 validated — Gate J complete (Issue #69) |
 | `physarum-coordinator` crate (full) | planned |
 | `physarum-cli` crate | planned |
 | `/path-density` endpoint | planned |
@@ -426,7 +426,7 @@ Summary:
 | 1 | Agent probing + A/B/C lab + Docker lab + TLA+ model | ✔ done |
 | 2 | Agent D + `/paths` endpoint + AWS Mode 1, Mode 2, tc/netem weighted paths | ✔ done |
 | 3 — Gate I | FlowObservation model + `POST /flow-observations` + `GET /flow-observations` + unit tests | implemented |
-| 4 — Gate J | `physarum-ebpf-observer` crate + TCP state tracepoint + AWS EC2 validation | planned |
+| 4 — Gate J | `physarum-ebpf-observer` crate + TCP state tracepoint + AWS EC2 validation | implemented — Issue #69 |
 | 5 — Gate K | Scoring integration — combine active probes + passive eBPF flows into `D_ij` / `q_ema` | planned |
 | Future | RustScan-backed service discovery + role-fluid unified agent runtime | planned |
 | Future | Production hardening (mTLS, attestation, ClickHouse, TOON) | planned |

@@ -169,16 +169,8 @@
         success_msg: "no payload fields detected — metadata-only confirmed"
 
     - name: Parse and pretty-print first FlowObservation
-      ansible.builtin.command: >
-        bash -c "echo '{{ flow_obs.stdout }}' | python3 -c \"
-import json, sys
-data = json.load(sys.stdin)
-events = data if isinstance(data, list) else data.get('observations', data.get('events', []))
-if events:
-    print(json.dumps(events[0], indent=2))
-else:
-    print('no events in response')
-\""
+      ansible.builtin.shell: |
+        echo '{{ flow_obs.stdout }}' | python3 -c "import json,sys; d=json.load(sys.stdin); evts=d if isinstance(d,list) else d.get('observations',d.get('events',[])); print(json.dumps(evts[0],indent=2)) if evts else print('no events')"
       register: first_event
       failed_when: false
       changed_when: false
