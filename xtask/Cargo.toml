@@ -1,0 +1,8 @@
+[package]
+name    = "xtask"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone build-tool crate — not part of the main workspace.
+# Invoke via: cargo xtask build-ebpf [--release]
