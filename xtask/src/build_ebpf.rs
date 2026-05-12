@@ -1,4 +1,4 @@
-use std::process::{Command, ExitCode};
+use std::process::Command;
 
 const EBF_MANIFEST: &str = "crates/physarum-ebpf-observer-ebpf/Cargo.toml";
 const BPF_TARGET: &str = "bpfel-unknown-none";
@@ -30,7 +30,7 @@ pub fn run(args: &[String]) {
 
     let profile = if release { "release" } else { "debug" };
     eprintln!(
-        "building eBPF bytecode ({profile}): target/{BPF_TARGET}/{profile}/physarum-ebpf-observer-ebpf"
+        "building eBPF bytecode ({profile}): crates/physarum-ebpf-observer-ebpf/target/{BPF_TARGET}/{profile}/physarum-ebpf-observer-ebpf"
     );
 
     let status = cmd.status().unwrap_or_else(|e| {
@@ -44,10 +44,10 @@ pub fn run(args: &[String]) {
     }
 
     eprintln!(
-        "eBPF bytecode ready at: target/{BPF_TARGET}/{profile}/physarum-ebpf-observer-ebpf\n\
+        "eBPF bytecode ready at: crates/physarum-ebpf-observer-ebpf/target/{BPF_TARGET}/{profile}/physarum-ebpf-observer-ebpf\n\
          run the observer with:\n  \
          sudo physarum-ebpf-observer \\\n    \
            --agent-id <id> \\\n    \
-           --bpf-bytecode target/{BPF_TARGET}/{profile}/physarum-ebpf-observer-ebpf"
+           --bpf-bytecode crates/physarum-ebpf-observer-ebpf/target/{BPF_TARGET}/{profile}/physarum-ebpf-observer-ebpf"
     );
 }

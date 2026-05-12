@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name    = "physarum-ebpf-observer-ebpf"
 version = "0.1.0"
@@ -13,7 +15,7 @@ name = "physarum-ebpf-observer-ebpf"
 path = "src/main.rs"
 
 [dependencies]
-aya-ebpf    = { version = "0.1", features = ["macros"] }
+aya-ebpf    = "0.1"
 aya-log-ebpf = "0.1"
 
 [profile.dev]
