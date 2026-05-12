@@ -4,12 +4,14 @@ members = [
     "crates/physarum-protocol",
     "crates/physarum-server",
     "crates/physarum-agent",
+    "crates/physarum-ebpf-observer",   # Gate J — userspace TCP flow observer
     # Future members (uncomment as crates are scaffolded):
     # "crates/physarum-graph",
-    # "crates/physarum-ebpf",
     # "crates/physarum-coordinator",
     # "crates/physarum-cli",
 ]
+# physarum-ebpf-observer-ebpf targets bpfel-unknown-none; build via `cargo xtask build-ebpf`.
+# xtask is a standalone build-tool binary; both are intentionally outside this workspace.
 
 [workspace.package]
 version       = "0.0.1"

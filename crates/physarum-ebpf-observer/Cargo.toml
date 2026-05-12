@@ -1,0 +1,28 @@
+[package]
+name              = "physarum-ebpf-observer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "physarum-ebpf-observer"
+path = "src/main.rs"
+
+[dependencies]
+physarum-protocol  = { path = "../physarum-protocol" }
+tokio              = { workspace = true }
+clap               = { workspace = true }
+reqwest            = { workspace = true }
+serde              = { workspace = true }
+serde_json         = { workspace = true }
+chrono             = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow             = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+aya     = { version = "0.13", features = ["async_tokio"] }
+aya-log = "0.2"

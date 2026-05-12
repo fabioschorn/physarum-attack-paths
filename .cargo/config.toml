@@ -1,0 +1,4 @@
+[alias]
+# Build the eBPF program crate (requires nightly + bpf-linker, Linux recommended).
+# Usage: cargo xtask build-ebpf [--release]
+xtask = "run --manifest-path xtask/Cargo.toml --"
