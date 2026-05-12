@@ -101,5 +101,7 @@ fn parse_event(bytes: &[u8]) -> Option<mapper::TcpEvent> {
     }
     // Safety: TcpEvent is #[repr(C)] with only plain integer fields;
     // the eBPF program wrote exactly this layout into the ring buffer.
-    Some(unsafe { *(bytes.as_ptr() as *const mapper::TcpEvent) })
+    // read_unaligned avoids any potential unaligned-read UB even if the ring
+    // buffer pointer does not satisfy TcpEvent's alignment requirement.
+    Some(unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const mapper::TcpEvent) })
 }

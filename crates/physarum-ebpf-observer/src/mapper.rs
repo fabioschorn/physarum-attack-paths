@@ -159,6 +159,13 @@ mod tests {
     }
 
     #[test]
+    fn tcp_event_layout_size_matches_expected_abi() {
+        // TcpEvent: 4+4+2+2+4+16+1+3 = 36 bytes.
+        // If this fails, the eBPF ↔ userspace ABI has drifted — update both sides together.
+        assert_eq!(core::mem::size_of::<TcpEvent>(), 36);
+    }
+
+    #[test]
     fn agent_id_comes_from_parameter_not_event() {
         let event = make_event([10, 0, 0, 1], [10, 0, 0, 2], 100, 200, 1, "x", 0);
         let obs = map(&event, "agent-x-007");

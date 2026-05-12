@@ -27,8 +27,10 @@ const EVT_CLOSE: u8 = 2; // close
 
 // ── tracepoint field offsets for sock/inet_sock_set_state ────────────────────
 //
-// Validated against: /sys/kernel/tracing/events/sock/inet_sock_set_state/format
-// on Amazon Linux 2023 kernel 6.1.x.  The first 8 bytes are the common header
+// Expected layout — must be validated against:
+//   /sys/kernel/tracing/events/sock/inet_sock_set_state/format
+// on the target kernel before Gate J is marked GREEN.
+// The first 8 bytes are the common header
 // (common_type u16 + common_flags u8 + common_preempt_count u8 + common_pid i32).
 //
 //   offset  8 : skaddr    (8 bytes — socket pointer, ignored)
