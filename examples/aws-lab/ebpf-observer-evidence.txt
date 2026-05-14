@@ -1,0 +1,126 @@
+eBPF Observer Runtime Validation Evidence
+Issue #69 — Gate J
+Date: 2026-05-12
+Playbook: examples/aws-lab/ansible/validate-ebpf-observer.yml
+Terraform: lab_phase=phase1, enable_observer=true (42 resources, us-east-1)
+AMI: ami-02ac6525f2b2b8166 (al2023-ami-2023.11.20260509.0-kernel-6.18-x86_64)
+
+Topology
+--------
+  server-a   physarum-server (coordinator)
+  agent-b    physarum-agent + physarum-ebpf-observer (observer host)
+  agent-c    physarum-agent
+  agent-d    physarum-agent
+
+Instance IPs
+------------
+  server-a  public=<redacted>  private=10.50.10.10
+  agent-b   public=<redacted>  private=10.50.20.10
+  agent-c   public=<redacted>  private=10.50.30.10
+  agent-d   public=<redacted>  private=10.50.40.10
+
+Kernel version (agent-b)
+------------------------
+  Linux ip-10-50-20-10.ec2.internal 6.18.25-55.108.amzn2023.x86_64
+  #2 SMP PREEMPT_DYNAMIC Fri May  8 18:05:56 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+
+Tracepoint format (/sys/kernel/tracing/events/sock/inet_sock_set_state/format)
+-------------------------------------------------------------------------------
+  name: inet_sock_set_state
+  ID: 2031
+  format:
+    field:unsigned short common_type;       offset:0;  size:2; signed:0;
+    field:unsigned char common_flags;       offset:2;  size:1; signed:0;
+    field:unsigned char common_preempt_count; offset:3; size:1; signed:0;
+    field:int common_pid;                   offset:4;  size:4; signed:1;
+
+    field:const void * skaddr;              offset:8;  size:8; signed:0;
+    field:int oldstate;                     offset:16; size:4; signed:1;
+    field:int newstate;                     offset:20; size:4; signed:1;
+    field:__u16 sport;                      offset:24; size:2; signed:0;
+    field:__u16 dport;                      offset:26; size:2; signed:0;
+    field:__u16 family;                     offset:28; size:2; signed:0;
+    field:__u16 protocol;                   offset:30; size:2; signed:0;
+    field:__u8 saddr[4];                    offset:32; size:4; signed:0;
+    field:__u8 daddr[4];                    offset:36; size:4; signed:0;
+
+  RESULT: offsets match eBPF program constants exactly (OFF_OLDSTATE=16,
+          OFF_NEWSTATE=20, OFF_SPORT=24, OFF_DPORT=26, OFF_FAMILY=28,
+          OFF_PROTOCOL=30, OFF_SADDR=32, OFF_DADDR=36). GREEN.
+
+Privilege mode (agent-b)
+------------------------
+  Observer run as: root (systemd service, User=root)
+  Rationale: AL2023 kernel 6.18 requires CAP_BPF + CAP_PERFMON for eBPF
+             program load; running as root satisfies all required capabilities.
+             Least-privilege CAP_BPF/CAP_PERFMON path deferred to Gate K.
+
+Observer startup journal
+------------------------
+  May 12 04:42:00 physarum-ebpf-observer[22573]:
+    INFO physarum_ebpf_observer: physarum-ebpf-observer starting
+    agent_id=agent-b coordinator=http://10.50.10.10:8080 dry_run=false filter_port=0
+
+  May 12 04:42:00 physarum-ebpf-observer[22573]:
+    WARN physarum_ebpf_observer::observer: eBPF kernel logger unavailable:
+    log event array AYA_LOGS doesn't exist
+
+  May 12 04:42:00 physarum-ebpf-observer[22573]:
+    INFO physarum_ebpf_observer::observer: observer attached to
+    tracepoint/sock/inet_sock_set_state agent_id=agent-b dry_run=false
+
+Traffic generation
+------------------
+  curl -s --max-time 5 http://10.50.10.10:8080/health
+  (outbound TCP from agent-b to server-a:8080)
+
+Sample FlowObservation (GET /flow-observations?agent_id=agent-b)
+-----------------------------------------------------------------
+  {
+    "agent_id": "agent-b",
+    "observed_at": "2026-05-12T04:44:05.876757547Z",
+    "source_ip": "10.50.20.10",
+    "source_port": 49658,
+    "destination_ip": "54.89.248.92",
+    "destination_port": 8080,
+    "protocol": "tcp",
+    "direction": "unknown",
+    "event": "close",
+    "pid": 27092,
+    "comm": "curl"
+  }
+
+Payload check
+-------------
+  Fields checked: payload, data, body, content, bytes
+  Result: NONE present — metadata-only confirmed. GREEN.
+
+Ansible PLAY RECAP
+------------------
+  agent-b   ok=21  changed=0  unreachable=0  failed=0  skipped=0
+  server-a  ok=8   changed=0  unreachable=0  failed=0  skipped=0
+
+Gate J assertions (all PASS)
+-----------------------------
+  [PASS] tracepoint format readable on target kernel
+  [PASS] physarum-ebpf-observer systemd service active
+  [PASS] observer journal confirms tracepoint/sock/inet_sock_set_state attached
+  [PASS] /flow-observations returned non-empty response
+  [PASS] agent-b FlowObservation confirmed in coordinator
+  [PASS] FlowObservation metadata fields confirmed (source_ip, destination_ip,
+         source_port, destination_port, protocol, direction, event, pid, comm)
+  [PASS] no payload fields detected — metadata-only confirmed
+  [PASS] observer stable throughout validation (still active at recap)
+
+Terraform destroy
+-----------------
+  Destroy complete! Resources: 42 destroyed.
+
+Artifacts (S3: physarum-artifacts-168740128169/physarum-attack-paths/dev/linux-x86_64/)
+----------------------------------------------------------------------------------------
+  physarum-server              2.6 MB  ELF x86-64
+  physarum-agent               4.8 MB  ELF x86-64
+  physarum-ebpf-observer       5.0 MB  ELF x86-64
+  physarum-ebpf-observer-ebpf  2.6 KB  ELF eBPF relocatable
+
+Gate J status: GREEN

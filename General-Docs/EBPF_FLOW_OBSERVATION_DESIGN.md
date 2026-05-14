@@ -1,6 +1,6 @@
 # eBPF Passive Flow Observation — Design and Test Strategy
 
-**Status:** Stage 0 design merged (PR #62); Stage 1 / Gate I implemented (PR #68)  
+**Status:** Stage 0 design merged (PR #62); Stage 1 / Gate I implemented (PR #68); Stage 2–3 / Gate J implemented and AWS EC2 validated (Issue #69, PR #71)  
 **Issue:** #61  
 **Author:** Dev Lead  
 **Date:** 2026-05-10
@@ -313,6 +313,6 @@ The intended sequence:
 |---|---|---|
 | 0 | This design document | Issue #61 |
 | 1 | FlowObservation model + POST/GET /flow-observations + unit tests | Gate I — COMPLETED (PR #68) |
-| 2 | physarum-ebpf-observer crate; TCP state tracepoint; posts to server | Gate J |
-| 3 | AWS EC2 validation — observer sees agent flows; evidence file | Gate J exit |
+| 2 | physarum-ebpf-observer crate; TCP state tracepoint; posts to server | Gate J — COMPLETED (PR #71) |
+| 3 | AWS EC2 validation — observer sees agent flows; evidence file | Gate J exit — COMPLETED (Issue #69) |
 | 4 | Scoring integration proposal (combine probes + flows) | Gate K |

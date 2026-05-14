@@ -1,4 +1,4 @@
-use std::process::{Command, ExitCode};
+use std::process::Command;
 
 const EBF_MANIFEST: &str = "crates/physarum-ebpf-observer-ebpf/Cargo.toml";
 const BPF_TARGET: &str = "bpfel-unknown-none";
@@ -6,8 +6,8 @@ const BPF_TARGET: &str = "bpfel-unknown-none";
 /// Build the eBPF program crate with the correct target and nightly unstable flags.
 ///
 /// The compiled ELF ends up at:
-///   target/bpfel-unknown-none/debug/physarum-ebpf-observer   (debug)
-///   target/bpfel-unknown-none/release/physarum-ebpf-observer (release)
+///   target/bpfel-unknown-none/debug/physarum-ebpf-observer-ebpf   (debug)
+///   target/bpfel-unknown-none/release/physarum-ebpf-observer-ebpf (release)
 ///
 /// Pass that path to the observer binary via --bpf-bytecode.
 pub fn run(args: &[String]) {
@@ -30,7 +30,7 @@ pub fn run(args: &[String]) {
 
     let profile = if release { "release" } else { "debug" };
     eprintln!(
-        "building eBPF bytecode ({profile}): target/{BPF_TARGET}/{profile}/physarum-ebpf-observer"
+        "building eBPF bytecode ({profile}): crates/physarum-ebpf-observer-ebpf/target/{BPF_TARGET}/{profile}/physarum-ebpf-observer-ebpf"
     );
 
     let status = cmd.status().unwrap_or_else(|e| {
@@ -44,10 +44,10 @@ pub fn run(args: &[String]) {
     }
 
     eprintln!(
-        "eBPF bytecode ready at: target/{BPF_TARGET}/{profile}/physarum-ebpf-observer\n\
+        "eBPF bytecode ready at: crates/physarum-ebpf-observer-ebpf/target/{BPF_TARGET}/{profile}/physarum-ebpf-observer-ebpf\n\
          run the observer with:\n  \
          sudo physarum-ebpf-observer \\\n    \
            --agent-id <id> \\\n    \
-           --bpf-bytecode target/{BPF_TARGET}/{profile}/physarum-ebpf-observer"
+           --bpf-bytecode crates/physarum-ebpf-observer-ebpf/target/{BPF_TARGET}/{profile}/physarum-ebpf-observer-ebpf"
     );
 }

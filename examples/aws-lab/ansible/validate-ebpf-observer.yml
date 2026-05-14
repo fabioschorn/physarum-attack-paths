@@ -1,0 +1,221 @@
+---
+# physarum AWS lab — Gate J eBPF observer runtime validation playbook.
+#
+# Collects evidence that physarum-ebpf-observer attaches to the
+# tracepoint/sock/inet_sock_set_state kernel tracepoint, emits metadata-only
+# FlowObservation events, and posts them to physarum-server.
+#
+# Run after terraform apply with enable_observer=true on agent-b:
+#   ansible-playbook -i ansible/inventory.local.ini ansible/validate-ebpf-observer.yml
+#
+# Gate J exit criteria verified here:
+#   kernel version + tracepoint format on target kernel
+#   observer privilege mode (root systemd service)
+#   observer startup log
+#   sample FlowObservation posted
+#   GET /flow-observations confirms ingestion
+#   no payload fields in events (schema check)
+
+- name: Collect kernel and tracepoint evidence from agent-b
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Collect kernel version
+      ansible.builtin.command: uname -a
+      register: kernel_version
+      changed_when: false
+
+    - name: Print kernel version
+      ansible.builtin.debug:
+        msg: "kernel: {{ kernel_version.stdout }}"
+
+    - name: Collect tracepoint format file
+      ansible.builtin.command: >
+        cat /sys/kernel/tracing/events/sock/inet_sock_set_state/format
+      register: tracepoint_format
+      changed_when: false
+      failed_when: false
+
+    - name: Print tracepoint format
+      ansible.builtin.debug:
+        msg: "{{ tracepoint_format.stdout_lines }}"
+
+    - name: Assert tracepoint format file is readable
+      ansible.builtin.assert:
+        that: tracepoint_format.rc == 0
+        fail_msg: >
+          /sys/kernel/tracing/events/sock/inet_sock_set_state/format not readable —
+          tracefs may not be mounted or kernel version too old
+        success_msg: "tracepoint format readable on target kernel"
+
+    - name: Check physarum-ebpf-observer systemd status
+      ansible.builtin.command: systemctl is-active physarum-ebpf-observer
+      register: observer_active
+      failed_when: false
+      changed_when: false
+
+    - name: Print observer systemd status
+      ansible.builtin.debug:
+        msg: "physarum-ebpf-observer: {{ observer_active.stdout }}"
+
+    - name: Assert observer is active
+      ansible.builtin.assert:
+        that: observer_active.stdout == "active"
+        fail_msg: >
+          physarum-ebpf-observer is not active (status: {{ observer_active.stdout }}).
+          Check: journalctl -u physarum-ebpf-observer -n 50
+        success_msg: "physarum-ebpf-observer is active"
+
+    - name: Collect observer journal (startup + first events)
+      ansible.builtin.command: journalctl -u physarum-ebpf-observer --no-pager -n 60
+      register: observer_journal
+      failed_when: false
+      changed_when: false
+
+    - name: Print observer journal
+      ansible.builtin.debug:
+        msg: "{{ observer_journal.stdout_lines }}"
+
+    - name: Assert observer log shows tracepoint attached
+      ansible.builtin.assert:
+        that: "'inet_sock_set_state' in observer_journal.stdout"
+        fail_msg: >
+          observer journal does not mention 'inet_sock_set_state' — tracepoint may not have attached.
+          Check: journalctl -u physarum-ebpf-observer -n 100
+        success_msg: "observer journal confirms tracepoint attachment"
+
+    - name: Document privilege mode
+      ansible.builtin.command: >
+        systemctl show physarum-ebpf-observer -p User -p SupplementaryGroups -p AmbientCapabilities
+      register: observer_privs
+      failed_when: false
+      changed_when: false
+
+    - name: Print privilege mode
+      ansible.builtin.debug:
+        msg: "privilege mode: {{ observer_privs.stdout_lines }}"
+
+    - name: Generate explicit outbound TCP connection (produces a flow event)
+      ansible.builtin.command: >
+        curl -s --max-time 5 http://{{ hostvars['server-a']['ansible_host'] }}:8080/health
+      register: health_curl
+      failed_when: false
+      changed_when: false
+
+    - name: Print curl result
+      ansible.builtin.debug:
+        msg: "curl /health from agent-b: {{ health_curl.stdout }}"
+
+    - name: Wait for observer to emit and POST the flow event
+      ansible.builtin.pause:
+        seconds: 5
+
+
+- name: Validate FlowObservation ingestion on server-a
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /flow-observations for agent-b
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b'
+      register: flow_obs
+      failed_when: false
+      changed_when: false
+
+    - name: Print /flow-observations response
+      ansible.builtin.debug:
+        msg: "{{ flow_obs.stdout }}"
+
+    - name: Assert /flow-observations returned non-empty response
+      ansible.builtin.assert:
+        that: flow_obs.stdout | length > 0
+        fail_msg: "/flow-observations returned empty — observer may not have posted any events"
+        success_msg: "/flow-observations returned data"
+
+    - name: Assert response contains agent-b observations
+      ansible.builtin.assert:
+        that: "'agent-b' in flow_obs.stdout"
+        fail_msg: "agent-b not found in /flow-observations response"
+        success_msg: "agent-b FlowObservation confirmed in coordinator"
+
+    - name: Assert observations include expected metadata fields
+      ansible.builtin.assert:
+        that:
+          - "'source_ip' in flow_obs.stdout"
+          - "'destination_ip' in flow_obs.stdout"
+          - "'source_port' in flow_obs.stdout"
+          - "'destination_port' in flow_obs.stdout"
+          - "'protocol' in flow_obs.stdout"
+          - "'direction' in flow_obs.stdout"
+          - "'event' in flow_obs.stdout"
+          - "'pid' in flow_obs.stdout"
+          - "'comm' in flow_obs.stdout"
+        fail_msg: "FlowObservation is missing expected metadata fields"
+        success_msg: "FlowObservation metadata fields confirmed"
+
+    - name: Assert no payload fields in observations
+      ansible.builtin.assert:
+        that:
+          - "'payload' not in flow_obs.stdout"
+          - "'data' not in flow_obs.stdout"
+          - "'body' not in flow_obs.stdout"
+          - "'content' not in flow_obs.stdout"
+          - "'bytes' not in flow_obs.stdout"
+        fail_msg: "UNEXPECTED: payload-like field found in FlowObservation — review observer output"
+        success_msg: "no payload fields detected — metadata-only confirmed"
+
+    - name: Parse and pretty-print first FlowObservation
+      ansible.builtin.shell: |
+        echo '{{ flow_obs.stdout }}' | python3 -c "import json,sys; d=json.load(sys.stdin); evts=d if isinstance(d,list) else d.get('observations',d.get('events',[])); print(json.dumps(evts[0],indent=2)) if evts else print('no events')"
+      register: first_event
+      failed_when: false
+      changed_when: false
+
+    - name: Print first FlowObservation
+      ansible.builtin.debug:
+        msg: "{{ first_event.stdout_lines }}"
+
+
+- name: Collect final observer stats from agent-b
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Tail observer journal after traffic generation
+      ansible.builtin.command: journalctl -u physarum-ebpf-observer --no-pager -n 30
+      register: observer_final
+      failed_when: false
+      changed_when: false
+
+    - name: Print final observer journal
+      ansible.builtin.debug:
+        msg: "{{ observer_final.stdout_lines }}"
+
+    - name: Confirm observer is still active after traffic
+      ansible.builtin.command: systemctl is-active physarum-ebpf-observer
+      register: observer_still_active
+      failed_when: false
+      changed_when: false
+
+    - name: Assert observer still active
+      ansible.builtin.assert:
+        that: observer_still_active.stdout == "active"
+        fail_msg: "observer crashed during validation"
+        success_msg: "observer stable throughout validation"
+
+    - name: Print Gate J validation summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Gate J eBPF Observer Validation Summary ==="
+          - "Host: agent-b ({{ inventory_hostname }})"
+          - "Observer status: {{ observer_still_active.stdout }}"
+          - "Tracepoint: sock/inet_sock_set_state readable"
+          - "Privilege mode: root systemd service"
+          - "FlowObservation: posted to coordinator and confirmed via GET /flow-observations"
+          - "Payload check: PASS (metadata-only)"
+          - "Gate J status: evidence collected — update QUALITY_GATE.md to GREEN"

@@ -7,7 +7,6 @@ use aya_ebpf::{
     maps::RingBuf,
     programs::TracePointContext,
 };
-use aya_log_ebpf as log;
 
 // ── kernel constants ─────────────────────────────────────────────────────────
 
@@ -110,8 +109,7 @@ fn handle(ctx: &TracePointContext) -> Result<(), i64> {
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
 
-    let mut comm = [0u8; 16];
-    let _ = bpf_get_current_comm(&mut comm);
+    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     let event = TcpEvent {
         src_addr: saddr,
@@ -125,7 +123,7 @@ fn handle(ctx: &TracePointContext) -> Result<(), i64> {
     };
 
     if let Some(mut entry) = EVENTS.reserve::<TcpEvent>(0) {
-        unsafe { entry.write(event) };
+        entry.write(event);
         entry.submit(0);
     }
 

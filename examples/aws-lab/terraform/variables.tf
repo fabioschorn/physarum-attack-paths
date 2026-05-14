@@ -99,3 +99,9 @@ variable "enable_artifact_download" {
   type        = bool
   default     = false
 }
+
+variable "enable_observer" {
+  description = "When true, user_data on agent-b also downloads physarum-ebpf-observer and its eBPF bytecode from S3 and starts the observer as a root systemd service. Requires enable_artifact_download = true and a Linux kernel with tracefs mounted. Gate J validation flag."
+  type        = bool
+  default     = false
+}
