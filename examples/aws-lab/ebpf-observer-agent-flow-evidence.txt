@@ -1,0 +1,94 @@
+eBPF Observer Agent Flow Validation Evidence
+Issue #72 — Gate J.1
+Date: <to be filled after AWS run>
+Playbook: examples/aws-lab/ansible/validate-ebpf-observer-agent-flow.yml
+Terraform: lab_phase=phase1, enable_observer=true (42 resources, us-east-1)
+
+Purpose
+-------
+Prove that the eBPF observer on agent-b captures physarum-agent probe traffic
+directed to agent-c (port 9002) — not merely arbitrary TCP flows (e.g. curl).
+Correlate the captured FlowObservation with the adaptive graph edge
+agent-b → agent-c maintained by the coordinator.
+
+Topology (same as Gate J)
+--------------------------
+  server-a   physarum-server (coordinator)
+  agent-b    physarum-agent + physarum-ebpf-observer (observer host)
+  agent-c    physarum-agent (probe target, listen_port=9002)
+  agent-d    physarum-agent
+
+Instance IPs
+------------
+  server-a  public=<redacted>  private=10.50.10.10
+  agent-b   public=<redacted>  private=10.50.20.10
+  agent-c   public=<redacted>  private=10.50.30.10
+  agent-d   public=<redacted>  private=10.50.40.10
+
+physarum-agent status (agent-b)
+--------------------------------
+  systemctl is-active physarum-agent: active
+  Journal evidence of probe/ProbeReport activity:
+    <to be filled after AWS run>
+
+physarum-ebpf-observer status (agent-b)
+-----------------------------------------
+  systemctl is-active physarum-ebpf-observer: active
+  tracepoint/sock/inet_sock_set_state: attached (confirmed in journal)
+
+FlowObservation — physarum-agent → agent-c:9002
+-------------------------------------------------
+  Filter: comm=physarum-agent, destination_port=9002
+  Result: FOUND:<count>
+
+  Sample FlowObservation (GET /flow-observations?agent_id=agent-b&limit=200):
+  {
+    "agent_id": "agent-b",
+    "observed_at": "<to be filled>",
+    "source_ip": "10.50.20.10",
+    "source_port": <ephemeral>,
+    "destination_ip": "10.50.30.10",
+    "destination_port": 9002,
+    "protocol": "tcp",
+    "direction": "<outbound or unknown>",
+    "event": "<connect_established or close>",
+    "pid": <pid>,
+    "comm": "physarum-agent"
+  }
+
+Graph correlation (GET /graph — agent-b → agent-c edge)
+---------------------------------------------------------
+  <to be filled after AWS run>
+  Expected:
+  {
+    "source": "agent-b",
+    "target": "agent-c",
+    "q_ema": <value > 0.0>,
+    ...
+  }
+  q_ema > 0: PASS
+
+Ansible PLAY RECAP
+------------------
+  <to be filled after AWS run>
+  Expected:
+    agent-b   ok=X  changed=0  unreachable=0  failed=0  skipped=0
+    server-a  ok=X  changed=0  unreachable=0  failed=0  skipped=0
+
+Gate J.1 assertions (all expected to PASS)
+-------------------------------------------
+  [PASS] physarum-agent is active on agent-b
+  [PASS] physarum-agent probe activity confirmed in journal
+  [PASS] physarum-ebpf-observer is active on agent-b
+  [PASS] observer journal confirms tracepoint/sock/inet_sock_set_state attached
+  [PASS] FlowObservation found with comm=physarum-agent, destination_port=9002
+  [PASS] FlowObservation.destination_ip == 10.50.30.10 (agent-c)
+  [PASS] agent-b → agent-c edge exists in /graph with q_ema > 0
+  [PASS] physarum-ebpf-observer stable throughout Gate J.1 validation
+
+Terraform destroy
+-----------------
+  <to be filled after AWS run>
+  Expected: Destroy complete! Resources: 42 destroyed.
+
+Gate J.1 status: PENDING AWS RUN

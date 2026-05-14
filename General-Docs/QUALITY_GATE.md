@@ -1,8 +1,8 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** Gate J — eBPF Observer Runtime Validation — COMPLETE  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime)  
-**Last updated:** 2026-05-12
+**Current gate:** Gate J.1 — eBPF Observer Agent Flow Correlation — IN PROGRESS  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime) · IN PROGRESS (eBPF Observer Agent Flow Correlation)  
+**Last updated:** 2026-05-14
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
 
@@ -32,6 +32,7 @@
 | AWS tc/netem Weighted Competing Paths | GREEN | 2 phases PASS in real EC2/VPC; Phase 1 top=B→C→D (score 0.694, E degraded); Phase 2 top=B→E→D (score 0.688, C degraded); top path switches; 50 resources destroyed clean; evidence in weighted-paths-aws-evidence.txt | Issue #58 |
 | FlowObservation model + POST/GET /flow-observations | GREEN | 64 tests passing; ring buffer eviction validated; no eBPF runtime | PR #68 |
 | Gate J — eBPF Observer Runtime (AWS EC2) | GREEN | kernel 6.18; tracepoint attached; FlowObservation posted; failed=0; metadata-only confirmed | Issue #69 |
+| Gate J.1 — eBPF observer agent-b → agent-c flow correlation | IN PROGRESS | Playbook written — AWS run pending | Issue #72 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
@@ -93,12 +94,18 @@ Runtime endpoints     : NOT yet validated in AWS
 | AWS tc/netem Weighted Competing Paths Validation | COMPLETED — Issue #58 |
 | Gate I — FlowObservation Model and Server Endpoints | COMPLETED — PR #68 |
 | Gate J — eBPF Observer Runtime Validation | COMPLETED — Issue #69 |
+| Gate J.1 — eBPF Observer Agent Flow Correlation | IN PROGRESS — Issue #72 |
 
 ---
 
 ## Active gate
 
-No active gate — Gate J complete (Issue #69). Next gate: TBD by manager.
+**Gate J.1 — eBPF Observer Agent Flow Correlation**  
+Tracked by: Issue #72  
+Entry criteria: Gate J complete (Issue #69) ✔ · PR #71 and PR #74 merged ✔  
+Scope: Prove that the eBPF observer on agent-b captures `physarum-agent` probe traffic to agent-c (port 9002) — not only arbitrary TCP. Correlate the captured FlowObservation (comm=physarum-agent, destination_ip=10.50.30.10, destination_port=9002) with the adaptive graph edge agent-b → agent-c (q_ema > 0) reported by the coordinator.  
+Exit criteria: Ansible `validate-ebpf-observer-agent-flow.yml` failed=0; FlowObservation.comm=physarum-agent confirmed; destination_ip/port match agent-c; /graph edge agent-b → agent-c with q_ema > 0; evidence in ebpf-observer-agent-flow-evidence.txt; terraform destroy confirmed.  
+Status: **IN PROGRESS** — playbook written, AWS run pending.
 
 ---
 

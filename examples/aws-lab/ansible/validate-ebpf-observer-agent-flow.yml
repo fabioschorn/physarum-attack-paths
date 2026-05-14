@@ -1,0 +1,264 @@
+---
+# physarum AWS lab — Gate J.1 eBPF observer agent flow validation playbook.
+#
+# Proves that the eBPF observer on agent-b captures physarum-agent probe
+# traffic directed to agent-c (port 9002) — not merely arbitrary TCP flows.
+#
+# Correlates the captured FlowObservation with the adaptive graph edge
+# agent-b → agent-c maintained by the coordinator (GET /graph).
+#
+# Entry criteria (must be satisfied before running this playbook):
+#   Gate J complete (physarum-ebpf-observer running, POST /flow-observations working)
+#   Terraform: lab_phase=phase1, enable_observer=true, enable_artifact_download=true
+#   physarum-agent on agent-b probing agent-c (probe_targets="" or "agent-c,agent-d")
+#
+# Run after terraform apply:
+#   ansible-playbook -i ansible/inventory.local.ini \
+#     ansible/validate-ebpf-observer-agent-flow.yml
+#
+# Gate J.1 exit criteria verified here:
+#   physarum-agent and physarum-ebpf-observer are active on agent-b
+#   FlowObservation found with comm=physarum-agent, destination_port=9002
+#   FlowObservation.destination_ip == 10.50.30.10 (agent-c private IP)
+#   GET /graph confirms agent-b → agent-c edge exists with q_ema > 0
+#   (graph correlation: adaptive morphology reflects the observed probe flow)
+
+
+- name: Confirm agent-b physarum-agent is probing and observer is active
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check physarum-agent systemd status
+      ansible.builtin.command: systemctl is-active physarum-agent
+      register: agent_active
+      failed_when: false
+      changed_when: false
+
+    - name: Print physarum-agent status
+      ansible.builtin.debug:
+        msg: "physarum-agent: {{ agent_active.stdout }}"
+
+    - name: Assert physarum-agent is active
+      ansible.builtin.assert:
+        that: agent_active.stdout == "active"
+        fail_msg: >
+          physarum-agent is not active on agent-b (status: {{ agent_active.stdout }}).
+          Check: journalctl -u physarum-agent -n 50
+        success_msg: "physarum-agent is active on agent-b"
+
+    - name: Collect physarum-agent probe journal
+      ansible.builtin.command: journalctl -u physarum-agent --no-pager -n 80
+      register: agent_journal
+      failed_when: false
+      changed_when: false
+
+    - name: Print physarum-agent journal
+      ansible.builtin.debug:
+        msg: "{{ agent_journal.stdout_lines }}"
+
+    - name: Assert physarum-agent shows probe or ProbeReport activity
+      ansible.builtin.assert:
+        that: >
+          'probe' in agent_journal.stdout or
+          'agent-c' in agent_journal.stdout or
+          'ProbeReport' in agent_journal.stdout or
+          '9002' in agent_journal.stdout
+        fail_msg: >
+          physarum-agent journal shows no probe or ProbeReport activity.
+          Agent may not have started yet — try again after 30 s.
+        success_msg: "physarum-agent probe activity confirmed in journal"
+
+    - name: Check physarum-ebpf-observer systemd status
+      ansible.builtin.command: systemctl is-active physarum-ebpf-observer
+      register: observer_active
+      failed_when: false
+      changed_when: false
+
+    - name: Print observer status
+      ansible.builtin.debug:
+        msg: "physarum-ebpf-observer: {{ observer_active.stdout }}"
+
+    - name: Assert physarum-ebpf-observer is active
+      ansible.builtin.assert:
+        that: observer_active.stdout == "active"
+        fail_msg: >
+          physarum-ebpf-observer is not active (status: {{ observer_active.stdout }}).
+          Check: journalctl -u physarum-ebpf-observer -n 50
+        success_msg: "physarum-ebpf-observer is active on agent-b"
+
+    - name: Tail observer journal for tracepoint and recent events
+      ansible.builtin.command: journalctl -u physarum-ebpf-observer --no-pager -n 60
+      register: observer_journal
+      failed_when: false
+      changed_when: false
+
+    - name: Print observer journal
+      ansible.builtin.debug:
+        msg: "{{ observer_journal.stdout_lines }}"
+
+    - name: Assert observer confirms tracepoint still attached
+      ansible.builtin.assert:
+        that: "'inet_sock_set_state' in observer_journal.stdout"
+        fail_msg: >
+          observer journal does not mention inet_sock_set_state — tracepoint may have detached.
+          Check: journalctl -u physarum-ebpf-observer -n 200
+        success_msg: "observer confirms tracepoint/sock/inet_sock_set_state attached"
+
+    - name: Wait for one full probe cycle (physarum-agent probes every 10 s)
+      ansible.builtin.pause:
+        seconds: 15
+        prompt: "Waiting 15 s for physarum-agent → agent-c probe cycle to complete..."
+
+
+- name: Validate physarum-agent FlowObservation and graph correlation on server-a (Gate J.1)
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /flow-observations for agent-b (limit 200)
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=200'
+      register: flow_obs_raw
+      failed_when: false
+      changed_when: false
+
+    - name: Assert /flow-observations returned non-empty response
+      ansible.builtin.assert:
+        that: flow_obs_raw.stdout | length > 0
+        fail_msg: "/flow-observations returned empty — observer may not have posted events yet"
+        success_msg: "/flow-observations returned data"
+
+    - name: Filter for physarum-agent flows to agent-c port 9002
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=200' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        obs = data if isinstance(data, list) else data.get('observations', data.get('events', []))
+        flows = [
+            o for o in obs
+            if o.get('comm') == 'physarum-agent' and o.get('destination_port') == 9002
+        ]
+        if not flows:
+            print('NO_AGENT_FLOWS')
+        else:
+            print('FOUND:' + str(len(flows)))
+            print(json.dumps(flows[0], indent=2))
+        "
+      register: agent_flow_filter
+      failed_when: false
+      changed_when: false
+
+    - name: Print filtered physarum-agent flows
+      ansible.builtin.debug:
+        msg: "{{ agent_flow_filter.stdout_lines }}"
+
+    - name: Assert physarum-agent flow to agent-c:9002 was captured by observer
+      ansible.builtin.assert:
+        that: "'FOUND:' in agent_flow_filter.stdout"
+        fail_msg: >
+          No FlowObservation found with comm=physarum-agent and destination_port=9002.
+          The eBPF observer captured arbitrary TCP but not a physarum-agent probe cycle yet.
+          Wait another 10-15 s and retry — or check: journalctl -u physarum-ebpf-observer -n 100
+        success_msg: "physarum-agent FlowObservation (destination_port=9002) confirmed"
+
+    - name: Assert destination_ip is agent-c private IP (10.50.30.10)
+      ansible.builtin.assert:
+        that: "'10.50.30.10' in agent_flow_filter.stdout"
+        fail_msg: >
+          FlowObservation destination_ip is not 10.50.30.10 (agent-c).
+          Unexpected destination in physarum-agent probe to port 9002.
+        success_msg: "destination_ip == 10.50.30.10 (agent-c) confirmed"
+
+    - name: GET /graph for edge correlation
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/graph'
+      register: graph_raw
+      failed_when: false
+      changed_when: false
+
+    - name: Print /graph response
+      ansible.builtin.debug:
+        msg: "{{ graph_raw.stdout_lines }}"
+
+    - name: Assert /graph returned non-empty response
+      ansible.builtin.assert:
+        that: graph_raw.stdout | length > 0
+        fail_msg: "/graph returned empty — coordinator has not yet received ProbeReports"
+        success_msg: "/graph returned data"
+
+    - name: Find agent-b → agent-c edge and assert q_ema > 0
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        bc = [e for e in edges if e.get('source') == 'agent-b' and e.get('target') == 'agent-c']
+        if not bc:
+            print('NO_BC_EDGE')
+            sys.exit(1)
+        q = bc[0].get('q_ema', 0.0)
+        if q <= 0.0:
+            print('EDGE_FOUND_BUT_Q_EMA_ZERO:' + str(q))
+            sys.exit(1)
+        print('PASS:q_ema=' + str(round(q, 4)))
+        print(json.dumps(bc[0], indent=2))
+        "
+      register: bc_edge_check
+      failed_when: bc_edge_check.rc != 0
+      changed_when: false
+
+    - name: Print agent-b → agent-c edge
+      ansible.builtin.debug:
+        msg: "{{ bc_edge_check.stdout_lines }}"
+
+    - name: Assert graph edge agent-b → agent-c exists with positive q_ema
+      ansible.builtin.assert:
+        that: "'PASS:' in bc_edge_check.stdout"
+        fail_msg: >
+          agent-b → agent-c edge not found or q_ema == 0.
+          The adaptive graph has not yet processed enough probe signals for this edge.
+        success_msg: "agent-b → agent-c edge confirmed in /graph with q_ema > 0"
+
+    - name: Print Gate J.1 validation summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Gate J.1 eBPF Agent Flow Observation Validation Summary ==="
+          - "Observer host     : agent-b (physarum-ebpf-observer active)"
+          - "Probe flow        : physarum-agent → agent-c (10.50.30.10:9002)"
+          - "FlowObservation   : comm=physarum-agent, destination_port=9002, destination_ip=10.50.30.10"
+          - "Graph correlation : agent-b → agent-c edge in /graph with q_ema > 0"
+          - "Gate J.1 status   : all assertions PASS — update QUALITY_GATE.md to GREEN"
+
+
+- name: Confirm observer stability on agent-b after validation
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check observer still active after full validation run
+      ansible.builtin.command: systemctl is-active physarum-ebpf-observer
+      register: observer_final
+      failed_when: false
+      changed_when: false
+
+    - name: Assert observer still active
+      ansible.builtin.assert:
+        that: observer_final.stdout == "active"
+        fail_msg: "physarum-ebpf-observer crashed during Gate J.1 validation"
+        success_msg: "physarum-ebpf-observer stable throughout Gate J.1 validation"
+
+    - name: Tail observer journal (post-validation snapshot)
+      ansible.builtin.command: journalctl -u physarum-ebpf-observer --no-pager -n 30
+      register: observer_tail
+      failed_when: false
+      changed_when: false
+
+    - name: Print final observer journal
+      ansible.builtin.debug:
+        msg: "{{ observer_tail.stdout_lines }}"

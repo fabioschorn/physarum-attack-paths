@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired adaptive attack-path graph prototype.** Rust agents perform peer probes, summarize short-term local observations, and send stimulus-oriented reports to a coordinator. The coordinator updates Q_ij, q_ema, and D_ij to maintain a living directed graph. AWS cloud labs (Mode 1, Mode 2, and tc/netem weighted competing paths) are implemented and validated. eBPF passive flow observation is implemented and AWS EC2 validated (Gate J) — `physarum-ebpf-observer` attaches to `tracepoint/sock/inet_sock_set_state` on kernel 6.18 and posts metadata-only FlowObservation events to the coordinator. Signatures, persistence, TOON, and the full role-fluid unified runtime are planned future phases.
+> **Bio-inspired adaptive attack-path graph prototype.** Rust agents perform peer probes, summarize short-term local observations, and send stimulus-oriented reports to a coordinator. The coordinator updates Q_ij, q_ema, and D_ij to maintain a living directed graph. AWS cloud labs (Mode 1, Mode 2, and tc/netem weighted competing paths) are implemented and validated. eBPF passive flow observation is implemented and AWS EC2 validated (Gate J) — `physarum-ebpf-observer` attaches to `tracepoint/sock/inet_sock_set_state` on kernel 6.18 and posts metadata-only FlowObservation events to the coordinator. Gate J.1 in progress: proving the observer captures `physarum-agent` probe flows (not arbitrary TCP) and correlating them with the adaptive graph edge agent-b → agent-c. Signatures, persistence, TOON, and the full role-fluid unified runtime are planned future phases.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
@@ -31,7 +31,7 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | `examples/aws-lab` | ✔ implemented — Mode 1, Mode 2, and AWS tc/netem weighted paths validated |
 | `examples/wasm-lab` | docs / planned |
 | `physarum-graph` crate | planned |
-| `physarum-ebpf-observer` crate | implemented + AWS EC2 validated — Gate J complete (Issue #69) |
+| `physarum-ebpf-observer` crate | implemented + AWS EC2 validated — Gate J complete (Issue #69) · Gate J.1 in progress (Issue #72) |
 | `physarum-coordinator` crate (full) | planned |
 | `physarum-cli` crate | planned |
 | `/path-density` endpoint | planned |
