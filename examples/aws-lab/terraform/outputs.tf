@@ -49,13 +49,13 @@ output "agent_d_private_ip" {
 }
 
 output "agent_e_public_ip" {
-  description = "Public IP of agent-e — SSH access for Ansible (weighted-paths phase only; null otherwise)"
-  value       = var.lab_phase == "weighted-paths" ? aws_instance.agent_e[0].public_ip : null
+  description = "Public IP of agent-e — SSH access for Ansible (weighted-paths and gate-k phases only; null otherwise)"
+  value       = contains(["weighted-paths", "gate-k"], var.lab_phase) ? aws_instance.agent_e[0].public_ip : null
 }
 
 output "agent_e_private_ip" {
-  description = "Private IP of agent-e (weighted-paths phase only; null otherwise)"
-  value       = var.lab_phase == "weighted-paths" ? aws_instance.agent_e[0].private_ip : null
+  description = "Private IP of agent-e (weighted-paths and gate-k phases only; null otherwise)"
+  value       = contains(["weighted-paths", "gate-k"], var.lab_phase) ? aws_instance.agent_e[0].private_ip : null
 }
 
 output "ssh_server_a" {

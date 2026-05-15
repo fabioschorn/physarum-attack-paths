@@ -14,6 +14,7 @@ locals {
     "phase1"         = "full-mesh"
     "phase2"         = "segmented-b-c-d"
     "weighted-paths" = "weighted-competing-paths"
+    "gate-k"         = "segmented-adaptive-flow-path"
   }
 
   # Common tags applied to all taggable resources.
@@ -25,13 +26,20 @@ locals {
     ManagedBy = "terraform"
   }
 
-  # For weighted-paths: default to agent-c,agent-e if operator did not override.
-  # Prevents a direct B→D edge from forming when the operator forgets to pass the variable.
+  # For weighted-paths and gate-k: default agent-b probe targets to agent-c,agent-e.
+  # gate-k: B probes C (peer) and E (direct path); no direct B→D edge.
+  # weighted-paths: B probes C and E (two competing multi-hop paths).
   effective_probe_targets = (
-    var.lab_phase == "weighted-paths" && var.agent_b_probe_targets == ""
+    contains(["weighted-paths", "gate-k"], var.lab_phase) && var.agent_b_probe_targets == ""
     ? "agent-c,agent-e"
     : var.agent_b_probe_targets
   )
+
+  # gate-k probe targets per agent:
+  #   agent-c: probes B (peer) and D (intermediary); C→E is blocked by SG.
+  #   agent-d: probes E only (D is the intermediary delivering to the destination).
+  effective_agent_c_probe_targets = var.lab_phase == "gate-k" ? "agent-b,agent-d" : ""
+  effective_agent_d_probe_targets = var.lab_phase == "gate-k" ? "agent-e" : ""
 }
 
 resource "aws_instance" "server_a" {
@@ -103,7 +111,7 @@ resource "aws_instance" "agent_c" {
     listen_port              = 9002
     coordinator_ip           = local.server_private_ip
     advertise_address        = local.agent_c_private_ip
-    probe_targets            = ""
+    probe_targets            = local.effective_agent_c_probe_targets
     name_prefix              = var.name_prefix
     enable_artifact_download = var.enable_artifact_download
     artifact_bucket          = var.artifact_bucket
@@ -133,7 +141,7 @@ resource "aws_instance" "agent_d" {
     listen_port              = 9003
     coordinator_ip           = local.server_private_ip
     advertise_address        = local.agent_d_private_ip
-    probe_targets            = ""
+    probe_targets            = local.effective_agent_d_probe_targets
     name_prefix              = var.name_prefix
     enable_artifact_download = var.enable_artifact_download
     artifact_bucket          = var.artifact_bucket
@@ -149,7 +157,7 @@ resource "aws_instance" "agent_d" {
 }
 
 resource "aws_instance" "agent_e" {
-  count = var.lab_phase == "weighted-paths" ? 1 : 0
+  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
 
   ami                    = local.ami_id
   instance_type          = var.instance_type

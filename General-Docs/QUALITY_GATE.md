@@ -1,8 +1,8 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** Gate J.1 — eBPF Observer Agent Flow Correlation — COMPLETE  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime) · GREEN (eBPF Observer Agent Flow Correlation)  
-**Last updated:** 2026-05-14
+**Current gate:** Gate K — Segmented Adaptive Flow-Path Lab — IN PROGRESS  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime) · GREEN (eBPF Observer Agent Flow Correlation) · IN PROGRESS (Gate K)  
+**Last updated:** 2026-05-15
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
 
@@ -33,6 +33,7 @@
 | FlowObservation model + POST/GET /flow-observations | GREEN | 64 tests passing; ring buffer eviction validated; no eBPF runtime | PR #68 |
 | Gate J — eBPF Observer Runtime (AWS EC2) | GREEN | kernel 6.18; tracepoint attached; FlowObservation posted; failed=0; metadata-only confirmed | Issue #69 |
 | Gate J.1 — eBPF observer agent-b → agent-c flow correlation | GREEN | destination_ip=10.50.30.10, port=9002, direction=outbound, event=connect_established confirmed; q_ema≈1.0; failed=0; 42 resources destroyed | Issue #72 |
+| Gate K — segmented adaptive flow-path A/B/C/D/E lab | IN PROGRESS | Terraform + Ansible implemented; AWS run pending | Issue #76 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
@@ -101,7 +102,11 @@ Runtime endpoints     : NOT yet validated in AWS
 
 ## Active gate
 
-No active gate — Gate J.1 complete (Issue #72). Next gate: TBD by manager.
+**Gate K — Segmented Adaptive Flow-Path Lab**  
+Tracked by: Issue #76  
+Entry criteria: Gate J.1 complete (Issue #72). ✔  
+Scope: 5-node AWS lab (A/B/C/D/E). B→E direct path; C→D→E indirect path; C→E blocked by SG. Validate real flow observation (eBPF), graph edge evidence, direct vs indirect comparison, and adaptive behavior when B→E is degraded via tc/netem and recovered.  
+Exit criteria: Test 1 (flow discovery), Test 2 (direct vs indirect), and Test 3 (adaptation with degradation + recovery) all PASS; Ansible recap failed=0; Terraform destroy clean; QUALITY_GATE.md updated to GREEN.
 
 ---
 

@@ -1,0 +1,7 @@
+Segmented Adaptive Flow-Path Lab Evidence
+Issue #76 — Gate K
+Date: PENDING AWS RUN
+Playbook: examples/aws-lab/ansible/validate-segmented-adaptive-flow-path.yml
+Terraform: lab_phase=gate-k, enable_observer=true
+
+Gate K status: PENDING — infrastructure implementation complete; AWS run not yet executed.

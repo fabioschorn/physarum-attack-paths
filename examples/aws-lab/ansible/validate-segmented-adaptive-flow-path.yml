@@ -1,0 +1,639 @@
+---
+# physarum AWS lab — Gate K segmented adaptive flow-path validation playbook.
+#
+# Proves the system can observe real flows, compare a direct path against an
+# indirect path, and adapt when the direct channel is degraded.
+#
+# Topology (lab_phase=gate-k):
+#   A (server-a)  coordinator
+#   B (agent-b)   probes C and E directly  (direct path: B→E)
+#   C (agent-c)   probes B and D           (peer with B; indirect: C→D→E)
+#   D (agent-d)   probes E only            (intermediary: D→E leg)
+#   E (agent-e)   isolated destination     (listen_port=9004, no probe targets)
+#
+# Private IPs (deterministic from cidrhost()):
+#   server-a  10.50.10.10
+#   agent-b   10.50.20.10
+#   agent-c   10.50.30.10
+#   agent-d   10.50.40.10
+#   agent-e   10.50.50.10  ← isolated destination
+#
+# Test 1 — Flow discovery: B→E, C→D, D→E have edges in /graph (q_ema > 0);
+#           C→E direct edge is absent (SG blocks C→E; C has no agent-e probe target).
+# Test 2 — Direct vs indirect: compare B→E edge metrics against C→D and D→E.
+# Test 3 — Adaptation:
+#   Phase 1 — healthy baseline: collect B→E, C→D, D→E q_ema snapshot.
+#   Phase 2 — degrade B→E via tc/netem on agent-b (targeted to agent-e IP):
+#             assert B→E avg_rtt_ms rises; C→D and D→E remain healthy.
+#   Phase 3 — recover: remove tc; assert B→E avg_rtt_ms returns to baseline.
+#
+# observer note: the eBPF observer is on agent-b (enable_observer=true).
+#   B→E FlowObservations are captured directly.
+#   C→D and D→E flows are confirmed via /graph edges (no observer on C or D).
+#   FlowObservation count gap for C→D and D→E is documented in evidence.
+#
+# Entry criteria:
+#   Terraform: lab_phase=gate-k, enable_observer=true, enable_artifact_download=true
+#   All 5 nodes running. physarum-agent and physarum-ebpf-observer active on agent-b.
+#
+# Run:
+#   ansible-playbook -i ansible/inventory.local.ini \
+#     ansible/validate-segmented-adaptive-flow-path.yml
+
+
+# ─── Pre-flight: confirm all agents are active ──────────────────────────────
+
+- name: Pre-flight — confirm all lab nodes are running physarum services
+  hosts: lab
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check physarum-agent systemd status
+      ansible.builtin.command: systemctl is-active physarum-agent
+      register: agent_active
+      failed_when: false
+      changed_when: false
+
+    - name: Print service status
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: physarum-agent={{ agent_active.stdout }}"
+
+    - name: Assert physarum-agent is active
+      ansible.builtin.assert:
+        that: agent_active.stdout == "active"
+        fail_msg: >
+          physarum-agent is not active on {{ inventory_hostname }} (status: {{ agent_active.stdout }}).
+          Wait 60 s after terraform apply for cloud-init to complete, then retry.
+        success_msg: "physarum-agent active on {{ inventory_hostname }}"
+
+
+- name: Pre-flight — confirm eBPF observer is active on agent-b
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check physarum-ebpf-observer systemd status
+      ansible.builtin.command: systemctl is-active physarum-ebpf-observer
+      register: observer_active
+      failed_when: false
+      changed_when: false
+
+    - name: Assert observer is active
+      ansible.builtin.assert:
+        that: observer_active.stdout == "active"
+        fail_msg: >
+          physarum-ebpf-observer is not active on agent-b (status: {{ observer_active.stdout }}).
+          Requires enable_observer=true and enable_artifact_download=true.
+        success_msg: "physarum-ebpf-observer active on agent-b"
+
+    - name: Wait for probe cycles (agents probe every 10 s — allow 5 full cycles)
+      ansible.builtin.pause:
+        seconds: 60
+        prompt: "Waiting 60 s for agents to complete probe cycles and build graph edges..."
+
+
+# ─── Test 1 — Flow discovery and real reachability ──────────────────────────
+
+- name: Test 1 — Flow discovery and real reachability (Gate K)
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Test 1: GET /flow-observations for agent-b (B→E FlowObservation)"
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=200'
+      register: flow_obs_raw
+      failed_when: false
+      changed_when: false
+
+    - name: "Test 1: Filter for B→E flow (destination_ip=10.50.50.10, port=9004)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=200' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        obs = data if isinstance(data, list) else data.get('observations', data.get('events', []))
+        flows = [
+            o for o in obs
+            if o.get('destination_ip') == '10.50.50.10' and o.get('destination_port') == 9004
+        ]
+        if not flows:
+            print('NO_BE_FLOWS')
+        else:
+            print('FOUND:' + str(len(flows)))
+            print(json.dumps(flows[0], indent=2))
+        "
+      register: be_flow_filter
+      failed_when: false
+      changed_when: false
+
+    - name: "Test 1: Print B→E FlowObservation filter result"
+      ansible.builtin.debug:
+        msg: "{{ be_flow_filter.stdout_lines }}"
+
+    - name: "Test 1: Assert B→E FlowObservation captured by eBPF observer"
+      ansible.builtin.assert:
+        that: "'FOUND:' in be_flow_filter.stdout"
+        fail_msg: >
+          No FlowObservation found for destination_ip=10.50.50.10, destination_port=9004.
+          Observer may not have captured a B→E probe cycle yet — wait 15 s and retry.
+        success_msg: "B→E FlowObservation confirmed (destination_ip=10.50.50.10, port=9004)"
+
+    - name: "Test 1: Assert B→E direction=outbound"
+      ansible.builtin.assert:
+        that: "'outbound' in be_flow_filter.stdout"
+        fail_msg: "B→E FlowObservation direction is not outbound."
+        success_msg: "B→E direction=outbound confirmed"
+
+    - name: "Test 1: Assert B→E event=connect_established"
+      ansible.builtin.assert:
+        that: "'connect_established' in be_flow_filter.stdout"
+        fail_msg: "B→E FlowObservation event is not connect_established."
+        success_msg: "B→E event=connect_established confirmed"
+
+    - name: "Test 1: GET /graph and extract edge evidence"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        def find(src, tgt):
+            m = [e for e in edges if e.get('source') == src and e.get('target') == tgt]
+            return m[0] if m else None
+        be = find('agent-b', 'agent-e')
+        cd = find('agent-c', 'agent-d')
+        de = find('agent-d', 'agent-e')
+        ce = find('agent-c', 'agent-e')
+        results = []
+        results.append('B->E: ' + ('FOUND q_ema=' + str(round(be['q_ema'],4)) if be and be['q_ema'] > 0 else 'MISSING'))
+        results.append('C->D: ' + ('FOUND q_ema=' + str(round(cd['q_ema'],4)) if cd and cd['q_ema'] > 0 else 'MISSING'))
+        results.append('D->E: ' + ('FOUND q_ema=' + str(round(de['q_ema'],4)) if de and de['q_ema'] > 0 else 'MISSING'))
+        results.append('C->E: ' + ('PRESENT (unexpected)' if ce and ce['q_ema'] > 0 else 'ABSENT (expected)'))
+        for r in results:
+            print(r)
+        "
+      register: graph_edges_summary
+      failed_when: false
+      changed_when: false
+
+    - name: "Test 1: Print /graph edge summary"
+      ansible.builtin.debug:
+        msg: "{{ graph_edges_summary.stdout_lines }}"
+
+    - name: "Test 1: Assert B→E graph edge with q_ema > 0"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        be = [e for e in edges if e.get('source') == 'agent-b' and e.get('target') == 'agent-e']
+        if not be or be[0].get('q_ema', 0) <= 0:
+            print('MISSING')
+            sys.exit(1)
+        print('PASS:q_ema=' + str(round(be[0]['q_ema'], 4)))
+      register: be_edge
+      failed_when: be_edge.rc != 0
+      changed_when: false
+
+    - name: "Test 1: Assert C→D graph edge with q_ema > 0"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        cd = [e for e in edges if e.get('source') == 'agent-c' and e.get('target') == 'agent-d']
+        if not cd or cd[0].get('q_ema', 0) <= 0:
+            print('MISSING')
+            sys.exit(1)
+        print('PASS:q_ema=' + str(round(cd[0]['q_ema'], 4)))
+      register: cd_edge
+      failed_when: cd_edge.rc != 0
+      changed_when: false
+
+    - name: "Test 1: Assert D→E graph edge with q_ema > 0"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        de = [e for e in edges if e.get('source') == 'agent-d' and e.get('target') == 'agent-e']
+        if not de or de[0].get('q_ema', 0) <= 0:
+            print('MISSING')
+            sys.exit(1)
+        print('PASS:q_ema=' + str(round(de[0]['q_ema'], 4)))
+      register: de_edge
+      failed_when: de_edge.rc != 0
+      changed_when: false
+
+    - name: "Test 1: Assert C→E direct edge is absent (SG blocks C→E in gate-k)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        ce = [e for e in edges if e.get('source') == 'agent-c' and e.get('target') == 'agent-e']
+        if ce and ce[0].get('q_ema', 0) > 0:
+            print('UNEXPECTED_CE_EDGE:q_ema=' + str(round(ce[0]['q_ema'], 4)))
+            sys.exit(1)
+        print('PASS:C->E edge absent or q_ema=0 (SG blocks direct C->E)')
+      register: ce_absent
+      failed_when: ce_absent.rc != 0
+      changed_when: false
+
+    - name: "Test 1: Print edge assertion results"
+      ansible.builtin.debug:
+        msg:
+          - "B→E edge: {{ be_edge.stdout }}"
+          - "C→D edge: {{ cd_edge.stdout }}"
+          - "D→E edge: {{ de_edge.stdout }}"
+          - "C→E edge: {{ ce_absent.stdout }}"
+
+
+# ─── Test 2 — Direct vs indirect path comparison ────────────────────────────
+
+- name: Test 2 — Direct vs indirect path comparison (Gate K)
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Test 2: Collect full graph snapshot for comparison"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        def fmt(src, tgt):
+            m = [e for e in edges if e.get('source') == src and e.get('target') == tgt]
+            if not m:
+                return src + '->' + tgt + ': no edge'
+            e = m[0]
+            return (src + '->' + tgt +
+                    ' q_ema=' + str(round(e.get('q_ema',0), 4)) +
+                    ' d_ij=' + str(round(e.get('d_ij',0), 4)) +
+                    ' success_rate=' + str(round(e.get('success_rate',0), 3)) +
+                    ' avg_rtt_ms=' + str(round(e.get('avg_rtt_ms',2), 2)) +
+                    ' sample_count=' + str(e.get('sample_count',0)))
+        print('=== Test 2: Direct vs Indirect Path Comparison ===')
+        print('Direct path:')
+        print('  ' + fmt('agent-b', 'agent-e'))
+        print('Indirect path (two legs):')
+        print('  ' + fmt('agent-c', 'agent-d'))
+        print('  ' + fmt('agent-d', 'agent-e'))
+        print('Peer links (B<->C):')
+        print('  ' + fmt('agent-b', 'agent-c'))
+        print('  ' + fmt('agent-c', 'agent-b'))
+        print()
+        print('NOTE: /graph does not yet track flow_event_count per edge.')
+        print('FlowObservation count for B->E is available from /flow-observations.')
+        print('C->D and D->E flow counts require observers on agent-c and agent-d (future gate).')
+      register: path_comparison
+      failed_when: false
+      changed_when: false
+
+    - name: "Test 2: Print path comparison"
+      ansible.builtin.debug:
+        msg: "{{ path_comparison.stdout_lines }}"
+
+    - name: "Test 2: Count B→E FlowObservations from observer"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=200' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        obs = data if isinstance(data, list) else data.get('observations', data.get('events', []))
+        be_flows = [o for o in obs if o.get('destination_ip') == '10.50.50.10' and o.get('destination_port') == 9004]
+        print('B->E FlowObservation count (agent-b observer): ' + str(len(be_flows)))
+        print('NOTE: C->D and D->E flow counts not available (no observer on agent-c or agent-d).')
+        "
+      register: flow_count
+      failed_when: false
+      changed_when: false
+
+    - name: "Test 2: Print FlowObservation count"
+      ansible.builtin.debug:
+        msg: "{{ flow_count.stdout_lines }}"
+
+
+# ─── Test 3 Phase 1 — Healthy baseline snapshot ─────────────────────────────
+
+- name: "Test 3 Phase 1 — Healthy baseline snapshot"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Test 3 Phase 1: Capture B→E baseline metrics"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        be = [e for e in edges if e.get('source') == 'agent-b' and e.get('target') == 'agent-e']
+        if not be:
+            print('BE_BASELINE: no edge')
+        else:
+            e = be[0]
+            print('BE_BASELINE: q_ema=' + str(round(e.get('q_ema',0),4)) +
+                  ' avg_rtt_ms=' + str(round(e.get('avg_rtt_ms',0),2)) +
+                  ' success_rate=' + str(round(e.get('success_rate',0),3)))
+        cd = [e for e in edges if e.get('source') == 'agent-c' and e.get('target') == 'agent-d']
+        de = [e for e in edges if e.get('source') == 'agent-d' and e.get('target') == 'agent-e']
+        if cd:
+            print('CD_BASELINE: q_ema=' + str(round(cd[0].get('q_ema',0),4)) +
+                  ' avg_rtt_ms=' + str(round(cd[0].get('avg_rtt_ms',0),2)))
+        if de:
+            print('DE_BASELINE: q_ema=' + str(round(de[0].get('q_ema',0),4)) +
+                  ' avg_rtt_ms=' + str(round(de[0].get('avg_rtt_ms',0),2)))
+        "
+      register: baseline_snapshot
+      failed_when: false
+      changed_when: false
+
+    - name: "Test 3 Phase 1: Print healthy baseline"
+      ansible.builtin.debug:
+        msg: "{{ baseline_snapshot.stdout_lines }}"
+
+
+# ─── Test 3 Phase 2 — Degrade B→E (tc/netem on agent-b) ────────────────────
+
+- name: "Test 3 Phase 2 — Apply tc/netem on agent-b targeting agent-e (10.50.50.10)"
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Test 3 Phase 2: Get primary network interface"
+      ansible.builtin.shell: ip route | awk '/default/ { print $5; exit }'
+      register: iface
+      changed_when: false
+
+    - name: "Test 3 Phase 2: Print interface"
+      ansible.builtin.debug:
+        msg: "Primary interface: {{ iface.stdout }}"
+
+    - name: "Test 3 Phase 2: Remove any existing tc qdisc (idempotent)"
+      ansible.builtin.command: tc qdisc del dev {{ iface.stdout }} root
+      failed_when: false
+      changed_when: false
+
+    - name: "Test 3 Phase 2: Add prio qdisc on agent-b"
+      ansible.builtin.command: tc qdisc add dev {{ iface.stdout }} root handle 1{{ ':' }} prio
+      changed_when: true
+
+    - name: "Test 3 Phase 2: Add netem on band 3 (200ms ±50ms, 10% loss)"
+      ansible.builtin.command: >
+        tc qdisc add dev {{ iface.stdout }} parent 1:3 handle 30: netem delay 200ms 50ms loss 10%
+      changed_when: true
+
+    - name: "Test 3 Phase 2: Add u32 filter — route traffic to agent-e (10.50.50.10) through netem band"
+      ansible.builtin.command: >
+        tc filter add dev {{ iface.stdout }} parent 1:0 protocol ip u32
+        match ip dst 10.50.50.10/32 flowid 1:3
+      changed_when: true
+
+    - name: "Test 3 Phase 2: Verify tc qdisc and filter are set"
+      ansible.builtin.shell: tc qdisc show dev {{ iface.stdout }} && tc filter show dev {{ iface.stdout }}
+      register: qdisc_phase2
+      changed_when: false
+
+    - name: "Test 3 Phase 2: Print tc state"
+      ansible.builtin.debug:
+        msg: "{{ qdisc_phase2.stdout_lines }}"
+
+    - name: "Test 3 Phase 2: Wait for degradation to propagate through probe cycles (90 s = 9 cycles)"
+      ansible.builtin.pause:
+        seconds: 90
+        prompt: "Waiting 90 s for tc/netem degradation to affect B→E probe metrics..."
+
+
+- name: "Test 3 Phase 2 — Observe B→E degradation and C→D→E stability"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Test 3 Phase 2: Collect degraded graph snapshot"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        def get(src, tgt):
+            m = [e for e in edges if e.get('source') == src and e.get('target') == tgt]
+            return m[0] if m else None
+        be = get('agent-b', 'agent-e')
+        cd = get('agent-c', 'agent-d')
+        de = get('agent-d', 'agent-e')
+        print('=== Test 3 Phase 2: Degraded snapshot (tc/netem on agent-b → agent-e) ===')
+        if be:
+            print('B->E: q_ema=' + str(round(be.get('q_ema',0),4)) +
+                  ' avg_rtt_ms=' + str(round(be.get('avg_rtt_ms',0),2)) +
+                  ' success_rate=' + str(round(be.get('success_rate',0),3)))
+        else:
+            print('B->E: no edge')
+        if cd:
+            print('C->D: q_ema=' + str(round(cd.get('q_ema',0),4)) +
+                  ' avg_rtt_ms=' + str(round(cd.get('avg_rtt_ms',0),2)) +
+                  ' success_rate=' + str(round(cd.get('success_rate',0),3)))
+        if de:
+            print('D->E: q_ema=' + str(round(de.get('q_ema',0),4)) +
+                  ' avg_rtt_ms=' + str(round(de.get('avg_rtt_ms',0),2)) +
+                  ' success_rate=' + str(round(de.get('success_rate',0),3)))
+        "
+      register: degraded_snapshot
+      failed_when: false
+      changed_when: false
+
+    - name: "Test 3 Phase 2: Print degraded snapshot"
+      ansible.builtin.debug:
+        msg: "{{ degraded_snapshot.stdout_lines }}"
+
+    - name: "Test 3 Phase 2: Assert B→E avg_rtt_ms > 50 (degradation confirmed)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        be = [e for e in edges if e.get('source') == 'agent-b' and e.get('target') == 'agent-e']
+        if not be:
+            print('NO_BE_EDGE')
+            sys.exit(1)
+        rtt = be[0].get('avg_rtt_ms', 0)
+        if rtt <= 50:
+            print('B->E avg_rtt_ms=' + str(rtt) + ' — degradation not yet reflected (wait longer or check tc)')
+            sys.exit(1)
+        print('PASS:B->E avg_rtt_ms=' + str(round(rtt,2)) + ' (>50 ms — degraded by tc/netem)')
+      register: degradation_assert
+      failed_when: degradation_assert.rc != 0
+      changed_when: false
+
+    - name: "Test 3 Phase 2: Print degradation assertion"
+      ansible.builtin.debug:
+        msg: "{{ degradation_assert.stdout }}"
+
+    - name: "Test 3 Phase 2: Assert C→D q_ema still healthy (> 0.8)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        cd = [e for e in edges if e.get('source') == 'agent-c' and e.get('target') == 'agent-d']
+        if not cd or cd[0].get('q_ema', 0) <= 0.8:
+            q = cd[0]['q_ema'] if cd else 0
+            print('C->D q_ema=' + str(round(q,4)) + ' — indirect path degraded (unexpected)')
+            sys.exit(1)
+        print('PASS:C->D q_ema=' + str(round(cd[0]['q_ema'],4)) + ' (indirect path healthy)')
+      register: cd_healthy
+      failed_when: cd_healthy.rc != 0
+      changed_when: false
+
+    - name: "Test 3 Phase 2: Print C→D health assertion"
+      ansible.builtin.debug:
+        msg: "{{ cd_healthy.stdout }}"
+
+
+# ─── Test 3 Phase 2 cleanup ──────────────────────────────────────────────────
+
+- name: "Test 3 Phase 3 — Remove tc/netem from agent-b and observe recovery"
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Test 3 Phase 3: Get primary network interface"
+      ansible.builtin.shell: ip route | awk '/default/ { print $5; exit }'
+      register: iface_cleanup
+      changed_when: false
+
+    - name: "Test 3 Phase 3: Remove tc qdisc (restore clean state)"
+      ansible.builtin.command: tc qdisc del dev {{ iface_cleanup.stdout }} root
+      failed_when: false
+      changed_when: true
+
+    - name: "Test 3 Phase 3: Verify tc qdisc removed"
+      ansible.builtin.command: tc qdisc show dev {{ iface_cleanup.stdout }}
+      register: qdisc_clean
+      changed_when: false
+
+    - name: "Test 3 Phase 3: Print tc state after cleanup"
+      ansible.builtin.debug:
+        msg: "{{ qdisc_clean.stdout_lines }}"
+
+    - name: "Test 3 Phase 3: Wait for recovery to propagate through probe cycles (60 s)"
+      ansible.builtin.pause:
+        seconds: 60
+        prompt: "Waiting 60 s for B→E probe metrics to recover after tc/netem removal..."
+
+
+- name: "Test 3 Phase 3 — Observe B→E recovery"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Test 3 Phase 3: Collect recovery graph snapshot"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        def get(src, tgt):
+            m = [e for e in edges if e.get('source') == src and e.get('target') == tgt]
+            return m[0] if m else None
+        be = get('agent-b', 'agent-e')
+        cd = get('agent-c', 'agent-d')
+        de = get('agent-d', 'agent-e')
+        print('=== Test 3 Phase 3: Recovery snapshot (tc/netem removed) ===')
+        if be:
+            print('B->E: q_ema=' + str(round(be.get('q_ema',0),4)) +
+                  ' avg_rtt_ms=' + str(round(be.get('avg_rtt_ms',0),2)) +
+                  ' success_rate=' + str(round(be.get('success_rate',0),3)))
+        if cd:
+            print('C->D: q_ema=' + str(round(cd.get('q_ema',0),4)) +
+                  ' avg_rtt_ms=' + str(round(cd.get('avg_rtt_ms',0),2)))
+        if de:
+            print('D->E: q_ema=' + str(round(de.get('q_ema',0),4)) +
+                  ' avg_rtt_ms=' + str(round(de.get('avg_rtt_ms',0),2)))
+        "
+      register: recovery_snapshot
+      failed_when: false
+      changed_when: false
+
+    - name: "Test 3 Phase 3: Print recovery snapshot"
+      ansible.builtin.debug:
+        msg: "{{ recovery_snapshot.stdout_lines }}"
+
+    - name: "Test 3 Phase 3: Assert B→E avg_rtt_ms < 50 (recovery confirmed)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        be = [e for e in edges if e.get('source') == 'agent-b' and e.get('target') == 'agent-e']
+        if not be:
+            print('NO_BE_EDGE')
+            sys.exit(1)
+        rtt = be[0].get('avg_rtt_ms', 0)
+        if rtt > 50:
+            print('B->E avg_rtt_ms=' + str(rtt) + ' — not yet recovered (q_ema EMA may still be catching up)')
+            sys.exit(1)
+        print('PASS:B->E avg_rtt_ms=' + str(round(rtt,2)) + ' (recovered to baseline)')
+      register: recovery_assert
+      failed_when: recovery_assert.rc != 0
+      changed_when: false
+
+    - name: "Test 3 Phase 3: Print recovery assertion"
+      ansible.builtin.debug:
+        msg: "{{ recovery_assert.stdout }}"
+
+
+# ─── Gate K summary ──────────────────────────────────────────────────────────
+
+- name: Gate K — final validation summary
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Print Gate K summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Gate K — Segmented Adaptive Flow-Path Lab Validation Summary ==="
+          - "Topology: A(coord) B<->C(peers) B->E(direct) C->D->E(indirect) C-/>E(blocked)"
+          - ""
+          - "Test 1 — Flow discovery:"
+          - "  B->E FlowObservation: destination_ip=10.50.50.10, port=9004, outbound, connect_established"
+          - "  B->E graph edge: q_ema > 0 (PASS)"
+          - "  C->D graph edge: q_ema > 0 (PASS)"
+          - "  D->E graph edge: q_ema > 0 (PASS)"
+          - "  C->E direct edge: absent (SG blocks C->E — PASS)"
+          - ""
+          - "Test 2 — Direct vs indirect:"
+          - "  B->E: single-hop direct path (metrics above)"
+          - "  C->D->E: two-hop indirect path (metrics above)"
+          - "  FlowObservation count for B->E captured by agent-b observer"
+          - "  C->D and D->E flow counts: gap documented (no observer on agent-c/agent-d)"
+          - ""
+          - "Test 3 — Adaptation:"
+          - "  Phase 1: healthy baseline captured"
+          - "  Phase 2: tc/netem on agent-b (200ms ±50ms, 10% loss) targeting agent-e"
+          - "           B->E avg_rtt_ms > 50 ms CONFIRMED; C->D q_ema > 0.8 CONFIRMED"
+          - "  Phase 3: tc/netem removed; B->E avg_rtt_ms < 50 ms CONFIRMED (recovery)"
+          - ""
+          - "Gate K status: all assertions PASS — update QUALITY_GATE.md to GREEN"
