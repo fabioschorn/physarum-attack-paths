@@ -95,8 +95,11 @@ pub struct PathResult {
     pub nodes: Vec<AgentId>,
     /// Ordered directed edges traversed.
     pub edges: Vec<PathEdge>,
-    /// Product of all d_ij values along the path.
+    /// Negative-log path cost score: exp(-(sum(-ln(q_ema)) + hop_weight*(hops-1))).
+    /// Higher is better. Weak edges dominate cost; multi-hop incurs a small structural penalty.
     pub score: f64,
+    /// Number of directed edges in this path (hops = nodes.len() - 1).
+    pub hops: usize,
 }
 
 /// Response body for GET /paths.
@@ -106,6 +109,13 @@ pub struct PathsResponse {
     pub target: AgentId,
     /// All discovered simple paths, sorted by score descending.
     pub paths: Vec<PathResult>,
+    /// Nodes of the top-ranked path (paths[0].nodes), or empty if no paths found.
+    pub selected_path: Vec<AgentId>,
+    /// Paths whose score >= secondary_conduit_threshold * best_score, excluding selected_path.
+    /// Models Physarum alternate-tube retention under uncertainty.
+    /// secondary_conduit_threshold=0.85 is a Physarum-inspired retention policy constant
+    /// (calibrated for Gate K.1; may be tuned as more topologies are validated).
+    pub secondary_conduits: Vec<PathResult>,
 }
 
 /// State of a single directed edge at a point in time.

@@ -1,0 +1,576 @@
+---
+# physarum AWS lab — Gate K.1 autonomous path selection validation playbook.
+#
+# Proves that /paths selected_path switches autonomously from B→E to B→C→D→E
+# when B→E is degraded via tc/netem, and reverts when B→E recovers.
+#
+# Scoring model (Gate K.1):
+#   score = exp(-(sum(-ln(q_ema)) + HOP_WEIGHT*(hops-1)))
+#   HOP_WEIGHT=0.05, Q_EMA_FLOOR=0.001, SECONDARY_CONDUIT_THRESHOLD=0.85
+#   Healthy indirect (q_ema≈0.9997) beats degraded direct (q_ema≈0.85)
+#   because RTT-driven q_ema degradation dominates the small hop penalty.
+#
+# Topology (lab_phase=gate-k, identical to Gate K):
+#   A (server-a)  coordinator               10.50.10.10
+#   B (agent-b)   probes C and E directly   10.50.20.10  (direct path: B→E)
+#   C (agent-c)   probes B and D            10.50.30.10  (peer with B)
+#   D (agent-d)   probes E only             10.50.40.10  (intermediary: D→E leg)
+#   E (agent-e)   isolated destination      10.50.50.10  (no probe targets)
+#
+# Phase 1 — healthy baseline:
+#   GET /paths?source=agent-b&target=agent-e
+#   Assert: selected_path = ["agent-b","agent-e"]
+#   Assert: secondary_conduits contains the B→C→D→E path
+#
+# Phase 2 — degrade B→E (tc/netem on agent-b, 200ms ±50ms / 10% loss):
+#   Wait 90 s (9 probe cycles). GET /paths again.
+#   Assert: selected_path switches to ["agent-b","agent-c","agent-d","agent-e"]
+#   Assert: B→E q_ema has dropped (indirect path now beats direct)
+#
+# Phase 3 — recover (tc/netem removed from agent-b):
+#   Wait 180 s (18 probe cycles). GET /paths again.
+#   Assert: selected_path reverts to ["agent-b","agent-e"]
+#
+# Entry criteria:
+#   Terraform: lab_phase=gate-k, enable_observer=true, enable_artifact_download=true
+#   All 5 nodes running. physarum-agent active on agent-b, agent-c, agent-d, agent-e.
+#   physarum-ebpf-observer active on agent-b.
+#   Binary built with Gate K.1 scoring model (PR #82).
+#
+# Run:
+#   ansible-playbook -i ansible/inventory.local.ini \
+#     ansible/validate-autonomous-path-selection.yml
+
+
+# ─── Pre-flight: confirm all services are active ─────────────────────────────
+
+- name: Pre-flight — confirm physarum-server is active on server-a
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check physarum-server systemd status
+      ansible.builtin.command: systemctl is-active physarum-server
+      register: server_active
+      failed_when: false
+      changed_when: false
+
+    - name: Print server service status
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: physarum-server={{ server_active.stdout }}"
+
+    - name: Assert physarum-server is active
+      ansible.builtin.assert:
+        that: server_active.stdout == "active"
+        fail_msg: >
+          physarum-server is not active on {{ inventory_hostname }}
+          (status: {{ server_active.stdout }}). Wait 60 s after terraform apply
+          for cloud-init to complete, then retry.
+        success_msg: "physarum-server active on {{ inventory_hostname }}"
+
+
+- name: Pre-flight — confirm physarum-agent is active on all agents
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check physarum-agent systemd status
+      ansible.builtin.command: systemctl is-active physarum-agent
+      register: agent_active
+      failed_when: false
+      changed_when: false
+
+    - name: Print agent service status
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: physarum-agent={{ agent_active.stdout }}"
+
+    - name: Assert physarum-agent is active
+      ansible.builtin.assert:
+        that: agent_active.stdout == "active"
+        fail_msg: >
+          physarum-agent is not active on {{ inventory_hostname }}
+          (status: {{ agent_active.stdout }}). Wait 60 s after terraform apply,
+          then retry.
+        success_msg: "physarum-agent active on {{ inventory_hostname }}"
+
+
+- name: Pre-flight — confirm eBPF observer is active on agent-b
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check physarum-ebpf-observer systemd status
+      ansible.builtin.command: systemctl is-active physarum-ebpf-observer
+      register: observer_active
+      failed_when: false
+      changed_when: false
+
+    - name: Assert physarum-ebpf-observer is active
+      ansible.builtin.assert:
+        that: observer_active.stdout == "active"
+        fail_msg: >
+          physarum-ebpf-observer is not active on agent-b
+          (status: {{ observer_active.stdout }}).
+          Requires enable_observer=true and enable_artifact_download=true.
+        success_msg: "physarum-ebpf-observer active on agent-b"
+
+    - name: Wait for probe cycles (agents probe every 10 s — allow 6 full cycles)
+      ansible.builtin.pause:
+        seconds: 70
+        prompt: "Waiting 70 s for agents to complete probe cycles and build graph edges..."
+
+
+# ─── Phase 1: Healthy baseline — selected_path = B→E ────────────────────────
+
+- name: "Gate K.1 Phase 1 — Healthy baseline: selected_path must be B→E"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Phase 1: Snapshot /graph (baseline edge metrics)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        def fmt(src, tgt):
+            m = [e for e in edges if e.get('source') == src and e.get('target') == tgt]
+            if not m:
+                return src + '->' + tgt + ': no edge'
+            e = m[0]
+            return (src + '->' + tgt +
+                    ' q_ema=' + str(round(e.get('q_ema',0), 4)) +
+                    ' d_ij=' + str(round(e.get('d_ij',0), 4)) +
+                    ' avg_rtt_ms=' + str(round(e.get('avg_rtt_ms',0), 2)) +
+                    ' success_rate=' + str(round(e.get('success_rate',0), 3)))
+        print('Phase 1 baseline edge metrics:')
+        print('  ' + fmt('agent-b', 'agent-e'))
+        print('  ' + fmt('agent-b', 'agent-c'))
+        print('  ' + fmt('agent-c', 'agent-d'))
+        print('  ' + fmt('agent-d', 'agent-e'))
+        "
+      register: phase1_graph
+      failed_when: false
+      changed_when: false
+
+    - name: "Phase 1: Print baseline edge metrics"
+      ansible.builtin.debug:
+        msg: "{{ phase1_graph.stdout_lines }}"
+
+    - name: "Phase 1: GET /paths and display full response"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-e' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        sel = data.get('selected_path', [])
+        paths = data.get('paths', [])
+        conduits = data.get('secondary_conduits', [])
+        print('selected_path: ' + str(sel))
+        print('paths found: ' + str(len(paths)))
+        for i, p in enumerate(paths):
+            print('  path[' + str(i) + '] nodes=' + str(p.get('nodes',[])) +
+                  ' score=' + str(round(p.get('score',0), 6)) +
+                  ' hops=' + str(p.get('hops',0)))
+        print('secondary_conduits: ' + str(len(conduits)))
+        for c in conduits:
+            print('  conduit nodes=' + str(c.get('nodes',[])) +
+                  ' score=' + str(round(c.get('score',0), 6)))
+        "
+      register: phase1_paths_display
+      failed_when: false
+      changed_when: false
+
+    - name: "Phase 1: Print /paths response"
+      ansible.builtin.debug:
+        msg: "{{ phase1_paths_display.stdout_lines }}"
+
+    - name: "Phase 1: Assert selected_path = B→E (direct, healthy)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-e' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        sel = data.get('selected_path', [])
+        expected = ['agent-b', 'agent-e']
+        if sel != expected:
+            print('FAIL: selected_path=' + str(sel) + ' expected=' + str(expected))
+            sys.exit(1)
+        print('PASS: selected_path=' + str(sel))
+        "
+      register: phase1_selected_assert
+      failed_when: phase1_selected_assert.rc != 0
+      changed_when: false
+
+    - name: "Phase 1: Print selected_path assertion"
+      ansible.builtin.debug:
+        msg: "{{ phase1_selected_assert.stdout }}"
+
+    - name: "Phase 1: Assert secondary_conduits or paths contains B→C→D→E"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-e' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        conduits = data.get('secondary_conduits', [])
+        paths = data.get('paths', [])
+        indirect = ['agent-b', 'agent-c', 'agent-d', 'agent-e']
+        found_conduit = any(c.get('nodes') == indirect for c in conduits)
+        found_path = any(p.get('nodes') == indirect for p in paths)
+        if not (found_conduit or found_path):
+            print('FAIL: B->C->D->E not found. paths=' + str([p.get('nodes') for p in paths]))
+            sys.exit(1)
+        label = 'secondary_conduits' if found_conduit else 'paths list'
+        print('PASS: B->C->D->E found in ' + label)
+        "
+      register: phase1_conduit_assert
+      failed_when: phase1_conduit_assert.rc != 0
+      changed_when: false
+
+    - name: "Phase 1: Print secondary_conduit assertion"
+      ansible.builtin.debug:
+        msg: "{{ phase1_conduit_assert.stdout }}"
+
+
+# ─── Phase 2: Degrade B→E — selected_path must switch to B→C→D→E ────────────
+
+- name: "Gate K.1 Phase 2 — Apply tc/netem on agent-b (target 10.50.50.10)"
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Phase 2: Get primary network interface"
+      ansible.builtin.shell: ip route | awk '/default/ { print $5; exit }'
+      register: iface
+      changed_when: false
+
+    - name: "Phase 2: Print primary interface"
+      ansible.builtin.debug:
+        msg: "Primary interface: {{ iface.stdout }}"
+
+    - name: "Phase 2: Remove any existing tc qdisc (idempotent cleanup)"
+      ansible.builtin.command: tc qdisc del dev {{ iface.stdout }} root
+      failed_when: false
+      changed_when: false
+
+    - name: "Phase 2: Add prio qdisc root"
+      ansible.builtin.command: tc qdisc add dev {{ iface.stdout }} root handle 1{{ ':' }} prio
+      changed_when: true
+
+    - name: "Phase 2: Add netem on band 3 (200ms ±50ms delay, 10% loss)"
+      ansible.builtin.command: >
+        tc qdisc add dev {{ iface.stdout }} parent 1:3 handle 30: netem delay 200ms 50ms loss 10%
+      changed_when: true
+
+    - name: "Phase 2: Add u32 filter — route traffic to agent-e (10.50.50.10) through netem"
+      ansible.builtin.command: >
+        tc filter add dev {{ iface.stdout }} parent 1:0 protocol ip u32
+        match ip dst 10.50.50.10/32 flowid 1:3
+      changed_when: true
+
+    - name: "Phase 2: Verify tc qdisc and filter"
+      ansible.builtin.shell: >
+        tc qdisc show dev {{ iface.stdout }} && tc filter show dev {{ iface.stdout }}
+      register: qdisc_phase2
+      changed_when: false
+
+    - name: "Phase 2: Print tc state"
+      ansible.builtin.debug:
+        msg: "{{ qdisc_phase2.stdout_lines }}"
+
+    - name: "Phase 2: Wait for degradation to propagate through probe cycles (90 s = 9 cycles)"
+      ansible.builtin.pause:
+        seconds: 90
+        prompt: "Waiting 90 s for tc/netem degradation to affect B→E q_ema..."
+
+
+- name: "Gate K.1 Phase 2 — Verify selected_path has switched to B→C→D→E"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Phase 2: Snapshot /graph (degraded edge metrics)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        def fmt(src, tgt):
+            m = [e for e in edges if e.get('source') == src and e.get('target') == tgt]
+            if not m:
+                return src + '->' + tgt + ': no edge'
+            e = m[0]
+            return (src + '->' + tgt +
+                    ' q_ema=' + str(round(e.get('q_ema',0), 4)) +
+                    ' avg_rtt_ms=' + str(round(e.get('avg_rtt_ms',0), 2)) +
+                    ' success_rate=' + str(round(e.get('success_rate',0), 3)))
+        print('Phase 2 degraded edge metrics (tc/netem on agent-b -> 10.50.50.10):')
+        print('  ' + fmt('agent-b', 'agent-e'))
+        print('  ' + fmt('agent-b', 'agent-c'))
+        print('  ' + fmt('agent-c', 'agent-d'))
+        print('  ' + fmt('agent-d', 'agent-e'))
+        "
+      register: phase2_graph
+      failed_when: false
+      changed_when: false
+
+    - name: "Phase 2: Print degraded edge metrics"
+      ansible.builtin.debug:
+        msg: "{{ phase2_graph.stdout_lines }}"
+
+    - name: "Phase 2: GET /paths and display full response"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-e' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        sel = data.get('selected_path', [])
+        paths = data.get('paths', [])
+        conduits = data.get('secondary_conduits', [])
+        print('selected_path: ' + str(sel))
+        print('paths found: ' + str(len(paths)))
+        for i, p in enumerate(paths):
+            print('  path[' + str(i) + '] nodes=' + str(p.get('nodes',[])) +
+                  ' score=' + str(round(p.get('score',0), 6)) +
+                  ' hops=' + str(p.get('hops',0)))
+        print('secondary_conduits: ' + str(len(conduits)))
+        for c in conduits:
+            print('  conduit nodes=' + str(c.get('nodes',[])) +
+                  ' score=' + str(round(c.get('score',0), 6)))
+        "
+      register: phase2_paths_display
+      failed_when: false
+      changed_when: false
+
+    - name: "Phase 2: Print /paths response"
+      ansible.builtin.debug:
+        msg: "{{ phase2_paths_display.stdout_lines }}"
+
+    - name: "Phase 2: Assert selected_path = B→C→D→E (indirect path won)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-e' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        sel = data.get('selected_path', [])
+        expected = ['agent-b', 'agent-c', 'agent-d', 'agent-e']
+        if sel != expected:
+            print('FAIL: selected_path=' + str(sel) + ' expected=' + str(expected))
+            print('  B->E q_ema may not have degraded enough. Check wait time or tc config.')
+            sys.exit(1)
+        print('PASS: selected_path switched to ' + str(sel))
+        "
+      register: phase2_selected_assert
+      failed_when: phase2_selected_assert.rc != 0
+      changed_when: false
+
+    - name: "Phase 2: Print selected_path assertion"
+      ansible.builtin.debug:
+        msg: "{{ phase2_selected_assert.stdout }}"
+
+    - name: "Phase 2: Assert B→E q_ema degraded (< 0.95)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        be = [e for e in edges if e.get('source') == 'agent-b' and e.get('target') == 'agent-e']
+        if not be:
+            print('NO_BE_EDGE'); sys.exit(1)
+        q = be[0].get('q_ema', 1.0)
+        if q >= 0.95:
+            print('B->E q_ema=' + str(round(q,4)) + ' >= 0.95 — not yet degraded')
+            sys.exit(1)
+        print('PASS: B->E q_ema=' + str(round(q,4)) + ' (degraded by tc/netem)')
+        "
+      register: phase2_qema_assert
+      failed_when: phase2_qema_assert.rc != 0
+      changed_when: false
+
+    - name: "Phase 2: Print B→E q_ema degradation assertion"
+      ansible.builtin.debug:
+        msg: "{{ phase2_qema_assert.stdout }}"
+
+
+# ─── Phase 3: Recover — selected_path must revert to B→E ────────────────────
+
+- name: "Gate K.1 Phase 3 — Remove tc/netem from agent-b"
+  hosts: agent-b
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Phase 3: Get primary network interface"
+      ansible.builtin.shell: ip route | awk '/default/ { print $5; exit }'
+      register: iface_cleanup
+      changed_when: false
+
+    - name: "Phase 3: Remove tc qdisc (restore clean state)"
+      ansible.builtin.command: tc qdisc del dev {{ iface_cleanup.stdout }} root
+      failed_when: false
+      changed_when: true
+
+    - name: "Phase 3: Verify tc qdisc removed"
+      ansible.builtin.command: tc qdisc show dev {{ iface_cleanup.stdout }}
+      register: qdisc_clean
+      changed_when: false
+
+    - name: "Phase 3: Print tc state after cleanup"
+      ansible.builtin.debug:
+        msg: "{{ qdisc_clean.stdout_lines }}"
+
+    - name: "Phase 3: Wait for B→E recovery through probe cycles (180 s = 18 cycles)"
+      ansible.builtin.pause:
+        seconds: 180
+        prompt: "Waiting 180 s for B→E q_ema to recover (WINDOW_SIZE=20, probe_interval=10s)..."
+
+
+- name: "Gate K.1 Phase 3 — Verify selected_path reverts to B→E"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Phase 3: Snapshot /graph (recovery edge metrics)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        def fmt(src, tgt):
+            m = [e for e in edges if e.get('source') == src and e.get('target') == tgt]
+            if not m:
+                return src + '->' + tgt + ': no edge'
+            e = m[0]
+            return (src + '->' + tgt +
+                    ' q_ema=' + str(round(e.get('q_ema',0), 4)) +
+                    ' avg_rtt_ms=' + str(round(e.get('avg_rtt_ms',0), 2)) +
+                    ' success_rate=' + str(round(e.get('success_rate',0), 3)))
+        print('Phase 3 recovery edge metrics (tc/netem removed):')
+        print('  ' + fmt('agent-b', 'agent-e'))
+        print('  ' + fmt('agent-b', 'agent-c'))
+        print('  ' + fmt('agent-c', 'agent-d'))
+        print('  ' + fmt('agent-d', 'agent-e'))
+        "
+      register: phase3_graph
+      failed_when: false
+      changed_when: false
+
+    - name: "Phase 3: Print recovery edge metrics"
+      ansible.builtin.debug:
+        msg: "{{ phase3_graph.stdout_lines }}"
+
+    - name: "Phase 3: GET /paths and display full response"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-e' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        sel = data.get('selected_path', [])
+        paths = data.get('paths', [])
+        conduits = data.get('secondary_conduits', [])
+        print('selected_path: ' + str(sel))
+        print('paths found: ' + str(len(paths)))
+        for i, p in enumerate(paths):
+            print('  path[' + str(i) + '] nodes=' + str(p.get('nodes',[])) +
+                  ' score=' + str(round(p.get('score',0), 6)) +
+                  ' hops=' + str(p.get('hops',0)))
+        print('secondary_conduits: ' + str(len(conduits)))
+        for c in conduits:
+            print('  conduit nodes=' + str(c.get('nodes',[])) +
+                  ' score=' + str(round(c.get('score',0), 6)))
+        "
+      register: phase3_paths_display
+      failed_when: false
+      changed_when: false
+
+    - name: "Phase 3: Print /paths response"
+      ansible.builtin.debug:
+        msg: "{{ phase3_paths_display.stdout_lines }}"
+
+    - name: "Phase 3: Assert selected_path reverted to B→E"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-e' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        sel = data.get('selected_path', [])
+        expected = ['agent-b', 'agent-e']
+        if sel != expected:
+            print('FAIL: selected_path=' + str(sel) + ' expected=' + str(expected))
+            print('  q_ema may still be recovering. WINDOW_SIZE=20 needs more cycles.')
+            sys.exit(1)
+        print('PASS: selected_path reverted to ' + str(sel))
+        "
+      register: phase3_selected_assert
+      failed_when: phase3_selected_assert.rc != 0
+      changed_when: false
+
+    - name: "Phase 3: Print recovery assertion"
+      ansible.builtin.debug:
+        msg: "{{ phase3_selected_assert.stdout }}"
+
+    - name: "Phase 3: Assert B→E avg_rtt_ms < 50 (RTT recovered)"
+      ansible.builtin.shell: |
+        curl -s 'http://127.0.0.1:8080/graph' | \
+        python3 -c "
+        import json, sys
+        data = json.load(sys.stdin)
+        edges = data.get('edges', [])
+        be = [e for e in edges if e.get('source') == 'agent-b' and e.get('target') == 'agent-e']
+        if not be:
+            print('NO_BE_EDGE'); sys.exit(1)
+        rtt = be[0].get('avg_rtt_ms', 0)
+        if rtt > 50:
+            print('B->E avg_rtt_ms=' + str(round(rtt,2)) + ' — not yet recovered')
+            sys.exit(1)
+        print('PASS: B->E avg_rtt_ms=' + str(round(rtt,2)) + ' (recovered to baseline)')
+        "
+      register: phase3_rtt_assert
+      failed_when: phase3_rtt_assert.rc != 0
+      changed_when: false
+
+    - name: "Phase 3: Print RTT recovery assertion"
+      ansible.builtin.debug:
+        msg: "{{ phase3_rtt_assert.stdout }}"
+
+
+# ─── Gate K.1 summary ────────────────────────────────────────────────────────
+
+- name: "Gate K.1 — Final validation summary"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "Gate K.1: Print summary"
+      ansible.builtin.debug:
+        msg:
+          - "=== Gate K.1 — Autonomous Path Selection Validation Summary ==="
+          - "Topology: lab_phase=gate-k, enable_observer=true"
+          - "Scoring: exp(-(sum(-ln(q_ema)) + 0.05*(hops-1)))"
+          - ""
+          - "Phase 1 — Healthy baseline:"
+          - "  selected_path: agent-b -> agent-e (direct, PASS)"
+          - "  secondary_conduits: B->C->D->E present (PASS)"
+          - ""
+          - "Phase 2 — B->E degraded (tc/netem 200ms±50ms 10%loss on agent-b):"
+          - "  selected_path switched to: agent-b -> agent-c -> agent-d -> agent-e (PASS)"
+          - "  B->E q_ema degraded below 0.95 (PASS)"
+          - ""
+          - "Phase 3 — Recovery (tc/netem removed, 180s wait):"
+          - "  selected_path reverted to: agent-b -> agent-e (PASS)"
+          - "  B->E avg_rtt_ms recovered below 50ms (PASS)"
+          - ""
+          - "Gate K.1 status: all assertions PASS"
+          - "Update QUALITY_GATE.md Gate K.1 row to GREEN."

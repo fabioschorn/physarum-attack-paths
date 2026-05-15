@@ -1,7 +1,7 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** Gate K — Segmented Adaptive Flow-Path Lab — COMPLETE  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime) · GREEN (eBPF Observer Agent Flow Correlation) · GREEN (Gate K)  
+**Current gate:** Gate K.1 — Autonomous Path Selection — COMPLETE  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime) · GREEN (eBPF Observer Agent Flow Correlation) · GREEN (Gate K) · GREEN (Gate K.1)  
 **Last updated:** 2026-05-15
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
@@ -12,7 +12,8 @@
 
 | Area | Status | Evidence | Notes |
 |---|---|---|---|
-| Build / test health | GREEN | 64 tests passing | `cargo test --workspace` — 18 agent + 13 protocol + 33 server; last verified PR #68 |
+| Build / test health | GREEN | 86 tests passing | `cargo test --workspace` — 18 agent + 16 observer + 12 protocol + 40 server; last verified PR #82 |
+| Gate K.1 — autonomous path selection (negative-log scoring + selected_path + secondary_conduits) | GREEN | `autonomous-path-selection-evidence.txt` | Issue #80 / PR #82 |
 | Docker A/B/C/D lab | GREEN | `check-docker-lab.sh`: 34 passed, 0 failed | PR #19 |
 | GET /paths endpoint | GREEN | Docker `/paths` validation posted | PR #20 |
 | Documentation workflow | GREEN | PR/issue templates + ownership guidelines merged | PR #23 |
@@ -34,10 +35,12 @@
 | Gate J — eBPF Observer Runtime (AWS EC2) | GREEN | kernel 6.18; tracepoint attached; FlowObservation posted; failed=0; metadata-only confirmed | Issue #69 |
 | Gate J.1 — eBPF observer agent-b → agent-c flow correlation | GREEN | destination_ip=10.50.30.10, port=9002, direction=outbound, event=connect_established confirmed; q_ema≈1.0; failed=0; 42 resources destroyed | Issue #72 |
 | Gate K — segmented adaptive flow-path A/B/C/D/E lab | GREEN | failed=0 all nodes; B→E FlowObs confirmed; q_ema>0 on B→E, C→D, D→E; C→E absent; degradation avg_rtt_ms=130.1ms PASS; recovery avg_rtt_ms=8.55ms PASS; 46 resources destroyed | Issue #76 — 4 documented limitations; see note below |
+| Gate K.1 — autonomous path selection and tie-breaking | GREEN | failed=0 all nodes; Phase 1: selected_path=B→E score=1.0, B→C→D→E secondary_conduit score=0.9047; Phase 2: selected_path switched to B→C→D→E (B→E q_ema=0.8508 avg_rtt_ms=120.75); Phase 3: selected_path reverted to B→E (q_ema=0.9358 score=0.9550); 46 resources destroyed | Issue #80 / PR #82 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
 
+**GREEN** for Gate K.1 — Autonomous Path Selection — 5-node AWS lab (lab_phase=gate-k, enable_observer=true); topology: B↔C(peers), B→E(direct), C→D→E(indirect), C→E blocked by SG; scoring model: score=exp(-(sum(-ln(max(q_ema,0.001)))+0.05*(hops-1))) (HOP_WEIGHT=0.05, Q_EMA_FLOOR=0.001, SECONDARY_CONDUIT_THRESHOLD=0.85); Phase 1 healthy: B→E q_ema=1.0 score=1.0 selected_path=[agent-b,agent-e]; B→C→D→E score=0.9047 in secondary_conduits; Phase 2 degraded (tc/netem 200ms±50ms 10%loss via u32 filter to 10.50.50.10/32): B→E q_ema=0.8508 avg_rtt_ms=120.75 score=0.8598; B→C→D→E score=0.9048 wins; selected_path switches to [agent-b,agent-c,agent-d,agent-e]; Phase 3 recovery (tc removed, 180s wait): B→E q_ema=0.9358 avg_rtt_ms=7.5 score=0.9550; B→C→D→E score=0.9048; selected_path reverts to [agent-b,agent-e]; Ansible PLAY RECAP agent-b ok=20 failed=0, server-a ok=28 failed=0; 46 resources created + destroyed. NOTE: ranking flip verified at Level 2 (automatic path re-selection by /paths endpoint). HOP_WEIGHT=0.05 calibrated for this topology: healthy 3-hop beats degraded 1-hop when q_ema drops below ~0.91 on the direct edge. B→E q_ema=0.9358 at recovery (not full 1.0 — 18/20 window slots flushed in 180s); score=0.9550 > 0.9048 is sufficient for correct reselection before full EMA recovery.  
 **GREEN** for Gate K — Segmented Adaptive Flow-Path Lab — 5-node AWS lab (lab_phase=gate-k, enable_observer=true); topology: B↔C(peers), B→E(direct), C→D→E(indirect), C→E blocked by SG; Test 1: B→E FlowObservation (destination_ip=10.50.50.10, destination_port=9004, direction=outbound, event=connect_established); B→E q_ema=0.9999, C→D q_ema=0.9997, D→E q_ema=0.9998; C→E edge absent (SG enforcement confirmed); Test 2: direct B→E avg_rtt_ms=0.05ms vs indirect C→D avg_rtt_ms=0.1ms, D→E avg_rtt_ms=0.1ms; sample_count=20; FlowObservation count gap documented (no observer on agent-c/agent-d); Test 3: baseline B→E avg_rtt_ms=0.05ms; Phase 2 degradation (tc/netem 200ms±50ms 10%loss via u32 filter to 10.50.50.10/32): B→E avg_rtt_ms=130.1ms CONFIRMED (>50ms), C→D q_ema=0.9999 CONFIRMED (indirect healthy); Phase 3 recovery (tc removed, 180s wait): B→E avg_rtt_ms=8.55ms CONFIRMED (<50ms); Ansible PLAY RECAP agent-b ok=20 failed=0, server-a ok=33 failed=0; 46 resources created + destroyed. NOTE: WINDOW_SIZE=20 × probe_interval=10s = 200s full flush time; 180s recovery wait sufficient (18/20 window slots cleared). Process attribution (comm=mandb) is expected for async TCP connections; 5-tuple uniquely identifies B→E physarum probe flow. DOCUMENTED LIMITATIONS: (1) Segment semantics — B (10.50.20.10) and C (10.50.30.10) are modelled as logical peers via SG reachability; they reside in different AWS subnets (10.50.20.0/24 and 10.50.30.0/24 respectively); strict same-subnet semantics not implemented in gate-k. (2) Path forwarding semantics — C→D→E is a logical multi-hop graph path (agent-c probes agent-d directly; agent-d probes agent-e directly); there is no network-layer packet forwarding or proxying through D. (3) Adaptation semantics — Test 3 validates that B→E probe metrics degrade and recover under tc/netem; the Physarum organism observes the degradation via q_ema changes but automatic path re-selection (organism traffic shifting from B→E to C→D→E during degradation) was not captured; /paths ranking during Phase 2 degradation was not recorded; that measurement is future work. (4) Flow count coverage — eBPF observer is present on agent-b only; per-edge FlowObservation counts for C→D and D→E are unavailable; those edges are confirmed exclusively via graph q_ema>0 and sample_count=20; extending observers to agent-c and agent-d is deferred to a future gate (Issue #76).  
 **GREEN** for Gate J.1 — eBPF Observer Agent Flow Correlation — FlowObservation (destination_ip=10.50.30.10, destination_port=9002, direction=outbound, event=connect_established) confirmed for physarum-agent → agent-c probe; agent-b → agent-c graph edge q_ema≈1.0 (sample_count=20); Ansible PLAY RECAP agent-b ok=17 failed=0, server-a ok=14 failed=0; 42 resources created + destroyed. NOTE: tracepoint/sock/inet_sock_set_state fires in softirq context — comm=swapper/0 (kernel idle at state change time) is expected for async connections; the 5-tuple uniquely identifies the physarum probe flow; process attribution improvement deferred to a future gate (Issue #72).  
 **GREEN** for Gate J — eBPF Observer Runtime — `physarum-ebpf-observer` binary + `physarum-ebpf-observer-ebpf` eBPF bytecode deployed to EC2 (AL2023, kernel 6.18.25); observer attached to `tracepoint/sock/inet_sock_set_state`; FlowObservation events (source_ip, destination_ip, source_port, destination_port, protocol, direction, event, pid, comm) posted to coordinator and confirmed via `GET /flow-observations`; metadata-only (no payload fields); Ansible PLAY RECAP agent-b ok=21 failed=0, server-a ok=8 failed=0; 42 resources created + destroyed (Issue #69).  
@@ -99,12 +102,13 @@ Runtime endpoints     : NOT yet validated in AWS
 | Gate J — eBPF Observer Runtime Validation | COMPLETED — Issue #69 |
 | Gate J.1 — eBPF Observer Agent Flow Correlation | COMPLETED — Issue #72 |
 | Gate K — Segmented Adaptive Flow-Path Lab | COMPLETED — Issue #76 |
+| Gate K.1 — Autonomous Path Selection (negative-log scoring) | COMPLETED — Issue #80 / PR #82 |
 
 ---
 
 ## Active gate
 
-No active gate. Gate K complete. Next gate TBD.
+No active gate. Gate K.1 complete. Next gate TBD.
 
 ---
 

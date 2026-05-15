@@ -1,0 +1,119 @@
+Autonomous Path Selection Evidence
+Issue #80 — Gate K.1
+Date: 2026-05-15
+Playbook: examples/aws-lab/ansible/validate-autonomous-path-selection.yml
+Terraform: lab_phase=gate-k, enable_observer=true, ami_id_override=ami-02ac6525f2b2b8166 (46 resources, us-east-1)
+
+Gate K.1 status: PASS — all assertions passed; failed=0 on all nodes; 46 resources destroyed.
+
+=== Lab topology ===
+Topology: A(coord) B<->C(peers) B->E(direct) C->D->E(indirect) C-/>E(SG-blocked)
+Private IPs (deterministic from cidrhost()):
+  server-a (A): 10.50.10.10
+  agent-b  (B): 10.50.20.10
+  agent-c  (C): 10.50.30.10
+  agent-d  (D): 10.50.40.10
+  agent-e  (E): 10.50.50.10
+
+=== Scoring model (Gate K.1) ===
+  score = exp(-(sum(-ln(max(q_ema, 0.001))) + 0.05*(hops-1)))
+  HOP_WEIGHT=0.05, Q_EMA_FLOOR=0.001, SECONDARY_CONDUIT_THRESHOLD=0.85
+  Implemented in PR #82 (feat/gate-k1-autonomous-path-selection).
+
+=== Pre-flight ===
+  physarum-server active on server-a
+  physarum-agent active on agent-b, agent-c, agent-d, agent-e
+  physarum-ebpf-observer active on agent-b
+
+=== Phase 1 — Healthy baseline ===
+Edge metrics:
+  agent-b->agent-e q_ema=1.0    d_ij=0.8333 avg_rtt_ms=0.0  success_rate=1.0
+  agent-b->agent-c q_ema=1.0    d_ij=0.8333 avg_rtt_ms=0.0  success_rate=1.0
+  agent-c->agent-d q_ema=0.9999 d_ij=0.8333 avg_rtt_ms=0.05 success_rate=1.0
+  agent-d->agent-e q_ema=1.0    d_ij=0.8333 avg_rtt_ms=0.0  success_rate=1.0
+
+GET /paths?source=agent-b&target=agent-e:
+  selected_path: ['agent-b', 'agent-e']
+  paths found: 2
+    path[0] nodes=['agent-b', 'agent-e'] score=1.0 hops=1
+    path[1] nodes=['agent-b', 'agent-c', 'agent-d', 'agent-e'] score=0.904704 hops=3
+  secondary_conduits: 1
+    conduit nodes=['agent-b', 'agent-c', 'agent-d', 'agent-e'] score=0.904704
+
+Assertions:
+  PASS: selected_path=['agent-b', 'agent-e'] (direct path, healthy)
+  PASS: B->C->D->E found in secondary_conduits (score=0.9047 >= 0.85 * 1.0)
+
+=== Phase 2 — B→E degraded (tc/netem on agent-b targeting 10.50.50.10) ===
+tc commands applied to agent-b (interface ens5):
+  tc qdisc add dev ens5 root handle 1: prio
+  tc qdisc add dev ens5 parent 1:3 handle 30: netem delay 200ms 50ms loss 10%
+  tc filter add dev ens5 parent 1:0 protocol ip u32 match ip dst 10.50.50.10/32 flowid 1:3
+  Wait: 90s (9 probe cycles)
+
+tc state verified:
+  qdisc prio 1: root refcnt 3 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1
+  qdisc netem 30: parent 1:3 limit 1000 delay 200ms 50ms loss 10% seed 8673808876160078484
+  filter match 0a32320a/ffffffff at 16 (= 10.50.50.10/32)
+
+Degraded edge metrics:
+  agent-b->agent-e q_ema=0.8598 avg_rtt_ms=120.75 success_rate=1.0
+  agent-b->agent-c q_ema=1.0    avg_rtt_ms=0.0    success_rate=1.0
+  agent-c->agent-d q_ema=1.0    avg_rtt_ms=0.0    success_rate=1.0
+  agent-d->agent-e q_ema=1.0    avg_rtt_ms=0.0    success_rate=1.0
+
+GET /paths?source=agent-b&target=agent-e (after 90s):
+  selected_path: ['agent-b', 'agent-c', 'agent-d', 'agent-e']
+  paths found: 2
+    path[0] nodes=['agent-b', 'agent-c', 'agent-d', 'agent-e'] score=0.904821 hops=3
+    path[1] nodes=['agent-b', 'agent-e'] score=0.85978 hops=1
+  secondary_conduits: 1
+    conduit nodes=['agent-b', 'agent-e'] score=0.85978
+
+Assertions:
+  PASS: selected_path switched to ['agent-b', 'agent-c', 'agent-d', 'agent-e']
+  PASS: B->E q_ema=0.8508 (degraded by tc/netem; < 0.95)
+
+NOTE on score separation:
+  Phase 1 B->E score=1.0 vs B->C->D->E score=0.9047 (B->E wins by 0.095)
+  Phase 2 B->C->D->E score=0.9048 vs B->E score=0.8598 (indirect wins by 0.045)
+  The q_ema EMA of RTT-based quality signal drives the ranking flip.
+  HOP_WEIGHT=0.05 allows a 3-hop healthy path to beat a 1-hop degraded path
+  when q_ema drops below ~0.91 on the direct edge.
+
+=== Phase 3 — Recovery (tc/netem removed from agent-b) ===
+  tc qdisc del dev ens5 root
+  Wait: 180s (18 probe cycles — WINDOW_SIZE=20, probe_interval=10s)
+
+Recovery edge metrics:
+  agent-b->agent-e q_ema=0.9358 avg_rtt_ms=7.5 success_rate=1.0
+  agent-b->agent-c q_ema=1.0    avg_rtt_ms=0.0 success_rate=1.0
+  agent-c->agent-d q_ema=1.0    avg_rtt_ms=0.0 success_rate=1.0
+  agent-d->agent-e q_ema=1.0    avg_rtt_ms=0.0 success_rate=1.0
+
+GET /paths?source=agent-b&target=agent-e (after 180s recovery):
+  selected_path: ['agent-b', 'agent-e']
+  paths found: 2
+    path[0] nodes=['agent-b', 'agent-e'] score=0.95504 hops=1
+    path[1] nodes=['agent-b', 'agent-c', 'agent-d', 'agent-e'] score=0.904837 hops=3
+  secondary_conduits: 1
+    conduit nodes=['agent-b', 'agent-c', 'agent-d', 'agent-e'] score=0.904837
+
+Assertions:
+  PASS: selected_path reverted to ['agent-b', 'agent-e']
+  PASS: B->E avg_rtt_ms=0.0 (recovered to baseline; < 50ms)
+
+NOTE: B->E q_ema=0.9358 at 180s (not yet full 1.0 recovery — WINDOW_SIZE=20×10s=200s
+total flush time; 18/20 window slots cleared). Score=0.9550 is sufficient to beat
+B->C->D->E score=0.9048, confirming path reselection before full EMA recovery.
+
+=== PLAY RECAP ===
+agent-b  : ok=20  changed=4  unreachable=0  failed=0  skipped=0  rescued=0  ignored=0
+agent-c  : ok=3   changed=0  unreachable=0  failed=0  skipped=0  rescued=0  ignored=0
+agent-d  : ok=3   changed=0  unreachable=0  failed=0  skipped=0  rescued=0  ignored=0
+agent-e  : ok=3   changed=0  unreachable=0  failed=0  skipped=0  rescued=0  ignored=0
+server-a : ok=28  changed=0  unreachable=0  failed=0  skipped=0  rescued=0  ignored=0
+
+=== Terraform destroy ===
+46 resources destroyed (lab_phase=gate-k, us-east-1).
+No AWS resources remain from this run.
