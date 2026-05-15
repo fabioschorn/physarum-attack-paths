@@ -43,8 +43,33 @@
 
 # ─── Pre-flight: confirm all agents are active ──────────────────────────────
 
-- name: Pre-flight — confirm all lab nodes are running physarum services
-  hosts: lab
+- name: Pre-flight — confirm server-a is running physarum-server
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check physarum-server systemd status
+      ansible.builtin.command: systemctl is-active physarum-server
+      register: server_active
+      failed_when: false
+      changed_when: false
+
+    - name: Print server service status
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: physarum-server={{ server_active.stdout }}"
+
+    - name: Assert physarum-server is active
+      ansible.builtin.assert:
+        that: server_active.stdout == "active"
+        fail_msg: >
+          physarum-server is not active on {{ inventory_hostname }} (status: {{ server_active.stdout }}).
+          Wait 60 s after terraform apply for cloud-init to complete, then retry.
+        success_msg: "physarum-server active on {{ inventory_hostname }}"
+
+
+- name: Pre-flight — confirm agents are running physarum-agent
+  hosts: agents
   gather_facts: false
   become: true
 
@@ -55,7 +80,7 @@
       failed_when: false
       changed_when: false
 
-    - name: Print service status
+    - name: Print agent service status
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }}: physarum-agent={{ agent_active.stdout }}"
 
@@ -104,14 +129,14 @@
   tasks:
     - name: "Test 1: GET /flow-observations for agent-b (B→E FlowObservation)"
       ansible.builtin.command: >
-        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=200'
+        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=1000'
       register: flow_obs_raw
       failed_when: false
       changed_when: false
 
     - name: "Test 1: Filter for B→E flow (destination_ip=10.50.50.10, port=9004)"
       ansible.builtin.shell: |
-        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=200' | \
+        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=1000' | \
         python3 -c "
         import json, sys
         data = json.load(sys.stdin)
@@ -196,6 +221,7 @@
             print('MISSING')
             sys.exit(1)
         print('PASS:q_ema=' + str(round(be[0]['q_ema'], 4)))
+        "
       register: be_edge
       failed_when: be_edge.rc != 0
       changed_when: false
@@ -212,6 +238,7 @@
             print('MISSING')
             sys.exit(1)
         print('PASS:q_ema=' + str(round(cd[0]['q_ema'], 4)))
+        "
       register: cd_edge
       failed_when: cd_edge.rc != 0
       changed_when: false
@@ -228,6 +255,7 @@
             print('MISSING')
             sys.exit(1)
         print('PASS:q_ema=' + str(round(de[0]['q_ema'], 4)))
+        "
       register: de_edge
       failed_when: de_edge.rc != 0
       changed_when: false
@@ -244,6 +272,7 @@
             print('UNEXPECTED_CE_EDGE:q_ema=' + str(round(ce[0]['q_ema'], 4)))
             sys.exit(1)
         print('PASS:C->E edge absent or q_ema=0 (SG blocks direct C->E)')
+        "
       register: ce_absent
       failed_when: ce_absent.rc != 0
       changed_when: false
@@ -296,6 +325,7 @@
         print('NOTE: /graph does not yet track flow_event_count per edge.')
         print('FlowObservation count for B->E is available from /flow-observations.')
         print('C->D and D->E flow counts require observers on agent-c and agent-d (future gate).')
+        "
       register: path_comparison
       failed_when: false
       changed_when: false
@@ -306,7 +336,7 @@
 
     - name: "Test 2: Count B→E FlowObservations from observer"
       ansible.builtin.shell: |
-        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=200' | \
+        curl -s 'http://127.0.0.1:8080/flow-observations?agent_id=agent-b&limit=1000' | \
         python3 -c "
         import json, sys
         data = json.load(sys.stdin)
@@ -476,6 +506,7 @@
             print('B->E avg_rtt_ms=' + str(rtt) + ' — degradation not yet reflected (wait longer or check tc)')
             sys.exit(1)
         print('PASS:B->E avg_rtt_ms=' + str(round(rtt,2)) + ' (>50 ms — degraded by tc/netem)')
+        "
       register: degradation_assert
       failed_when: degradation_assert.rc != 0
       changed_when: false
@@ -497,6 +528,7 @@
             print('C->D q_ema=' + str(round(q,4)) + ' — indirect path degraded (unexpected)')
             sys.exit(1)
         print('PASS:C->D q_ema=' + str(round(cd[0]['q_ema'],4)) + ' (indirect path healthy)')
+        "
       register: cd_healthy
       failed_when: cd_healthy.rc != 0
       changed_when: false
@@ -533,10 +565,10 @@
       ansible.builtin.debug:
         msg: "{{ qdisc_clean.stdout_lines }}"
 
-    - name: "Test 3 Phase 3: Wait for recovery to propagate through probe cycles (60 s)"
+    - name: "Test 3 Phase 3: Wait for recovery to propagate through probe cycles (180 s = 18 cycles)"
       ansible.builtin.pause:
-        seconds: 60
-        prompt: "Waiting 60 s for B→E probe metrics to recover after tc/netem removal..."
+        seconds: 180
+        prompt: "Waiting 180 s for B->E probe metrics to recover after tc/netem removal (WINDOW_SIZE=20, probe_interval=10s)..."
 
 
 - name: "Test 3 Phase 3 — Observe B→E recovery"
@@ -594,6 +626,7 @@
             print('B->E avg_rtt_ms=' + str(rtt) + ' — not yet recovered (q_ema EMA may still be catching up)')
             sys.exit(1)
         print('PASS:B->E avg_rtt_ms=' + str(round(rtt,2)) + ' (recovered to baseline)')
+        "
       register: recovery_assert
       failed_when: recovery_assert.rc != 0
       changed_when: false

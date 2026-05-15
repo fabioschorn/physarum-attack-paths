@@ -1,7 +1,7 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** Gate K — Segmented Adaptive Flow-Path Lab — IN PROGRESS  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime) · GREEN (eBPF Observer Agent Flow Correlation) · IN PROGRESS (Gate K)  
+**Current gate:** Gate K — Segmented Adaptive Flow-Path Lab — COMPLETE  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime) · GREEN (eBPF Observer Agent Flow Correlation) · GREEN (Gate K)  
 **Last updated:** 2026-05-15
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
@@ -33,11 +33,12 @@
 | FlowObservation model + POST/GET /flow-observations | GREEN | 64 tests passing; ring buffer eviction validated; no eBPF runtime | PR #68 |
 | Gate J — eBPF Observer Runtime (AWS EC2) | GREEN | kernel 6.18; tracepoint attached; FlowObservation posted; failed=0; metadata-only confirmed | Issue #69 |
 | Gate J.1 — eBPF observer agent-b → agent-c flow correlation | GREEN | destination_ip=10.50.30.10, port=9002, direction=outbound, event=connect_established confirmed; q_ema≈1.0; failed=0; 42 resources destroyed | Issue #72 |
-| Gate K — segmented adaptive flow-path A/B/C/D/E lab | IN PROGRESS | Terraform + Ansible implemented; AWS run pending | Issue #76 |
+| Gate K — segmented adaptive flow-path A/B/C/D/E lab | GREEN | failed=0 all nodes; B→E FlowObs confirmed; q_ema>0 on B→E, C→D, D→E; C→E absent; degradation avg_rtt_ms=130.1ms PASS; recovery avg_rtt_ms=8.55ms PASS; 46 resources destroyed | Issue #76 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
 
+**GREEN** for Gate K — Segmented Adaptive Flow-Path Lab — 5-node AWS lab (lab_phase=gate-k, enable_observer=true); topology: B↔C(peers), B→E(direct), C→D→E(indirect), C→E blocked by SG; Test 1: B→E FlowObservation (destination_ip=10.50.50.10, destination_port=9004, direction=outbound, event=connect_established); B→E q_ema=0.9999, C→D q_ema=0.9997, D→E q_ema=0.9998; C→E edge absent (SG enforcement confirmed); Test 2: direct B→E avg_rtt_ms=0.05ms vs indirect C→D avg_rtt_ms=0.1ms, D→E avg_rtt_ms=0.1ms; sample_count=20; FlowObservation count gap documented (no observer on agent-c/agent-d); Test 3: baseline B→E avg_rtt_ms=0.05ms; Phase 2 degradation (tc/netem 200ms±50ms 10%loss via u32 filter to 10.50.50.10/32): B→E avg_rtt_ms=130.1ms CONFIRMED (>50ms), C→D q_ema=0.9999 CONFIRMED (indirect healthy); Phase 3 recovery (tc removed, 180s wait): B→E avg_rtt_ms=8.55ms CONFIRMED (<50ms); Ansible PLAY RECAP agent-b ok=20 failed=0, server-a ok=33 failed=0; 46 resources created + destroyed. NOTE: WINDOW_SIZE=20 × probe_interval=10s = 200s full flush time; 180s recovery wait sufficient (18/20 window slots cleared). Process attribution (comm=mandb) is expected for async TCP connections; 5-tuple uniquely identifies B→E physarum probe flow (Issue #76).  
 **GREEN** for Gate J.1 — eBPF Observer Agent Flow Correlation — FlowObservation (destination_ip=10.50.30.10, destination_port=9002, direction=outbound, event=connect_established) confirmed for physarum-agent → agent-c probe; agent-b → agent-c graph edge q_ema≈1.0 (sample_count=20); Ansible PLAY RECAP agent-b ok=17 failed=0, server-a ok=14 failed=0; 42 resources created + destroyed. NOTE: tracepoint/sock/inet_sock_set_state fires in softirq context — comm=swapper/0 (kernel idle at state change time) is expected for async connections; the 5-tuple uniquely identifies the physarum probe flow; process attribution improvement deferred to a future gate (Issue #72).  
 **GREEN** for Gate J — eBPF Observer Runtime — `physarum-ebpf-observer` binary + `physarum-ebpf-observer-ebpf` eBPF bytecode deployed to EC2 (AL2023, kernel 6.18.25); observer attached to `tracepoint/sock/inet_sock_set_state`; FlowObservation events (source_ip, destination_ip, source_port, destination_port, protocol, direction, event, pid, comm) posted to coordinator and confirmed via `GET /flow-observations`; metadata-only (no payload fields); Ansible PLAY RECAP agent-b ok=21 failed=0, server-a ok=8 failed=0; 42 resources created + destroyed (Issue #69).  
 **GREEN** for Gate I — FlowObservation Model and Server Endpoints — `FlowObservation` struct + `FlowDirection`/`FlowEvent`/`FlowProtocol` enums (snake_case serde) added to `physarum-protocol`; `POST /flow-observations` (201 Created, in-memory VecDeque ring buffer, capacity 1000, oldest evicted on overflow); `GET /flow-observations` (limit + agent_id filter); 14 new tests (8 protocol + 6 endpoint); 64 total tests pass; no eBPF runtime, Aya, kernel tracepoint, RustScan, or scoring integration (PR #68). Scope: protocol model, server endpoints, in-memory bounded buffer, tests. Next gate: Gate J — physarum-ebpf-observer runtime prototype and AWS EC2 validation.  
@@ -97,16 +98,13 @@ Runtime endpoints     : NOT yet validated in AWS
 | Gate I — FlowObservation Model and Server Endpoints | COMPLETED — PR #68 |
 | Gate J — eBPF Observer Runtime Validation | COMPLETED — Issue #69 |
 | Gate J.1 — eBPF Observer Agent Flow Correlation | COMPLETED — Issue #72 |
+| Gate K — Segmented Adaptive Flow-Path Lab | COMPLETED — Issue #76 |
 
 ---
 
 ## Active gate
 
-**Gate K — Segmented Adaptive Flow-Path Lab**  
-Tracked by: Issue #76  
-Entry criteria: Gate J.1 complete (Issue #72). ✔  
-Scope: 5-node AWS lab (A/B/C/D/E). B→E direct path; C→D→E indirect path; C→E blocked by SG. Validate real flow observation (eBPF), graph edge evidence, direct vs indirect comparison, and adaptive behavior when B→E is degraded via tc/netem and recovered.  
-Exit criteria: Test 1 (flow discovery), Test 2 (direct vs indirect), and Test 3 (adaptation with degradation + recovery) all PASS; Ansible recap failed=0; Terraform destroy clean; QUALITY_GATE.md updated to GREEN.
+No active gate. Gate K complete. Next gate TBD.
 
 ---
 

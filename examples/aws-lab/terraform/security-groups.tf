@@ -270,7 +270,7 @@ resource "aws_security_group_rule" "agent_e_from_b" {
   count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe from agent-b (weighted-paths: competing path; gate-k: direct B→E path)"
+  description              = "Probe from agent-b (weighted-paths: competing path; gate-k: direct B-E path)"
   from_port                = 9004
   to_port                  = 9004
   protocol                 = "tcp"
@@ -282,7 +282,7 @@ resource "aws_security_group_rule" "agent_e_from_d" {
   count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe from agent-d (weighted-paths: D in B→E→D path; gate-k: D→E intermediary leg)"
+  description              = "Probe from agent-d (weighted-paths: D in B-E-D path; gate-k: D-E intermediary leg)"
   from_port                = 9004
   to_port                  = 9004
   protocol                 = "tcp"
