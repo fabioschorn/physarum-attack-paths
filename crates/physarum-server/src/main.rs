@@ -282,14 +282,16 @@ mod tests {
         let path = &pr.paths[0];
         assert_eq!(path.nodes, vec!["agent-b", "agent-c", "agent-d"]);
         assert_eq!(path.edges.len(), 2);
+        assert_eq!(path.hops, 2);
         assert_eq!(path.edges[0].source, "agent-b");
         assert_eq!(path.edges[0].target, "agent-c");
         assert_eq!(path.edges[1].source, "agent-c");
         assert_eq!(path.edges[1].target, "agent-d");
+        assert_eq!(pr.selected_path, vec!["agent-b", "agent-c", "agent-d"]);
     }
 
     #[tokio::test]
-    async fn paths_score_equals_product_of_d_ij() {
+    async fn paths_score_uses_negative_log_q_ema() {
         let state = Arc::new(AppState::new());
         send_report(state.clone(), "agent-b", "agent-c", true, 1.0, 0.0).await;
         send_report(state.clone(), "agent-c", "agent-d", true, 1.0, 0.0).await;
@@ -303,10 +305,16 @@ mod tests {
         let pr: PathsResponse = serde_json::from_slice(&bytes).unwrap();
 
         for path in &pr.paths {
-            let expected: f64 = path.edges.iter().map(|e| e.d_ij).product();
+            let edge_cost: f64 = path
+                .edges
+                .iter()
+                .map(|e| -(e.q_ema.max(0.001_f64).ln()))
+                .sum();
+            let hop_penalty = 0.05 * (path.edges.len().saturating_sub(1)) as f64;
+            let expected = (-(edge_cost + hop_penalty)).exp();
             assert!(
                 (path.score - expected).abs() < 1e-12,
-                "score {:.6} != product of d_ij {:.6}",
+                "score {:.6} != negative-log(q_ema) expected {:.6}",
                 path.score,
                 expected,
             );
