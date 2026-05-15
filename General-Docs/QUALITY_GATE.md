@@ -1,8 +1,8 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** Gate J — eBPF Observer Runtime Validation — COMPLETE  
-**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime)  
-**Last updated:** 2026-05-12
+**Current gate:** Gate J.1 — eBPF Observer Agent Flow Correlation — COMPLETE  
+**Overall status:** GREEN (Adaptive Path Prototype) · GREEN (AWS Mode 1 Runtime) · GREEN (AWS Phase Identity) · GREEN (AWS Mode 2 Runtime) · GREEN (B/C/D TLA+ Path-Selection Model) · GREEN (Weighted Competing Paths) · GREEN (AWS tc/netem Weighted Paths) · GREEN (FlowObservation Model and Server Endpoints) · GREEN (eBPF Observer Runtime) · GREEN (eBPF Observer Agent Flow Correlation)  
+**Last updated:** 2026-05-14
 
 > GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
 
@@ -32,10 +32,12 @@
 | AWS tc/netem Weighted Competing Paths | GREEN | 2 phases PASS in real EC2/VPC; Phase 1 top=B→C→D (score 0.694, E degraded); Phase 2 top=B→E→D (score 0.688, C degraded); top path switches; 50 resources destroyed clean; evidence in weighted-paths-aws-evidence.txt | Issue #58 |
 | FlowObservation model + POST/GET /flow-observations | GREEN | 64 tests passing; ring buffer eviction validated; no eBPF runtime | PR #68 |
 | Gate J — eBPF Observer Runtime (AWS EC2) | GREEN | kernel 6.18; tracepoint attached; FlowObservation posted; failed=0; metadata-only confirmed | Issue #69 |
+| Gate J.1 — eBPF observer agent-b → agent-c flow correlation | GREEN | destination_ip=10.50.30.10, port=9002, direction=outbound, event=connect_established confirmed; q_ema≈1.0; failed=0; 42 resources destroyed | Issue #72 |
 | Security hardening / API auth | FUTURE | Port 8080 unauthenticated; Security Group is sole access control | Deferred until auth layer added |
 | Persistence / replay | FUTURE | Not scoped | Deferred |
 | WASM visual simulation | FUTURE | Plan documented, no impl yet | Deferred |
 
+**GREEN** for Gate J.1 — eBPF Observer Agent Flow Correlation — FlowObservation (destination_ip=10.50.30.10, destination_port=9002, direction=outbound, event=connect_established) confirmed for physarum-agent → agent-c probe; agent-b → agent-c graph edge q_ema≈1.0 (sample_count=20); Ansible PLAY RECAP agent-b ok=17 failed=0, server-a ok=14 failed=0; 42 resources created + destroyed. NOTE: tracepoint/sock/inet_sock_set_state fires in softirq context — comm=swapper/0 (kernel idle at state change time) is expected for async connections; the 5-tuple uniquely identifies the physarum probe flow; process attribution improvement deferred to a future gate (Issue #72).  
 **GREEN** for Gate J — eBPF Observer Runtime — `physarum-ebpf-observer` binary + `physarum-ebpf-observer-ebpf` eBPF bytecode deployed to EC2 (AL2023, kernel 6.18.25); observer attached to `tracepoint/sock/inet_sock_set_state`; FlowObservation events (source_ip, destination_ip, source_port, destination_port, protocol, direction, event, pid, comm) posted to coordinator and confirmed via `GET /flow-observations`; metadata-only (no payload fields); Ansible PLAY RECAP agent-b ok=21 failed=0, server-a ok=8 failed=0; 42 resources created + destroyed (Issue #69).  
 **GREEN** for Gate I — FlowObservation Model and Server Endpoints — `FlowObservation` struct + `FlowDirection`/`FlowEvent`/`FlowProtocol` enums (snake_case serde) added to `physarum-protocol`; `POST /flow-observations` (201 Created, in-memory VecDeque ring buffer, capacity 1000, oldest evicted on overflow); `GET /flow-observations` (limit + agent_id filter); 14 new tests (8 protocol + 6 endpoint); 64 total tests pass; no eBPF runtime, Aya, kernel tracepoint, RustScan, or scoring integration (PR #68). Scope: protocol model, server endpoints, in-memory bounded buffer, tests. Next gate: Gate J — physarum-ebpf-observer runtime prototype and AWS EC2 validation.  
 **Overall GREEN** for the Adaptive Path Prototype gate — all Phase 1 milestones complete.  
@@ -93,12 +95,13 @@ Runtime endpoints     : NOT yet validated in AWS
 | AWS tc/netem Weighted Competing Paths Validation | COMPLETED — Issue #58 |
 | Gate I — FlowObservation Model and Server Endpoints | COMPLETED — PR #68 |
 | Gate J — eBPF Observer Runtime Validation | COMPLETED — Issue #69 |
+| Gate J.1 — eBPF Observer Agent Flow Correlation | COMPLETED — Issue #72 |
 
 ---
 
 ## Active gate
 
-No active gate — Gate J complete (Issue #69). Next gate: TBD by manager.
+No active gate — Gate J.1 complete (Issue #72). Next gate: TBD by manager.
 
 ---
 
