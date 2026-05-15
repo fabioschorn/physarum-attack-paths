@@ -118,10 +118,7 @@ pub fn path_score(edges: &[PathEdge]) -> f64 {
     if edges.is_empty() {
         return 0.0;
     }
-    let edge_cost: f64 = edges
-        .iter()
-        .map(|e| -(e.q_ema.max(Q_EMA_FLOOR).ln()))
-        .sum();
+    let edge_cost: f64 = edges.iter().map(|e| -(e.q_ema.max(Q_EMA_FLOOR).ln())).sum();
     let hop_penalty = HOP_WEIGHT * (edges.len() - 1) as f64;
     (-(edge_cost + hop_penalty)).exp()
 }
@@ -194,7 +191,10 @@ mod tests {
     fn single_healthy_edge_scores_near_one() {
         let e = vec![edge(0.9999)];
         let s = path_score(&e);
-        assert!(s > 0.99, "healthy single-hop score should be near 1, got {s}");
+        assert!(
+            s > 0.99,
+            "healthy single-hop score should be near 1, got {s}"
+        );
     }
 
     #[test]
