@@ -354,3 +354,115 @@ GPU training
 
 This note is research positioning only.
 
+---
+
+## 10. Micromouse-inspired exploration and RustScan candidate-path discovery
+
+### Source of the insight
+
+Micromouse is a competitive robotics discipline in which an autonomous robot enters an unknown maze, explores it, builds an internal map, and then runs the fastest possible route to the centre.
+
+The key insight is the two-phase structure:
+
+```text
+Phase 1 — exploration: the robot moves through unknown corridors, senses walls, and updates its maze map.
+Phase 2 — optimized run: the robot uses the completed map to run the fastest (not necessarily shortest) route.
+```
+
+The fastest path is not always the shortest path. A longer corridor with better turning radius can be faster than a shorter one with many tight turns.
+
+### Mapping to physarum-attack-paths
+
+| Micromouse concept | physarum-attack-paths equivalent |
+|---|---|
+| Unknown maze | Unknown network / lab topology |
+| Walls / corridors | Blocked / reachable network channels |
+| IR sensors | RustScan + active probes + eBPF passive observation |
+| Maze memory (internal map) | Adaptive graph (GraphSnapshot, EdgeSnapshot) |
+| Flood fill / route planning | Path scoring and reinforcement model (`/paths`) |
+| Fastest path, not shortest | Best path by latency, loss, jitter, stability, and flow evidence |
+| Single robot body | Distributed agent organism |
+
+The key difference:
+
+```text
+Micromouse: one robot traverses a static maze.
+Physarum-attack-paths: a distributed agent organism occupies, senses, reinforces, and adapts through network paths. The maze is live and can change.
+```
+
+---
+
+### Sensing model
+
+Micromouse uses IR sensors to detect walls one step ahead. This project uses three complementary sensing mechanisms:
+
+```text
+RustScan (future)  -> candidate-path discovery: find open ports and services on adjacent hosts
+active probes      -> viability testing: confirm reachability and measure quality (latency, loss, jitter)
+eBPF observer      -> passive-flow confirmation: observe real OS-level TCP flows without adding probe traffic
+```
+
+RustScan provides candidate-path discovery. It helps the organism identify possible next channels when no peer list is pre-declared — analogous to the Micromouse detecting a new open corridor.
+
+Active probes correspond to the robot physically moving into a corridor and measuring how easy it is to traverse.
+
+eBPF flow observation corresponds to the robot sensing traffic already flowing through a channel — confirming that the corridor is in active use, not just structurally open.
+
+---
+
+### Adaptive memory
+
+Micromouse builds a complete maze map before the optimized run. This project builds an adaptive graph that is continuously updated as probes report back:
+
+```text
+Q_ij          -> raw probe quality signal
+q_ema         -> smoothed quality memory (exponential moving average)
+D_ij          -> adaptive edge conductivity (reinforces strong channels, weakens poor ones)
+FlowObservation -> confirms that a channel carries real traffic, not only probe traffic
+```
+
+The graph is not a static map. Like a living slime mold, it continuously remodels itself based on incoming stimuli.
+
+---
+
+### Gate sequence ahead
+
+The Micromouse analogy maps naturally onto the planned gate sequence:
+
+```text
+Gate K   -> segmented adaptive flow-path lab with known agents (topology exploration, flow counting, path comparison, adaptation)
+Gate L   -> RustScan-backed candidate-path discovery (organism senses unknown channels without a pre-declared peer list)
+Gate M   -> controlled expansion from discovered candidates (organism propagates toward promising paths)
+Gate N   -> role-fluid distributed organism behavior (agents adapt roles based on position, flow evidence, and graph state)
+```
+
+Gate K is the first step toward Micromouse-style adaptive route comparison: known topology, real flows, direct vs indirect path comparison, adaptation when a channel degrades.
+
+Gate L introduces the exploration phase: RustScan discovers candidate channels that were not pre-declared.
+
+Gates M and N move toward the distributed organism framing: the system does not just observe, it expands and adapts.
+
+---
+
+### Why this framing matters
+
+Micromouse provides a concrete and intuitive reference for explaining the project to outside audiences:
+
+```text
+"The system explores an unknown network the way a Micromouse explores an unknown maze.
+It senses channels, builds a map, reinforces productive routes, and adapts when the environment changes.
+Unlike a Micromouse, this system is distributed — it is an organism, not a single robot."
+```
+
+This framing is useful for research positioning, patent-style invention framing, and stakeholder communication.
+
+### Relationship to other brainstorm sections
+
+```text
+Section 1–4  -> MCPM-inspired path density (simulation layer on top of the adaptive graph)
+Section 9    -> MCTS/self-play traversal (learned prioritization layer)
+Section 10   -> Micromouse-inspired exploration (sensing model and gate sequence framing)
+```
+
+These are complementary, not competing. The Micromouse framing explains sensing and exploration. MCPM explains density emergence. MCTS explains learned prioritization. All three layers depend on the adaptive graph substrate being stable first.
+
