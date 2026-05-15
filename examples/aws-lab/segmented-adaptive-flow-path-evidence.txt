@@ -98,3 +98,32 @@ server-a : ok=33  changed=0  unreachable=0  failed=0  skipped=0  rescued=0  igno
 === Terraform destroy ===
 46 resources destroyed (lab_phase=gate-k, us-east-1).
 No AWS resources remain from this run.
+
+=== Documented limitations ===
+The following limitations are acknowledged as part of the Gate K record.
+They were reviewed by the Manager (PR #79) and do not block the GREEN status
+provided they are clearly documented here and in QUALITY_GATE.md.
+
+(1) Segment semantics — B and C are modelled as logical peers via SG
+reachability, not as hosts in the same AWS subnet. agent-b resides in
+10.50.20.0/24 and agent-c in 10.50.30.0/24. A future refinement may place
+B and C in the same subnet if strict network-layer segment semantics are
+required.
+
+(2) Path forwarding semantics — C->D->E is a logical multi-hop graph path:
+agent-c probes agent-d directly, and agent-d probes agent-e directly. There
+is no network-layer packet forwarding or proxying through D. The Physarum
+graph model treats each directed edge (C->D, D->E) as an independent probe
+channel; the multi-hop path is a graph-level concept, not an IP routing path.
+
+(3) Adaptation semantics — Test 3 demonstrates that B->E probe metrics degrade
+under tc/netem and recover after removal. It does not demonstrate that the
+Physarum organism automatically re-selects C->D->E as the preferred path while
+B->E is degraded. The /paths endpoint ranking during Phase 2 degradation was
+not recorded. Capturing automatic path re-selection in a timed window while
+degradation is active is deferred to a future gate.
+
+(4) Flow count coverage — eBPF observer is deployed on agent-b only. Per-edge
+FlowObservation counts for C->D and D->E are not available in this run.
+Those edges are confirmed exclusively via graph q_ema > 0 and sample_count=20.
+Extending eBPF observers to agent-c and agent-d is deferred to a future gate.
