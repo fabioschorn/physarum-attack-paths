@@ -7,6 +7,7 @@
 #   phase1          — Mode 1 full mesh: B↔C, B↔D, C↔D all allowed
 #   phase2          — Mode 2 segmented: B↔D rules omitted; only B↔C and C↔D allowed
 #   weighted-paths  — B↔C, B↔E, C↔D, E↔D; agent-b restricted via --probe-targets (no SG block needed)
+#   gate-k          — B↔C (peers), B→E (direct), C→D, D→E; C→E is BLOCKED (no SG rule)
 #
 # The two B↔D rules (agent_b_from_d and agent_d_from_b) use
 # count = var.lab_phase == "phase1" ? 1 : 0 to enforce the phase boundary.
@@ -244,10 +245,10 @@ resource "aws_security_group_rule" "agent_d_ssh" {
 # ── Agent E security group (weighted-paths only) ─────────────────────────────
 
 resource "aws_security_group" "agent_e" {
-  count = var.lab_phase == "weighted-paths" ? 1 : 0
+  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
 
   name        = "${local.effective_name_prefix}-agent-e"
-  description = "physarum-agent-e (E, secondary/alternate path) - ${var.lab_phase}"
+  description = "physarum-agent-e (E, secondary/alternate path or isolated destination) - ${var.lab_phase}"
   vpc_id      = aws_vpc.lab.id
 
   egress {
@@ -266,10 +267,10 @@ resource "aws_security_group" "agent_e" {
 # ── Agent E ingress rules (weighted-paths only) ───────────────────────────────
 
 resource "aws_security_group_rule" "agent_e_from_b" {
-  count = var.lab_phase == "weighted-paths" ? 1 : 0
+  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe from agent-b (weighted-paths only)"
+  description              = "Probe from agent-b (weighted-paths: competing path; gate-k: direct B-E path)"
   from_port                = 9004
   to_port                  = 9004
   protocol                 = "tcp"
@@ -278,10 +279,10 @@ resource "aws_security_group_rule" "agent_e_from_b" {
 }
 
 resource "aws_security_group_rule" "agent_e_from_d" {
-  count = var.lab_phase == "weighted-paths" ? 1 : 0
+  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe from agent-d (weighted-paths only)"
+  description              = "Probe from agent-d (weighted-paths: D in B-E-D path; gate-k: D-E intermediary leg)"
   from_port                = 9004
   to_port                  = 9004
   protocol                 = "tcp"
@@ -302,10 +303,10 @@ resource "aws_security_group_rule" "agent_e_from_c" {
 }
 
 resource "aws_security_group_rule" "agent_e_ssh" {
-  count = var.lab_phase == "weighted-paths" ? 1 : 0
+  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
 
   type              = "ingress"
-  description       = "SSH from operator (Dev Lead workstation only) - weighted-paths only"
+  description       = "SSH from operator (Dev Lead workstation only)"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
@@ -316,10 +317,10 @@ resource "aws_security_group_rule" "agent_e_ssh" {
 # ── Server A ← Agent E reports (weighted-paths only) ─────────────────────────
 
 resource "aws_security_group_rule" "server_a_from_agent_e" {
-  count = var.lab_phase == "weighted-paths" ? 1 : 0
+  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Agent reports from agent-e (weighted-paths only)"
+  description              = "Agent reports from agent-e"
   from_port                = 8080
   to_port                  = 8080
   protocol                 = "tcp"

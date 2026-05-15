@@ -5,13 +5,13 @@ variable "aws_region" {
 }
 
 variable "lab_phase" {
-  description = "AWS lab validation phase. phase1 = Mode 1 full mesh. phase2 = Mode 2 segmented B→C→D. weighted-paths = competing B→C→D vs B→E→D with tc/netem degradation (Issue #58)."
+  description = "AWS lab validation phase. phase1 = Mode 1 full mesh. phase2 = Mode 2 segmented B→C→D. weighted-paths = competing B→C→D vs B→E→D with tc/netem degradation (Issue #58). gate-k = segmented adaptive flow-path A/B/C/D/E: B→E direct, C→D→E indirect, C→E blocked (Issue #76)."
   type        = string
   default     = "phase1"
 
   validation {
-    condition     = contains(["phase1", "phase2", "weighted-paths"], var.lab_phase)
-    error_message = "lab_phase must be phase1, phase2, or weighted-paths."
+    condition     = contains(["phase1", "phase2", "weighted-paths", "gate-k"], var.lab_phase)
+    error_message = "lab_phase must be phase1, phase2, weighted-paths, or gate-k."
   }
 }
 
