@@ -1,0 +1,23 @@
+[package]
+name              = "physarum-scanner"
+description       = "Async TCP connect port scanner for physarum-agent candidate discovery"
+# Attribution: core scanning algorithm derived from RustScan (GPL-3.0, github.com/RustScan/RustScan).
+# Reimplemented in tokio, with bug fixes and reduction to the TCP-connect subset needed for
+# physarum candidate discovery. No subprocess, no Nmap/scripts, no UDP, no rlimit manipulation.
+
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+tokio     = { workspace = true }
+futures   = { workspace = true }
+tracing   = { workspace = true }
+thiserror = { workspace = true }
+libc      = "0.2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "net", "time", "macros"] }

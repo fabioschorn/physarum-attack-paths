@@ -3,6 +3,11 @@ pub use flow_observation::{
     FlowDirection, FlowEvent, FlowObservation, FlowObservationAck, FlowProtocol,
 };
 
+pub mod discovery;
+pub use discovery::{
+    CandidateDiscoveryReport, CandidateEndpoint, CandidateStatus, DiscoveryScope, DiscoveryTrigger,
+};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
