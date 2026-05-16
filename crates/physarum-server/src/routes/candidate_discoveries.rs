@@ -28,7 +28,12 @@ pub async fn ingest_candidate_discovery(
     let count = report.candidates.len();
     let mut store = state.candidates.write().await;
     for candidate in report.candidates {
-        store.insert((candidate.ip, candidate.port), candidate);
+        let key = (
+            candidate.discovered_by.clone(),
+            candidate.ip,
+            candidate.port,
+        );
+        store.insert(key, candidate);
     }
     tracing::info!(
         agent = %discovering_agent,
@@ -41,6 +46,10 @@ pub async fn ingest_candidate_discovery(
     )
 }
 
+// MVP limitation: candidate status (Discovered → ProbeValidated → FlowConfirmed) is not
+// updated server-side in Gate L. The server stores what the agent reports; status transitions
+// require the agent to re-POST an updated CandidateDiscoveryReport or a dedicated PATCH
+// endpoint. Tracked as Gate L.1 work item.
 pub async fn list_candidate_discoveries(
     State(state): State<Arc<AppState>>,
     Query(params): Query<ListQuery>,
@@ -208,23 +217,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn upsert_replaces_same_ip_port() {
+    async fn different_agents_discovering_same_endpoint_creates_two_entries() {
+        // Key is (discovered_by, ip, port) — provenance is preserved.
+        // Two agents discovering the same socket create independent entries.
         let state = Arc::new(AppState::new());
 
-        // agent-b discovers 10.0.0.1:9001
         let report_b = make_report("agent-b", vec![make_candidate("agent-b", "10.0.0.1", 9001)]);
-        post_report(build_test_router(state.clone()), &report_b).await;
-
-        // agent-c also discovers the same socket — should overwrite
         let report_c = make_report("agent-c", vec![make_candidate("agent-c", "10.0.0.1", 9001)]);
+        post_report(build_test_router(state.clone()), &report_b).await;
         post_report(build_test_router(state.clone()), &report_c).await;
 
         let store = state.candidates.read().await;
-        assert_eq!(store.len(), 1, "same (ip,port) deduplicates to one entry");
-        let entry = &store[&("10.0.0.1".parse().unwrap(), 9001u16)];
         assert_eq!(
-            entry.discovered_by, "agent-c",
-            "latest agent wins on upsert"
+            store.len(),
+            2,
+            "different agents → separate entries for same (ip,port)"
+        );
+    }
+
+    #[tokio::test]
+    async fn same_agent_rediscovering_same_endpoint_upserts() {
+        // Same agent discovering same (ip, port) a second time updates the entry in place.
+        let state = Arc::new(AppState::new());
+
+        let report1 = make_report("agent-b", vec![make_candidate("agent-b", "10.0.0.1", 9001)]);
+        let report2 = make_report("agent-b", vec![make_candidate("agent-b", "10.0.0.1", 9001)]);
+        post_report(build_test_router(state.clone()), &report1).await;
+        post_report(build_test_router(state.clone()), &report2).await;
+
+        let store = state.candidates.read().await;
+        assert_eq!(
+            store.len(),
+            1,
+            "same agent + same (ip,port) → single entry (upsert)"
         );
     }
 

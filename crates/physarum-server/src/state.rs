@@ -9,7 +9,10 @@ pub struct AppState {
     pub agents: RwLock<HashMap<AgentId, AgentInfo>>,
     pub edges: RwLock<HashMap<(AgentId, AgentId), EdgeSnapshot>>,
     pub flow_observations: RwLock<VecDeque<FlowObservation>>,
-    pub candidates: RwLock<HashMap<(IpAddr, u16), CandidateEndpoint>>,
+    // Key: (discovered_by, ip, port) — separate entries per discovering agent.
+    // Two agents discovering the same (ip, port) create independent entries,
+    // preserving provenance and enabling per-agent filtering without data loss.
+    pub candidates: RwLock<HashMap<(String, IpAddr, u16), CandidateEndpoint>>,
 }
 
 impl AppState {

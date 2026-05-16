@@ -3,11 +3,11 @@ use physarum_protocol::{
     CandidateDiscoveryReport, CandidateEndpoint, CandidateStatus, DiscoveryScope, DiscoveryTrigger,
 };
 use physarum_scanner::{PortList, Scanner};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // ── Trait ────────────────────────────────────────────────────────────────────
@@ -143,7 +143,19 @@ impl CandidateDiscovery for RustScanDiscovery {
         discovering_agent: &'a str,
     ) -> Pin<Box<dyn Future<Output = Vec<CandidateEndpoint>> + Send + 'a>> {
         Box::pin(async move {
-            let ips = expand_cidrs(&scope.cidrs);
+            let max_hosts = scope.max_candidates.saturating_mul(10).max(1024);
+            let ips = {
+                let mut all = expand_cidrs(&scope.cidrs);
+                if all.len() > max_hosts {
+                    tracing::warn!(
+                        expanded = all.len(),
+                        cap = max_hosts,
+                        "CIDR expansion capped — reduce discovery CIDRs or raise max_candidates"
+                    );
+                    all.truncate(max_hosts);
+                }
+                all
+            };
             let ports = PortList::explicit(scope.ports.clone());
 
             tracing::debug!(
@@ -201,12 +213,18 @@ impl CandidateDiscovery for NullDiscovery {
 
 // ── Discovery loop ────────────────────────────────────────────────────────────
 
+/// Runs the scheduled discovery loop.
+///
+/// `discovered_sockets` is shared with `probe_loop` — after each scan the loop
+/// writes all found sockets into it so the probe loop can promote them to active
+/// probe targets without probing all registered agents by default.
 pub async fn discovery_loop(
     config: Arc<DiscoveryConfig>,
     discovery: Arc<dyn CandidateDiscovery>,
     discovering_agent: String,
     coordinator: String,
     client: Arc<reqwest::Client>,
+    discovered_sockets: Arc<Mutex<HashSet<SocketAddr>>>,
 ) {
     let interval = Duration::from_secs(config.interval_secs);
     // Gate L.1: seed queue will be populated from eBPF /flow-observations events.
@@ -224,6 +242,20 @@ pub async fn discovery_loop(
         tracing::info!(count = candidates.len(), "discovery run complete");
 
         if !candidates.is_empty() {
+            // Share discovered sockets with the probe loop before posting the report,
+            // so probe_loop can start targeting them in the next probe cycle.
+            {
+                let mut sockets = discovered_sockets.lock().unwrap();
+                for c in &candidates {
+                    sockets.insert(SocketAddr::new(c.ip, c.port));
+                }
+                tracing::info!(
+                    total_known = sockets.len(),
+                    new = candidates.len(),
+                    "discovered sockets updated — probe loop will use these targets"
+                );
+            }
+
             let report = CandidateDiscoveryReport {
                 discovering_agent: discovering_agent.clone(),
                 scope,

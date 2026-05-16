@@ -1,12 +1,14 @@
 //! Async TCP connect port scanner for physarum candidate discovery.
 //!
-//! Derived from [RustScan](https://github.com/RustScan/RustScan) (GPL-3.0).
-//! Reimplemented in native tokio with the following changes:
-//! - async-std dependency removed; pure tokio executor
-//! - `assert!`-on-error replaced with proper `Result` propagation (bug fix)
-//! - debug `println!` in udp_bind removed (bug fix)
-//! - UDP, scripts, TUI, benchmark, and rlimit modules omitted (not needed for TCP discovery)
-//! - Internet-facing test targets removed; tests are hermetic
+//! Inspired by [RustScan](https://github.com/RustScan/RustScan)'s high-level TCP-connect
+//! discovery approach. Implemented independently in native tokio for physarum-agent;
+//! no code was copied from RustScan.
+//!
+//! Key differences from RustScan:
+//! - Pure tokio executor (no async-std dependency)
+//! - Typed `Result` error propagation instead of `assert!`-on-error
+//! - TCP-connect subset only — no UDP, no Nmap scripts, no TUI, no rlimit manipulation
+//! - Hermetic tests (no Internet-facing targets)
 //!
 //! ## Example
 //!

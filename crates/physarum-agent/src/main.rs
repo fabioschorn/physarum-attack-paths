@@ -6,9 +6,9 @@ use clap::Parser;
 use discovery::{CandidateDiscovery, DiscoveryConfig, RustScanDiscovery};
 use physarum_protocol::{PeerInfo, ProbeReport, RegisterRequest};
 use rand::Rng;
-use std::collections::{HashMap, VecDeque};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing_subscriber::EnvFilter;
 
@@ -269,17 +269,56 @@ async fn send_report(
     Ok(())
 }
 
-async fn probe_loop(cli: Arc<Cli>, client: Arc<reqwest::Client>) {
+async fn probe_loop(
+    cli: Arc<Cli>,
+    client: Arc<reqwest::Client>,
+    discovered_sockets: Arc<Mutex<HashSet<SocketAddr>>>,
+) {
     let interval = Duration::from_secs(cli.probe_interval_seconds);
     let mut observations: HashMap<String, PeerObservation> = HashMap::new();
     let target_filter = build_target_filter(&cli.probe_targets);
+    // When discovery is enabled and no explicit probe targets were given, the probe
+    // loop restricts itself to candidates that the discovery worker has found.
+    // This proves the data path: discovery finds sockets → probe validates them →
+    // only then do graph edges appear. Without this, empty probe_targets would fall
+    // back to probe-all, mixing up discovery evidence with default behavior.
+    let use_discovery_filter = cli.discovery_enabled && target_filter.is_empty();
+    let mut ever_promoted: HashSet<String> = HashSet::new();
+
     loop {
         match fetch_peers(&cli, &client).await {
             Ok(peers) => {
-                let active_peers: Vec<&PeerInfo> = peers
-                    .iter()
-                    .filter(|p| target_filter.is_empty() || target_filter.contains(&p.agent_id))
-                    .collect();
+                let active_peers: Vec<&PeerInfo> = if use_discovery_filter {
+                    let sockets = discovered_sockets.lock().unwrap();
+                    peers
+                        .iter()
+                        .filter(|p| {
+                            p.address
+                                .parse::<IpAddr>()
+                                .map(|ip| sockets.contains(&SocketAddr::new(ip, p.probe_port)))
+                                .unwrap_or(false)
+                        })
+                        .collect()
+                } else {
+                    peers
+                        .iter()
+                        .filter(|p| target_filter.is_empty() || target_filter.contains(&p.agent_id))
+                        .collect()
+                };
+
+                if use_discovery_filter {
+                    for peer in &active_peers {
+                        if ever_promoted.insert(peer.agent_id.clone()) {
+                            tracing::info!(
+                                agent_id = %peer.agent_id,
+                                address = %peer.address,
+                                port = peer.probe_port,
+                                "candidate promoted to probe target"
+                            );
+                        }
+                    }
+                }
+
                 tracing::debug!(count = active_peers.len(), "fetched peers");
                 for peer in &active_peers {
                     let url = build_peer_probe_url(peer);
@@ -373,6 +412,12 @@ async fn main() {
         std::process::exit(1);
     }
 
+    // Shared channel between the discovery worker and the probe loop.
+    // When discovery is enabled and probe_targets is empty, the probe loop restricts
+    // itself to sockets written here by discovery_loop — proving that graph edges
+    // only appear after discovery finds and the probe validates a candidate.
+    let discovered_sockets: Arc<Mutex<HashSet<SocketAddr>>> = Arc::new(Mutex::new(HashSet::new()));
+
     if cli.discovery_enabled {
         let cidrs = parse_cidrs(&cli.discovery_cidrs);
         match discovery::validate_rfc1918(&cidrs) {
@@ -398,12 +443,13 @@ async fn main() {
                     cli.id.clone(),
                     cli.coordinator.clone(),
                     client.clone(),
+                    discovered_sockets.clone(),
                 ));
             }
         }
     }
 
-    probe_loop(cli, client).await;
+    probe_loop(cli, client, discovered_sockets).await;
 }
 
 #[cfg(test)]
