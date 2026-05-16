@@ -2,7 +2,7 @@ mod discovery;
 
 use axum::{routing::get, Json, Router};
 use chrono::Utc;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use discovery::{CandidateDiscovery, DiscoveryConfig, RustScanDiscovery};
 use physarum_protocol::{PeerInfo, ProbeReport, RegisterRequest};
 use rand::Rng;
@@ -11,6 +11,18 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing_subscriber::EnvFilter;
+
+/// Controls how the discovery CIDR scope is built.
+#[derive(Debug, Clone, ValueEnum, Default)]
+pub enum DiscoveryScopeMode {
+    /// Use only --discovery-cidrs. Current default behavior.
+    #[default]
+    Explicit,
+    /// Derive discovery CIDRs from non-loopback local network interfaces (RFC1918 only).
+    LocalInterfaces,
+    /// Union of --discovery-cidrs and locally-derived interface CIDRs.
+    Merged,
+}
 
 #[derive(Parser, Clone)]
 #[command(name = "physarum-agent", about = "Physarum attack-path agent")]
@@ -76,6 +88,17 @@ struct Cli {
         env = "PHYSARUM_DISCOVERY_SEED_COOLDOWN_SECS"
     )]
     discovery_seed_cooldown_secs: u64,
+
+    /// How to build the discovery CIDR scope.
+    /// `explicit` (default): use --discovery-cidrs only.
+    /// `local-interfaces`: derive from host interfaces (RFC1918, non-loopback, prefix >= /16).
+    /// `merged`: union of both.
+    #[arg(
+        long,
+        default_value = "explicit",
+        env = "PHYSARUM_DISCOVERY_SCOPE_MODE"
+    )]
+    discovery_scope_mode: DiscoveryScopeMode,
 }
 
 #[derive(serde::Serialize)]
@@ -419,7 +442,27 @@ async fn main() {
     let discovered_sockets: Arc<Mutex<HashSet<SocketAddr>>> = Arc::new(Mutex::new(HashSet::new()));
 
     if cli.discovery_enabled {
-        let cidrs = parse_cidrs(&cli.discovery_cidrs);
+        let explicit_cidrs = parse_cidrs(&cli.discovery_cidrs);
+        let cidrs = match cli.discovery_scope_mode {
+            DiscoveryScopeMode::Explicit => explicit_cidrs,
+            DiscoveryScopeMode::LocalInterfaces => {
+                let derived = discovery::derive_local_rfc1918_cidrs();
+                if !derived.is_empty() {
+                    tracing::info!(cidrs = ?derived, "discovery scope derived from local interfaces");
+                }
+                derived
+            }
+            DiscoveryScopeMode::Merged => {
+                let mut merged = discovery::derive_local_rfc1918_cidrs();
+                merged.extend(explicit_cidrs);
+                merged.sort();
+                merged.dedup();
+                if !merged.is_empty() {
+                    tracing::info!(cidrs = ?merged, "merged explicit + local-interface discovery scope");
+                }
+                merged
+            }
+        };
         match discovery::validate_rfc1918(&cidrs) {
             Err(e) => tracing::error!(error = %e, "invalid discovery scope; discovery disabled"),
             Ok(()) => {
@@ -473,6 +516,7 @@ mod tests {
             discovery_max_candidates: 50,
             discovery_timeout_ms: 1500,
             discovery_seed_cooldown_secs: 300,
+            discovery_scope_mode: DiscoveryScopeMode::Explicit,
         }
     }
 

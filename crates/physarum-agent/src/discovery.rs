@@ -1,11 +1,12 @@
 use chrono::Utc;
+use if_addrs::{get_if_addrs, IfAddr};
 use physarum_protocol::{
     CandidateDiscoveryReport, CandidateEndpoint, CandidateStatus, DiscoveryScope, DiscoveryTrigger,
 };
 use physarum_scanner::{PortList, Scanner};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -29,6 +30,73 @@ pub struct DiscoveryConfig {
     pub max_candidates: usize,
     pub interval_secs: u64,
     pub seed_cooldown_secs: u64,
+}
+
+// ── Local-interface CIDR derivation ──────────────────────────────────────────
+
+/// Minimum prefix length when deriving discovery scope from local interfaces.
+/// Networks larger than /16 (>65 534 hosts) are skipped even within RFC1918 space.
+const MIN_DISCOVERY_PREFIX: u32 = 16;
+
+fn is_link_local(ip: Ipv4Addr) -> bool {
+    let o = ip.octets();
+    o[0] == 169 && o[1] == 254
+}
+
+fn netmask_to_prefix(netmask: Ipv4Addr) -> u32 {
+    u32::from(netmask).count_ones()
+}
+
+fn network_addr(ip: Ipv4Addr, netmask: Ipv4Addr) -> Ipv4Addr {
+    Ipv4Addr::from(u32::from(ip) & u32::from(netmask))
+}
+
+/// Returns one RFC1918 CIDR per eligible local interface.
+///
+/// Excluded: loopback, link-local (169.254/16), non-private ranges, interfaces
+/// with a prefix length below `MIN_DISCOVERY_PREFIX` (prevents accidentally
+/// deriving a /8 discovery scope from an interface like 10.0.0.10/8).
+pub fn derive_local_rfc1918_cidrs() -> Vec<String> {
+    let ifaces = match get_if_addrs() {
+        Ok(i) => i,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to enumerate network interfaces");
+            return vec![];
+        }
+    };
+    let mut cidrs: Vec<String> = ifaces
+        .iter()
+        .filter(|i| !i.is_loopback())
+        .filter_map(|i| {
+            if let IfAddr::V4(ref v4) = i.addr {
+                if is_link_local(v4.ip) {
+                    return None;
+                }
+                let prefix = netmask_to_prefix(v4.netmask);
+                if prefix < MIN_DISCOVERY_PREFIX {
+                    tracing::warn!(
+                        interface = %i.name,
+                        prefix,
+                        min = MIN_DISCOVERY_PREFIX,
+                        "interface network too large for discovery — skipped"
+                    );
+                    return None;
+                }
+                let net = network_addr(v4.ip, v4.netmask);
+                let cidr = format!("{}/{}", net, prefix);
+                if is_rfc1918(&cidr) {
+                    Some(cidr)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+    cidrs.sort();
+    cidrs.dedup();
+    cidrs
 }
 
 // ── RFC1918 validation ────────────────────────────────────────────────────────
@@ -285,6 +353,41 @@ pub async fn discovery_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn link_local_detected() {
+        assert!(is_link_local("169.254.1.1".parse().unwrap()));
+        assert!(is_link_local("169.254.0.0".parse().unwrap()));
+        assert!(!is_link_local("10.50.20.1".parse().unwrap()));
+        assert!(!is_link_local("192.168.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn netmask_to_prefix_class_c() {
+        assert_eq!(netmask_to_prefix("255.255.255.0".parse().unwrap()), 24);
+    }
+
+    #[test]
+    fn netmask_to_prefix_class_b() {
+        assert_eq!(netmask_to_prefix("255.255.0.0".parse().unwrap()), 16);
+    }
+
+    #[test]
+    fn network_addr_removes_host_bits() {
+        assert_eq!(
+            network_addr(
+                "10.50.20.10".parse().unwrap(),
+                "255.255.255.0".parse().unwrap()
+            ),
+            "10.50.20.0".parse::<Ipv4Addr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn derive_local_cidrs_does_not_panic() {
+        // Content is environment-dependent; just verify the function completes.
+        let _ = derive_local_rfc1918_cidrs();
+    }
 
     #[test]
     fn rfc1918_accepts_class_a() {
