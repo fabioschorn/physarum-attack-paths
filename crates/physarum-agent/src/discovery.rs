@@ -457,10 +457,56 @@ pub async fn ebpf_seed_loop(
                 continue;
             }
 
-            // Skip hosts already present in discovered_sockets (any port).
+            // If this host is already in discovered_sockets, skip the scan (no
+            // redundant /32 scan needed) but still post an eBPF-triggered
+            // candidate report so the server can preserve the stronger trigger
+            // provenance via its priority upsert logic.
             {
-                let sockets = discovered_sockets.lock().unwrap();
-                if sockets.iter().any(|s| s.ip() == dst_ip) {
+                let known_for_dst: Vec<SocketAddr> = {
+                    let sockets = discovered_sockets.lock().unwrap();
+                    sockets.iter().filter(|s| s.ip() == dst_ip).copied().collect()
+                };
+                if !known_for_dst.is_empty() {
+                    if seed_queue.should_scan(dst_ip) {
+                        tracing::info!(ip = %dst_ip, "eBPF cue: known host — asserting trigger provenance");
+                        let provenance_candidates: Vec<CandidateEndpoint> = known_for_dst
+                            .iter()
+                            .map(|s| CandidateEndpoint {
+                                discovered_by: agent_id.clone(),
+                                ip: s.ip(),
+                                port: s.port(),
+                                protocol: "tcp".to_string(),
+                                discovery_method: "physarum-scanner".to_string(),
+                                discovered_at: Utc::now(),
+                                status: CandidateStatus::Discovered,
+                                confidence: 0.0,
+                                trigger: DiscoveryTrigger::EbpfNewOutboundHost,
+                            })
+                            .collect();
+                        let provenance_scope = DiscoveryScope {
+                            cidrs: vec![format!("{dst_ip}/32")],
+                            ports: known_for_dst.iter().map(|s| s.port()).collect(),
+                            timeout_ms: config.timeout_ms,
+                            max_candidates: config.max_candidates,
+                        };
+                        let provenance_report = CandidateDiscoveryReport {
+                            discovering_agent: agent_id.clone(),
+                            scope: provenance_scope,
+                            candidates: provenance_candidates,
+                            discovered_at: Utc::now(),
+                        };
+                        let post_url = format!("{coordinator}/candidate-discoveries");
+                        match client.post(&post_url).json(&provenance_report).send().await {
+                            Ok(_) => {
+                                tracing::info!(ip = %dst_ip, "eBPF trigger provenance report posted");
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "failed to post eBPF provenance report");
+                            }
+                        }
+                    } else {
+                        tracing::debug!(ip = %dst_ip, "eBPF cue: known host cooldown active — skipping");
+                    }
                     continue;
                 }
             }
