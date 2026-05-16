@@ -1,13 +1,28 @@
+mod discovery;
+
 use axum::{routing::get, Json, Router};
 use chrono::Utc;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+use discovery::{CandidateDiscovery, DiscoveryConfig, RustScanDiscovery};
 use physarum_protocol::{PeerInfo, ProbeReport, RegisterRequest};
 use rand::Rng;
-use std::collections::{HashMap, VecDeque};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing_subscriber::EnvFilter;
+
+/// Controls how the discovery CIDR scope is built.
+#[derive(Debug, Clone, ValueEnum, Default)]
+pub enum DiscoveryScopeMode {
+    /// Use only --discovery-cidrs. Current default behavior.
+    #[default]
+    Explicit,
+    /// Derive discovery CIDRs from non-loopback local network interfaces (RFC1918 only).
+    LocalInterfaces,
+    /// Union of --discovery-cidrs and locally-derived interface CIDRs.
+    Merged,
+}
 
 #[derive(Parser, Clone)]
 #[command(name = "physarum-agent", about = "Physarum attack-path agent")]
@@ -37,6 +52,53 @@ struct Cli {
     /// probe topology (e.g. to remove a direct edge). Lab-only — not a production signal.
     #[arg(long, default_value = "", env = "PHYSARUM_PROBE_TARGETS")]
     probe_targets: String,
+
+    /// Enable blind TCP candidate discovery (Gate L).
+    #[arg(long, default_value_t = false, env = "PHYSARUM_DISCOVERY_ENABLED")]
+    discovery_enabled: bool,
+
+    /// RFC1918 CIDRs to scan, comma-separated (e.g. "10.50.20.0/24,10.50.30.0/24").
+    #[arg(long, default_value = "", env = "PHYSARUM_DISCOVERY_CIDRS")]
+    discovery_cidrs: String,
+
+    /// TCP ports to probe during discovery, comma-separated (e.g. "9001,9002,9003").
+    #[arg(
+        long,
+        default_value = "9001,9002,9003,9004",
+        env = "PHYSARUM_DISCOVERY_PORTS"
+    )]
+    discovery_ports: String,
+
+    /// Seconds between scheduled discovery runs.
+    #[arg(long, default_value_t = 300, env = "PHYSARUM_DISCOVERY_INTERVAL_SECS")]
+    discovery_interval_secs: u64,
+
+    /// Maximum candidates returned per discovery run.
+    #[arg(long, default_value_t = 50, env = "PHYSARUM_DISCOVERY_MAX_CANDIDATES")]
+    discovery_max_candidates: usize,
+
+    /// Connection timeout for each probe socket (ms).
+    #[arg(long, default_value_t = 1500, env = "PHYSARUM_DISCOVERY_TIMEOUT_MS")]
+    discovery_timeout_ms: u64,
+
+    /// Cooldown before re-scanning a seed IP (Gate L.1, seconds).
+    #[arg(
+        long,
+        default_value_t = 300,
+        env = "PHYSARUM_DISCOVERY_SEED_COOLDOWN_SECS"
+    )]
+    discovery_seed_cooldown_secs: u64,
+
+    /// How to build the discovery CIDR scope.
+    /// `explicit` (default): use --discovery-cidrs only.
+    /// `local-interfaces`: derive from host interfaces (RFC1918, non-loopback, prefix >= /16).
+    /// `merged`: union of both.
+    #[arg(
+        long,
+        default_value = "explicit",
+        env = "PHYSARUM_DISCOVERY_SCOPE_MODE"
+    )]
+    discovery_scope_mode: DiscoveryScopeMode,
 }
 
 #[derive(serde::Serialize)]
@@ -230,17 +292,56 @@ async fn send_report(
     Ok(())
 }
 
-async fn probe_loop(cli: Arc<Cli>, client: Arc<reqwest::Client>) {
+async fn probe_loop(
+    cli: Arc<Cli>,
+    client: Arc<reqwest::Client>,
+    discovered_sockets: Arc<Mutex<HashSet<SocketAddr>>>,
+) {
     let interval = Duration::from_secs(cli.probe_interval_seconds);
     let mut observations: HashMap<String, PeerObservation> = HashMap::new();
     let target_filter = build_target_filter(&cli.probe_targets);
+    // When discovery is enabled and no explicit probe targets were given, the probe
+    // loop restricts itself to candidates that the discovery worker has found.
+    // This proves the data path: discovery finds sockets → probe validates them →
+    // only then do graph edges appear. Without this, empty probe_targets would fall
+    // back to probe-all, mixing up discovery evidence with default behavior.
+    let use_discovery_filter = cli.discovery_enabled && target_filter.is_empty();
+    let mut ever_promoted: HashSet<String> = HashSet::new();
+
     loop {
         match fetch_peers(&cli, &client).await {
             Ok(peers) => {
-                let active_peers: Vec<&PeerInfo> = peers
-                    .iter()
-                    .filter(|p| target_filter.is_empty() || target_filter.contains(&p.agent_id))
-                    .collect();
+                let active_peers: Vec<&PeerInfo> = if use_discovery_filter {
+                    let sockets = discovered_sockets.lock().unwrap();
+                    peers
+                        .iter()
+                        .filter(|p| {
+                            p.address
+                                .parse::<IpAddr>()
+                                .map(|ip| sockets.contains(&SocketAddr::new(ip, p.probe_port)))
+                                .unwrap_or(false)
+                        })
+                        .collect()
+                } else {
+                    peers
+                        .iter()
+                        .filter(|p| target_filter.is_empty() || target_filter.contains(&p.agent_id))
+                        .collect()
+                };
+
+                if use_discovery_filter {
+                    for peer in &active_peers {
+                        if ever_promoted.insert(peer.agent_id.clone()) {
+                            tracing::info!(
+                                agent_id = %peer.agent_id,
+                                address = %peer.address,
+                                port = peer.probe_port,
+                                "candidate promoted to probe target"
+                            );
+                        }
+                    }
+                }
+
                 tracing::debug!(count = active_peers.len(), "fetched peers");
                 for peer in &active_peers {
                     let url = build_peer_probe_url(peer);
@@ -284,6 +385,24 @@ fn build_target_filter(probe_targets: &str) -> Vec<String> {
         .collect()
 }
 
+fn parse_ports(ports_str: &str) -> Vec<u16> {
+    ports_str
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<u16>().ok())
+        .collect()
+}
+
+fn parse_cidrs(cidrs_str: &str) -> Vec<String> {
+    cidrs_str
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Arc::new(Cli::parse());
@@ -316,7 +435,64 @@ async fn main() {
         std::process::exit(1);
     }
 
-    probe_loop(cli, client).await;
+    // Shared channel between the discovery worker and the probe loop.
+    // When discovery is enabled and probe_targets is empty, the probe loop restricts
+    // itself to sockets written here by discovery_loop — proving that graph edges
+    // only appear after discovery finds and the probe validates a candidate.
+    let discovered_sockets: Arc<Mutex<HashSet<SocketAddr>>> = Arc::new(Mutex::new(HashSet::new()));
+
+    if cli.discovery_enabled {
+        let explicit_cidrs = parse_cidrs(&cli.discovery_cidrs);
+        let cidrs = match cli.discovery_scope_mode {
+            DiscoveryScopeMode::Explicit => explicit_cidrs,
+            DiscoveryScopeMode::LocalInterfaces => {
+                let derived = discovery::derive_local_rfc1918_cidrs();
+                if !derived.is_empty() {
+                    tracing::info!(cidrs = ?derived, "discovery scope derived from local interfaces");
+                }
+                derived
+            }
+            DiscoveryScopeMode::Merged => {
+                let mut merged = discovery::derive_local_rfc1918_cidrs();
+                merged.extend(explicit_cidrs);
+                merged.sort();
+                merged.dedup();
+                if !merged.is_empty() {
+                    tracing::info!(cidrs = ?merged, "merged explicit + local-interface discovery scope");
+                }
+                merged
+            }
+        };
+        match discovery::validate_rfc1918(&cidrs) {
+            Err(e) => tracing::error!(error = %e, "invalid discovery scope; discovery disabled"),
+            Ok(()) => {
+                let config = Arc::new(DiscoveryConfig {
+                    cidrs,
+                    ports: parse_ports(&cli.discovery_ports),
+                    timeout_ms: cli.discovery_timeout_ms,
+                    max_candidates: cli.discovery_max_candidates,
+                    interval_secs: cli.discovery_interval_secs,
+                    seed_cooldown_secs: cli.discovery_seed_cooldown_secs,
+                });
+                let disc: Arc<dyn CandidateDiscovery> = Arc::new(RustScanDiscovery);
+                tracing::info!(
+                    cidrs = ?cli.discovery_cidrs,
+                    interval_secs = cli.discovery_interval_secs,
+                    "discovery enabled"
+                );
+                tokio::spawn(discovery::discovery_loop(
+                    config,
+                    disc,
+                    cli.id.clone(),
+                    cli.coordinator.clone(),
+                    client.clone(),
+                    discovered_sockets.clone(),
+                ));
+            }
+        }
+    }
+
+    probe_loop(cli, client, discovered_sockets).await;
 }
 
 #[cfg(test)]
@@ -333,6 +509,14 @@ mod tests {
             probe_interval_seconds: 10,
             synthetic_failure_rate: 0.0,
             probe_targets: String::new(),
+            discovery_enabled: false,
+            discovery_cidrs: String::new(),
+            discovery_ports: "9001,9002,9003,9004".to_string(),
+            discovery_interval_secs: 300,
+            discovery_max_candidates: 50,
+            discovery_timeout_ms: 1500,
+            discovery_seed_cooldown_secs: 300,
+            discovery_scope_mode: DiscoveryScopeMode::Explicit,
         }
     }
 

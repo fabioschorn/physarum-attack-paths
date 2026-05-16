@@ -10,8 +10,8 @@ variable "lab_phase" {
   default     = "phase1"
 
   validation {
-    condition     = contains(["phase1", "phase2", "weighted-paths", "gate-k"], var.lab_phase)
-    error_message = "lab_phase must be phase1, phase2, weighted-paths, or gate-k."
+    condition     = contains(["phase1", "phase2", "weighted-paths", "gate-k", "gate-l"], var.lab_phase)
+    error_message = "lab_phase must be phase1, phase2, weighted-paths, gate-k, or gate-l."
   }
 }
 
@@ -104,4 +104,16 @@ variable "enable_observer" {
   description = "When true, user_data on agent-b also downloads physarum-ebpf-observer and its eBPF bytecode from S3 and starts the observer as a root systemd service. Requires enable_artifact_download = true and a Linux kernel with tracefs mounted. Gate J validation flag."
   type        = bool
   default     = false
+}
+
+variable "enable_discovery" {
+  description = "When true, agent-b starts with --discovery-enabled and the configured discovery_cidrs. Gate L validation flag. Requires enable_artifact_download = true."
+  type        = bool
+  default     = false
+}
+
+variable "discovery_cidrs" {
+  description = "Comma-separated RFC1918 CIDRs for agent-b blind discovery (Gate L). Defaults to the three agent subnets of the lab VPC. Must be RFC1918; Internet-facing CIDRs are rejected by the agent at startup."
+  type        = string
+  default     = "10.50.20.0/24,10.50.30.0/24,10.50.40.0/24"
 }

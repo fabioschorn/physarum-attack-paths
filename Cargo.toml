@@ -4,6 +4,7 @@ members = [
     "crates/physarum-protocol",
     "crates/physarum-server",
     "crates/physarum-agent",
+    "crates/physarum-scanner",         # Gate L — async TCP-connect port scanner (internal, inspired by RustScan)
     "crates/physarum-ebpf-observer",   # Gate J — userspace TCP flow observer
     # Future members (uncomment as crates are scaffolded):
     # "crates/physarum-graph",

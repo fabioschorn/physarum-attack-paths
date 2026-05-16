@@ -33,6 +33,11 @@ fn build_router(state: Arc<AppState>) -> Router {
             post(routes::flow_observations::ingest_flow_observation)
                 .get(routes::flow_observations::list_flow_observations),
         )
+        .route(
+            "/candidate-discoveries",
+            post(routes::candidate_discoveries::ingest_candidate_discovery)
+                .get(routes::candidate_discoveries::list_candidate_discoveries),
+        )
         .with_state(state)
 }
 

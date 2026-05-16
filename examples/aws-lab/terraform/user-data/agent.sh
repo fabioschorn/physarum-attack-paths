@@ -16,7 +16,9 @@ set -euxo pipefail
 #   artifact_bucket          = ${artifact_bucket}
 #   artifact_prefix          = ${artifact_prefix}
 #   artifact_region          = ${artifact_region}
-#   enable_observer          = ${enable_observer}  (Gate J: start physarum-ebpf-observer on this node)
+#   enable_observer          = ${enable_observer}   (Gate J: start physarum-ebpf-observer on this node)
+#   enable_discovery         = ${enable_discovery}  (Gate L: start blind RustScan discovery loop)
+#   discovery_cidrs          = ${discovery_cidrs}   (Gate L: RFC1918 CIDRs to scan, comma-separated)
 
 AGENT_ID="${agent_id}"
 LISTEN_PORT="${listen_port}"
@@ -29,11 +31,19 @@ ARTIFACT_BUCKET="${artifact_bucket}"
 ARTIFACT_PREFIX="${artifact_prefix}"
 ARTIFACT_REGION="${artifact_region}"
 ENABLE_OBSERVER="${enable_observer}"
+ENABLE_DISCOVERY="${enable_discovery}"
+DISCOVERY_CIDRS="${discovery_cidrs}"
 
 # Build optional --probe-targets flag (lab-only topology control; empty = probe all)
 PROBE_TARGETS_FLAG=""
 if [ -n "$PROBE_TARGETS" ]; then
   PROBE_TARGETS_FLAG="--probe-targets $PROBE_TARGETS"
+fi
+
+# Build optional Gate L discovery flags (agent-b only in gate-l lab_phase)
+DISCOVERY_FLAGS=""
+if [ "$ENABLE_DISCOVERY" = "true" ] && [ -n "$DISCOVERY_CIDRS" ]; then
+  DISCOVERY_FLAGS="--discovery-enabled --discovery-cidrs $DISCOVERY_CIDRS --discovery-ports 9001,9002,9003,9004 --discovery-interval-secs 300 --discovery-timeout-ms 1500 --discovery-max-candidates 50 --discovery-seed-cooldown-secs 300"
 fi
 
 # Install dependencies
@@ -65,12 +75,19 @@ if [ "$ENABLE_ARTIFACT_DOWNLOAD" = "true" ]; then
   chmod +x /usr/local/bin/physarum-agent
 
   # Verified ExecStart flags: cargo run -p physarum-agent -- --help
-  #   --id <ID>                          (required)
-  #   --coordinator <COORDINATOR>        (required)
-  #   --listen <LISTEN>                  (required)
-  #   --advertise-address <ADDR>         (required)
-  #   --probe-interval-seconds <N>       [default: 10]
-  #   --probe-targets <IDS>              [default: probe all; lab-only]
+  #   --id <ID>                              (required)
+  #   --coordinator <COORDINATOR>            (required)
+  #   --listen <LISTEN>                      (required)
+  #   --advertise-address <ADDR>             (required)
+  #   --probe-interval-seconds <N>           [default: 10]
+  #   --probe-targets <IDS>                  [default: probe all; lab-only]
+  #   --discovery-enabled                    [Gate L]
+  #   --discovery-cidrs <CIDRs>              [Gate L: comma-separated RFC1918]
+  #   --discovery-ports <PORTS>              [Gate L: default 9001,9002,9003,9004]
+  #   --discovery-interval-secs <N>          [Gate L: default 300]
+  #   --discovery-timeout-ms <N>             [Gate L: default 1500]
+  #   --discovery-max-candidates <N>         [Gate L: default 50]
+  #   --discovery-seed-cooldown-secs <N>     [Gate L: default 300]
   cat > /etc/systemd/system/physarum-agent.service << UNIT
 [Unit]
 Description=physarum-agent ($AGENT_ID)
@@ -78,7 +95,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/physarum-agent --id $AGENT_ID --coordinator http://$COORDINATOR_IP:8080 --listen 0.0.0.0:$LISTEN_PORT --advertise-address $ADVERTISE_ADDRESS --probe-interval-seconds 10 $PROBE_TARGETS_FLAG
+ExecStart=/usr/local/bin/physarum-agent --id $AGENT_ID --coordinator http://$COORDINATOR_IP:8080 --listen 0.0.0.0:$LISTEN_PORT --advertise-address $ADVERTISE_ADDRESS --probe-interval-seconds 10 $PROBE_TARGETS_FLAG $DISCOVERY_FLAGS
 Restart=on-failure
 RestartSec=10
 Environment=AGENT_ID=$AGENT_ID
@@ -97,7 +114,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/bin/bash -c 'echo "physarum-agent binary not installed — artifact download disabled (enable_artifact_download=false) — would run: physarum-agent --id $AGENT_ID --coordinator http://$COORDINATOR_IP:8080 --listen 0.0.0.0:$LISTEN_PORT --advertise-address $ADVERTISE_ADDRESS --probe-interval-seconds 10 $PROBE_TARGETS_FLAG" && sleep infinity'
+ExecStart=/bin/bash -c 'echo "physarum-agent binary not installed — artifact download disabled (enable_artifact_download=false) — would run: physarum-agent --id $AGENT_ID --coordinator http://$COORDINATOR_IP:8080 --listen 0.0.0.0:$LISTEN_PORT --advertise-address $ADVERTISE_ADDRESS --probe-interval-seconds 10 $PROBE_TARGETS_FLAG $DISCOVERY_FLAGS" && sleep infinity'
 Restart=on-failure
 RestartSec=10
 Environment=AGENT_ID=$AGENT_ID

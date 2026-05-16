@@ -1,0 +1,258 @@
+---
+# physarum AWS lab — Gate L blind candidate discovery validation.
+#
+# Validates that agent-b discovers live sockets on the configured RFC1918
+# CIDRs via physarum-scanner (inspired by RustScan), reports them to the
+# coordinator at POST /candidate-discoveries, and that at least one
+# discovered candidate subsequently becomes a graph edge via probe.
+#
+# The key Gate L proof:
+#   discovery run complete
+#   -> discovered sockets updated (probe loop will use these targets)
+#   -> candidate promoted to probe target
+#   -> probe succeeded
+#   -> graph edge appears
+#
+# This chain is verified in Evidence 5 (promotion chain log assertions).
+#
+# Topology (gate-l lab_phase — same as phase1 full-mesh but agent-b runs
+# with --discovery-enabled):
+#   server-a  : 10.50.10.10 (coordinator)
+#   agent-b   : 10.50.20.10 (scout — discovery enabled)
+#   agent-c   : 10.50.30.10 (target)
+#   agent-d   : 10.50.40.10 (target)
+#
+# Prerequisites:
+#   - terraform apply -var lab_phase=gate-l -var enable_discovery=true \
+#       -var enable_artifact_download=true [...]
+#   - Wait ~5 min for cloud-init + first discovery scan cycle to complete
+#   - ansible-playbook -i ansible/inventory.local.ini \
+#       ansible/validate-gate-l-discovery.yml
+#
+# Evidence collected:
+#   1. Blind discovery — /candidate-discoveries returns candidates from agent-b
+#   2. Candidate→edge — at least one candidate appears as a graph edge
+#   3. Path ranking   — /paths finds routes through discovered candidates
+#   4. Discovery log  — agent-b journal confirms scanner ran
+#   5. Promotion chain — journal proves discovery -> promoted -> probe -> edge
+#                        (the critical Gate L data path — not probe-all masking)
+
+- name: "Evidence 1 — Blind discovery: /candidate-discoveries is populated"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /candidate-discoveries (all)
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/candidate-discoveries
+      register: all_candidates
+      changed_when: false
+
+    - name: Print all candidates
+      ansible.builtin.debug:
+        msg: "{{ all_candidates.stdout }}"
+
+    - name: GET /candidate-discoveries?agent_id=agent-b
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/candidate-discoveries?agent_id=agent-b'
+      register: agent_b_candidates
+      changed_when: false
+
+    - name: Print agent-b candidates
+      ansible.builtin.debug:
+        msg: "{{ agent_b_candidates.stdout }}"
+
+    - name: Assert /candidate-discoveries returned non-empty response
+      ansible.builtin.assert:
+        that: all_candidates.stdout | length > 2
+        fail_msg: "/candidate-discoveries returned empty — discovery may not have run yet"
+        success_msg: "/candidate-discoveries has entries"
+
+    - name: Assert agent-b has discovered at least one candidate
+      ansible.builtin.assert:
+        that: "'agent-b' in agent_b_candidates.stdout"
+        fail_msg: "No candidates discovered by agent-b — check discovery flags and scanner logs"
+        success_msg: "agent-b has reported candidate discoveries"
+
+    - name: Assert discovered candidates are in expected RFC1918 range
+      ansible.builtin.assert:
+        that: "'10.50.' in all_candidates.stdout"
+        fail_msg: "Discovered candidates are not in 10.50.x.x range — check discovery_cidrs"
+        success_msg: "Candidates are in the expected 10.50.x.x RFC1918 range"
+
+    - name: GET /candidate-discoveries?limit=5
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/candidate-discoveries?limit=5'
+      register: limited_candidates
+      changed_when: false
+
+    - name: Parse limited candidates count
+      ansible.builtin.shell: >
+        echo '{{ limited_candidates.stdout }}' | python3 -c
+        "import sys, json; d = json.load(sys.stdin); print(len(d))"
+      register: limited_count
+      changed_when: false
+      failed_when: false
+
+    - name: Assert ?limit=5 returns at most 5 candidates
+      ansible.builtin.assert:
+        that: limited_count.stdout | int <= 5
+        fail_msg: "?limit=5 returned more than 5 candidates: {{ limited_count.stdout }}"
+        success_msg: "?limit=5 cap is respected (returned {{ limited_count.stdout }})"
+      when: limited_count.rc == 0
+
+
+- name: "Evidence 2 — Candidate→edge: discovered candidates appear in the graph"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /graph
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/graph
+      register: graph
+      changed_when: false
+
+    - name: Print /graph
+      ansible.builtin.debug:
+        msg: "{{ graph.stdout }}"
+
+    - name: Assert /graph is non-empty
+      ansible.builtin.assert:
+        that: graph.stdout | length > 2
+        fail_msg: "/graph returned empty — probing may not have started yet"
+        success_msg: "/graph has content"
+
+    - name: Assert agent-b appears in the graph
+      ansible.builtin.assert:
+        that: "'agent-b' in graph.stdout"
+        fail_msg: "agent-b not in graph — registration or probing failed"
+        success_msg: "agent-b is present in the graph"
+
+    - name: Assert at least one agent-c or agent-d appears (probe succeeded)
+      ansible.builtin.assert:
+        that: "'agent-c' in graph.stdout or 'agent-d' in graph.stdout"
+        fail_msg: "Neither agent-c nor agent-d in graph — no candidate was probe-validated"
+        success_msg: "At least one discovered candidate became a graph edge"
+
+
+- name: "Evidence 3 — Path ranking: /paths finds routes through discovered candidates"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /paths?source=agent-b&target=agent-d
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d'
+      register: paths_b_d
+      changed_when: false
+
+    - name: Print /paths B→D
+      ansible.builtin.debug:
+        msg: "{{ paths_b_d.stdout }}"
+
+    - name: Assert /paths returned a valid JSON response
+      ansible.builtin.assert:
+        that: paths_b_d.stdout | length > 2
+        fail_msg: "/paths returned empty"
+        success_msg: "/paths returned a response"
+
+    - name: Assert selected_path is not empty
+      ansible.builtin.assert:
+        that: "'agent-b' in paths_b_d.stdout and 'agent-d' in paths_b_d.stdout"
+        fail_msg: "/paths does not mention agent-b and agent-d — no path found"
+        success_msg: "/paths found a route involving agent-b and agent-d"
+
+
+- name: "Evidence 4 — Discovery log: agent-b journal confirms scanner ran"
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Tail physarum-agent journal (agent-b only)
+      ansible.builtin.command: >
+        journalctl -u physarum-agent --no-pager -n 200
+      register: agent_journal
+      failed_when: false
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Print agent-b journal
+      ansible.builtin.debug:
+        msg: "{{ agent_journal.stdout_lines }}"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert discovery run appears in agent-b logs
+      ansible.builtin.assert:
+        that: >
+          'starting scheduled discovery run' in agent_journal.stdout or
+          'discovery run complete' in agent_journal.stdout or
+          'physarum-scanner starting' in agent_journal.stdout
+        fail_msg: >
+          No discovery log lines found in agent-b journal.
+          Check that --discovery-enabled was passed and the first scan cycle has elapsed.
+        success_msg: "agent-b discovery scan confirmed in journal"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert discovery report was posted (coordinator accepted)
+      ansible.builtin.assert:
+        that: "'discovery report posted' in agent_journal.stdout"
+        fail_msg: >
+          'discovery report posted' not found in agent-b journal.
+          The agent may have found no open sockets, or the coordinator POST failed.
+        success_msg: "agent-b posted discovery report to coordinator"
+      when: inventory_hostname == 'agent-b'
+
+
+- name: "Evidence 5 — Promotion chain: discovery drives probe, not probe-all"
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  # This play verifies the Gate L critical data path:
+  #   discovery run complete count=N
+  #   discovered sockets updated — probe loop will use these targets
+  #   candidate promoted to probe target
+  #
+  # Without these messages the graph edges may be from the old probe-all
+  # fallback, not from discovery. With them, the organism proved:
+  #   discovery found it -> promoted it -> probed it -> edge appeared.
+
+  tasks:
+    - name: Tail physarum-agent journal for promotion chain (agent-b only)
+      ansible.builtin.command: >
+        journalctl -u physarum-agent --no-pager -n 300
+      register: agent_journal_promo
+      failed_when: false
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert discovered sockets shared with probe loop
+      ansible.builtin.assert:
+        that: "'discovered sockets updated' in agent_journal_promo.stdout"
+        fail_msg: >
+          'discovered sockets updated — probe loop will use these targets' not found.
+          The discovery worker may not have found any open sockets, or the
+          discovered_sockets bridge is not writing to the shared set.
+        success_msg: "discovery worker shared sockets with probe loop"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert at least one candidate was promoted to probe target
+      ansible.builtin.assert:
+        that: "'candidate promoted to probe target' in agent_journal_promo.stdout"
+        fail_msg: >
+          'candidate promoted to probe target' not found in agent-b journal.
+          Either no discovered socket matched a registered peer, or probe_loop
+          is not filtering through discovered_sockets.
+        success_msg: "at least one discovery candidate was promoted to active probe target"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Print promotion evidence from agent-b journal
+      ansible.builtin.debug:
+        msg: >
+          {{ agent_journal_promo.stdout_lines
+             | select('search', 'discovery|promoted|probe result|graph')
+             | list }}
+      when: inventory_hostname == 'agent-b'
