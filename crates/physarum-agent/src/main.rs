@@ -1,6 +1,9 @@
+mod discovery;
+
 use axum::{routing::get, Json, Router};
 use chrono::Utc;
 use clap::Parser;
+use discovery::{CandidateDiscovery, DiscoveryConfig, RustScanDiscovery};
 use physarum_protocol::{PeerInfo, ProbeReport, RegisterRequest};
 use rand::Rng;
 use std::collections::{HashMap, VecDeque};
@@ -37,6 +40,42 @@ struct Cli {
     /// probe topology (e.g. to remove a direct edge). Lab-only — not a production signal.
     #[arg(long, default_value = "", env = "PHYSARUM_PROBE_TARGETS")]
     probe_targets: String,
+
+    /// Enable blind TCP candidate discovery (Gate L).
+    #[arg(long, default_value_t = false, env = "PHYSARUM_DISCOVERY_ENABLED")]
+    discovery_enabled: bool,
+
+    /// RFC1918 CIDRs to scan, comma-separated (e.g. "10.50.20.0/24,10.50.30.0/24").
+    #[arg(long, default_value = "", env = "PHYSARUM_DISCOVERY_CIDRS")]
+    discovery_cidrs: String,
+
+    /// TCP ports to probe during discovery, comma-separated (e.g. "9001,9002,9003").
+    #[arg(
+        long,
+        default_value = "9001,9002,9003,9004",
+        env = "PHYSARUM_DISCOVERY_PORTS"
+    )]
+    discovery_ports: String,
+
+    /// Seconds between scheduled discovery runs.
+    #[arg(long, default_value_t = 300, env = "PHYSARUM_DISCOVERY_INTERVAL_SECS")]
+    discovery_interval_secs: u64,
+
+    /// Maximum candidates returned per discovery run.
+    #[arg(long, default_value_t = 50, env = "PHYSARUM_DISCOVERY_MAX_CANDIDATES")]
+    discovery_max_candidates: usize,
+
+    /// Connection timeout for each probe socket (ms).
+    #[arg(long, default_value_t = 1500, env = "PHYSARUM_DISCOVERY_TIMEOUT_MS")]
+    discovery_timeout_ms: u64,
+
+    /// Cooldown before re-scanning a seed IP (Gate L.1, seconds).
+    #[arg(
+        long,
+        default_value_t = 300,
+        env = "PHYSARUM_DISCOVERY_SEED_COOLDOWN_SECS"
+    )]
+    discovery_seed_cooldown_secs: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -284,6 +323,24 @@ fn build_target_filter(probe_targets: &str) -> Vec<String> {
         .collect()
 }
 
+fn parse_ports(ports_str: &str) -> Vec<u16> {
+    ports_str
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<u16>().ok())
+        .collect()
+}
+
+fn parse_cidrs(cidrs_str: &str) -> Vec<String> {
+    cidrs_str
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Arc::new(Cli::parse());
@@ -316,6 +373,36 @@ async fn main() {
         std::process::exit(1);
     }
 
+    if cli.discovery_enabled {
+        let cidrs = parse_cidrs(&cli.discovery_cidrs);
+        match discovery::validate_rfc1918(&cidrs) {
+            Err(e) => tracing::error!(error = %e, "invalid discovery scope; discovery disabled"),
+            Ok(()) => {
+                let config = Arc::new(DiscoveryConfig {
+                    cidrs,
+                    ports: parse_ports(&cli.discovery_ports),
+                    timeout_ms: cli.discovery_timeout_ms,
+                    max_candidates: cli.discovery_max_candidates,
+                    interval_secs: cli.discovery_interval_secs,
+                    seed_cooldown_secs: cli.discovery_seed_cooldown_secs,
+                });
+                let disc: Arc<dyn CandidateDiscovery> = Arc::new(RustScanDiscovery);
+                tracing::info!(
+                    cidrs = ?cli.discovery_cidrs,
+                    interval_secs = cli.discovery_interval_secs,
+                    "discovery enabled"
+                );
+                tokio::spawn(discovery::discovery_loop(
+                    config,
+                    disc,
+                    cli.id.clone(),
+                    cli.coordinator.clone(),
+                    client.clone(),
+                ));
+            }
+        }
+    }
+
     probe_loop(cli, client).await;
 }
 
@@ -333,6 +420,13 @@ mod tests {
             probe_interval_seconds: 10,
             synthetic_failure_rate: 0.0,
             probe_targets: String::new(),
+            discovery_enabled: false,
+            discovery_cidrs: String::new(),
+            discovery_ports: "9001,9002,9003,9004".to_string(),
+            discovery_interval_secs: 300,
+            discovery_max_candidates: 50,
+            discovery_timeout_ms: 1500,
+            discovery_seed_cooldown_secs: 300,
         }
     }
 
