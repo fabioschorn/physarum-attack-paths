@@ -466,3 +466,108 @@ Section 10   -> Micromouse-inspired exploration (sensing model and gate sequence
 
 These are complementary, not competing. The Micromouse framing explains sensing and exploration. MCPM explains density emergence. MCTS explains learned prioritization. All three layers depend on the adaptive graph substrate being stable first.
 
+---
+
+## 11. Future agent autonomy: from local reactions to strategic organism behavior
+
+### Current state
+
+The current agent has started to move beyond a fixed client role. It already performs bounded local autonomy:
+
+```text
+observe eBPF flow cues
+filter by configured discovery scope
+apply cooldown/deduplication
+run exact-host discovery
+promote discovered candidates to active probe targets
+report validated evidence back to the graph
+```
+
+This is an important transition:
+
+```text
+old model: receive a peer list -> probe peers -> report results
+current model: sense -> discover candidates -> validate -> report graph evidence
+```
+
+However, this is still local operational autonomy. The agent is not yet making global strategic decisions by itself.
+
+---
+
+### Strategic questions for future agents
+
+The future role-fluid organism should eventually let agents ask and answer higher-level strategic questions such as:
+
+```text
+Which global path should I prefer?
+Should I change my role from client to server?
+Should I become a local coordinator?
+Should I propagate state to another node?
+Should I choose among multiple competing paths by myself?
+Should I abandon a weak region and reinforce another?
+Should I initiate secure mesh communication with another peer?
+```
+
+These questions mark the difference between:
+
+```text
+an agent that reacts locally
+```
+
+and:
+
+```text
+an organism node that participates in distributed strategy
+```
+
+---
+
+### Mapping to future capabilities
+
+Possible future capability mapping:
+
+```text
+Prefer global path
+  -> consume /paths, selected_path, secondary_conduits, path scores, graph freshness
+
+Change role from client to server
+  -> role-fluid runtime, ServeLocal, Coordinate, local control-plane promotion
+
+Become local coordinator
+  -> distributed state handoff, coordinator failover, local graph/cache ownership
+
+Propagate state to another node
+  -> mesh communication, state reconciliation, signed graph snapshots, eventual consistency
+
+Choose among competing paths independently
+  -> local path-ranking policy, threshold logic, uncertainty scoring, expected-loss reasoning
+
+Abandon weak region and reinforce another
+  -> decay/retention policy, q_ema/D_ij thresholds, secondary conduit preservation
+
+Initiate secure mesh communication
+  -> TLS/mTLS, node identity, capability-aware peer communication, trust bootstrap
+```
+
+---
+
+### Research framing
+
+This moves the project toward a stronger organism claim:
+
+```text
+The system is not only a coordinator that computes paths from reports.
+It is a distributed organism whose nodes can sense, validate, remember, choose, and eventually change role based on environmental conditions.
+```
+
+Near-term gates should continue to prove one behavior at a time:
+
+```text
+Gate L.2 -> local-interface scope + eBPF-triggered discovery from inbound stimuli
+Gate L.3 -> packet-level ICMP sensing with before/after evidence
+Gate M   -> role-fluid physarum-node runtime
+Gate N   -> secure service-mesh-like communication with TLS/mTLS
+```
+
+The strategic autonomy questions should remain visible as the north star for Gate M and Gate N.
+
