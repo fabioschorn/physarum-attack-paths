@@ -464,7 +464,11 @@ pub async fn ebpf_seed_loop(
             {
                 let known_for_dst: Vec<SocketAddr> = {
                     let sockets = discovered_sockets.lock().unwrap();
-                    sockets.iter().filter(|s| s.ip() == dst_ip).copied().collect()
+                    sockets
+                        .iter()
+                        .filter(|s| s.ip() == dst_ip)
+                        .copied()
+                        .collect()
                 };
                 if !known_for_dst.is_empty() {
                     if seed_queue.should_scan(dst_ip) {
