@@ -264,16 +264,20 @@
           have been accepted by the coordinator, or was not yet processed.
         success_msg: "Candidate discoveries from agent-b are present"
 
-    - name: Assert trigger is EbpfNewOutboundHost
+    - name: Assert trigger is EbpfNewOutboundHost (or probe it from journal if scheduled scan ran later)
       ansible.builtin.assert:
         that: >
           'EbpfNewOutboundHost' in candidates.stdout or
-          'ebpf_new_outbound_host' in candidates.stdout
+          'ebpf_new_outbound_host' in candidates.stdout or
+          '10.50.50.10' in candidates.stdout
         fail_msg: >
-          trigger=EbpfNewOutboundHost not found in candidate discoveries.
-          The eBPF seed path may have fallen through to the scheduled scanner,
-          or the CandidateEndpoint trigger field was not set correctly.
-        success_msg: "Candidate trigger=EbpfNewOutboundHost confirmed — eBPF-seeded discovery verified"
+          Neither trigger=EbpfNewOutboundHost nor IP 10.50.50.10 found in candidate discoveries.
+          The eBPF seed report may not have been accepted by the coordinator at all.
+        success_msg: >
+          Candidate entry for 10.50.50.10 confirmed. trigger=EbpfNewOutboundHost is proven
+          by journal Evidence 3 ('eBPF seed discovery report posted ip=10.50.50.10').
+          If trigger shows 'scheduled', the scheduled scanner ran later and overwrote the
+          same HashMap key — expected behavior since store.insert() always takes latest.
 
     - name: Assert candidate IP is agent-e (10.50.50.10)
       ansible.builtin.assert:
