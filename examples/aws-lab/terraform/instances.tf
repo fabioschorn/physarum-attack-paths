@@ -15,6 +15,7 @@ locals {
     "phase2"         = "segmented-b-c-d"
     "weighted-paths" = "weighted-competing-paths"
     "gate-k"         = "segmented-adaptive-flow-path"
+    "gate-l"         = "blind-candidate-discovery"
   }
 
   # Common tags applied to all taggable resources.
@@ -88,6 +89,8 @@ resource "aws_instance" "agent_b" {
     artifact_prefix          = var.artifact_prefix
     artifact_region          = local.resolved_artifact_region
     enable_observer          = var.enable_observer
+    enable_discovery         = var.enable_discovery
+    discovery_cidrs          = var.discovery_cidrs
   })
 
   tags = merge(local.phase_tags, {
@@ -118,6 +121,8 @@ resource "aws_instance" "agent_c" {
     artifact_prefix          = var.artifact_prefix
     artifact_region          = local.resolved_artifact_region
     enable_observer          = false
+    enable_discovery         = false
+    discovery_cidrs          = ""
   })
 
   tags = merge(local.phase_tags, {
@@ -148,6 +153,8 @@ resource "aws_instance" "agent_d" {
     artifact_prefix          = var.artifact_prefix
     artifact_region          = local.resolved_artifact_region
     enable_observer          = false
+    enable_discovery         = false
+    discovery_cidrs          = ""
   })
 
   tags = merge(local.phase_tags, {
@@ -180,6 +187,8 @@ resource "aws_instance" "agent_e" {
     artifact_prefix          = var.artifact_prefix
     artifact_region          = local.resolved_artifact_region
     enable_observer          = false
+    enable_discovery         = false
+    discovery_cidrs          = ""
   })
 
   tags = merge(local.phase_tags, {
