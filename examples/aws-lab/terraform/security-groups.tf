@@ -245,7 +245,7 @@ resource "aws_security_group_rule" "agent_d_ssh" {
 # ── Agent E security group (weighted-paths only) ─────────────────────────────
 
 resource "aws_security_group" "agent_e" {
-  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
+  count = contains(["weighted-paths", "gate-k", "gate-l"], var.lab_phase) ? 1 : 0
 
   name        = "${local.effective_name_prefix}-agent-e"
   description = "physarum-agent-e (E, secondary/alternate path or isolated destination) - ${var.lab_phase}"
@@ -267,10 +267,10 @@ resource "aws_security_group" "agent_e" {
 # ── Agent E ingress rules (weighted-paths only) ───────────────────────────────
 
 resource "aws_security_group_rule" "agent_e_from_b" {
-  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
+  count = contains(["weighted-paths", "gate-k", "gate-l"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe from agent-b (weighted-paths: competing path; gate-k: direct B-E path)"
+  description              = "Probe from agent-b (weighted-paths: competing path; gate-k: direct B-E path; gate-l: eBPF-seeded probe target)"
   from_port                = 9004
   to_port                  = 9004
   protocol                 = "tcp"
@@ -303,7 +303,7 @@ resource "aws_security_group_rule" "agent_e_from_c" {
 }
 
 resource "aws_security_group_rule" "agent_e_ssh" {
-  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
+  count = contains(["weighted-paths", "gate-k", "gate-l"], var.lab_phase) ? 1 : 0
 
   type              = "ingress"
   description       = "SSH from operator (Dev Lead workstation only)"
@@ -317,7 +317,7 @@ resource "aws_security_group_rule" "agent_e_ssh" {
 # ── Server A ← Agent E reports (weighted-paths only) ─────────────────────────
 
 resource "aws_security_group_rule" "server_a_from_agent_e" {
-  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
+  count = contains(["weighted-paths", "gate-k", "gate-l"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
   description              = "Agent reports from agent-e"

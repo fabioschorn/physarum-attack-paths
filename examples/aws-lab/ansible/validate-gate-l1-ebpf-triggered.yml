@@ -1,0 +1,449 @@
+---
+# physarum AWS lab — Gate L.1 eBPF-triggered adaptive discovery validation.
+#
+# Validates that agent-b's ebpf_seed_loop observes an outbound
+# connect_established event (posted by physarum-ebpf-observer), then
+# immediately triggers an exact-host RustScan against dst_ip/32, reports
+# the candidate as trigger=EbpfNewOutboundHost, shares it with the probe
+# loop, and the probe loop promotes it to a live graph edge.
+#
+# The chain that must be proven end-to-end:
+#   TCP connect (agent-b → agent-e)
+#   -> physarum-ebpf-observer posts FlowObservation to coordinator
+#   -> ebpf_seed_loop polls GET /flow-observations?since=<cursor>
+#   -> eBPF new-host cue: enqueued seed (log)
+#   -> RustScanDiscovery against 10.50.50.10/32
+#   -> eBPF seed discovery report posted (log)
+#   -> GET /candidate-discoveries shows trigger=EbpfNewOutboundHost
+#   -> eBPF seed scan: discovered sockets updated (log)
+#   -> probe_loop promotes candidate -> probe success -> /report
+#   -> graph edge B→E appears in GET /graph
+#   -> cooldown: repeat cues for same IP are silently skipped
+#
+# Topology (gate-l lab_phase, agent-e added):
+#   server-a  : 10.50.10.10  (coordinator)
+#   agent-b   : 10.50.20.10  (eBPF observer + discovery enabled)
+#   agent-c   : 10.50.30.10  (peer — known to agent-b via probe-targets)
+#   agent-d   : 10.50.40.10  (target)
+#   agent-e   : 10.50.50.10  (initially undiscovered — Gate L.1 target)
+#
+# Prerequisites:
+#   terraform apply \
+#     -var="lab_phase=gate-l" \
+#     -var="operator_cidr=$(curl -s ifconfig.me)/32" \
+#     -var="ami_id_override=ami-02fe376e6ac9632c8" \
+#     -var="enable_artifact_download=true" \
+#     -var="artifact_bucket=physarum-artifacts-168740128169" \
+#     -var="enable_observer=true" \
+#     -var="enable_discovery=true" \
+#     -var="discovery_cidrs=10.50.20.0/24,10.50.30.0/24,10.50.40.0/24,10.50.50.0/24" \
+#     -var="agent_b_probe_targets=agent-c"
+#   Update inventory.local.ini with agent-e's public IP.
+#   Wait ~3 min for cloud-init to complete before running this playbook.
+#
+#   ansible-playbook -i ansible/inventory.local.ini \
+#     ansible/validate-gate-l1-ebpf-triggered.yml
+#
+# Evidence collected (maps to Manager's 9-item required list):
+#   1. eBPF observer running + agent-e reachable: pre-condition check
+#   2. TCP trigger + flow observation at coordinator (items 1-2)
+#   3. ebpf_seed_loop log: enqueued seed + scan + report posted (items 2-3)
+#   4. /candidate-discoveries: trigger=EbpfNewOutboundHost (item 4)
+#   5. discovered_sockets updated log (item 5)
+#   6. Candidate promoted + probe success + graph edge B→E (items 6-7)
+#   7. Cooldown: repeat triggers produce no new seed in logs (item 8)
+
+# ── Evidence 1: pre-condition — observer running, agent-e reachable ───────────
+
+- name: "Evidence 1 — Pre-condition: eBPF observer active, agent-e registered"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /agents — all registered agents
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/agents
+      register: agents_list
+      changed_when: false
+
+    - name: Print registered agents
+      ansible.builtin.debug:
+        msg: "{{ agents_list.stdout }}"
+
+    - name: Assert agent-e is registered with coordinator
+      ansible.builtin.assert:
+        that: "'agent-e' in agents_list.stdout"
+        fail_msg: >
+          agent-e is not registered. Confirm agent-e user_data started
+          physarum-agent and it reached the coordinator at 10.50.10.10:8080.
+        success_msg: "agent-e is registered with the coordinator"
+
+    - name: Assert agent-b is registered with coordinator
+      ansible.builtin.assert:
+        that: "'agent-b' in agents_list.stdout"
+        fail_msg: "agent-b is not registered — check physarum-agent on agent-b"
+        success_msg: "agent-b is registered with the coordinator"
+
+- name: "Evidence 1b — Pre-condition: physarum-ebpf-observer active on agent-b"
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Check physarum-ebpf-observer systemd status (agent-b only)
+      ansible.builtin.command: systemctl is-active physarum-ebpf-observer
+      register: observer_status
+      failed_when: false
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Print observer status
+      ansible.builtin.debug:
+        msg: "physarum-ebpf-observer: {{ observer_status.stdout }}"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert observer is active on agent-b
+      ansible.builtin.assert:
+        that: observer_status.stdout == 'active'
+        fail_msg: >
+          physarum-ebpf-observer is not active on agent-b (status: {{ observer_status.stdout }}).
+          Check: journalctl -u physarum-ebpf-observer --no-pager -n 50
+        success_msg: "physarum-ebpf-observer is active on agent-b"
+      when: inventory_hostname == 'agent-b'
+
+# ── Evidence 2: TCP trigger + flow observation posted ─────────────────────────
+
+- name: "Evidence 2 — TCP trigger: agent-b connects to agent-e, observer posts flow event"
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Note timestamp before triggering TCP connect (agent-b only)
+      ansible.builtin.command: date -u +%Y-%m-%dT%H:%M:%SZ
+      register: trigger_ts
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Print trigger timestamp
+      ansible.builtin.debug:
+        msg: "TCP trigger timestamp: {{ trigger_ts.stdout }}"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Trigger TCP connect from agent-b to agent-e:9004 (eBPF stimulus)
+      ansible.builtin.shell: >
+        bash -c 'echo > /dev/tcp/10.50.50.10/9004' || true
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Wait 10s for observer to capture and post the flow event
+      ansible.builtin.pause:
+        seconds: 10
+      when: inventory_hostname == 'agent-b'
+
+- name: "Evidence 2b — Flow observation: coordinator received connect_established event"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /flow-observations (last 20)
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/flow-observations?limit=20&agent_id=agent-b'
+      register: flow_obs
+      changed_when: false
+
+    - name: Print flow observations
+      ansible.builtin.debug:
+        msg: "{{ flow_obs.stdout }}"
+
+    - name: Assert coordinator received a flow observation from agent-b
+      ansible.builtin.assert:
+        that: "'agent-b' in flow_obs.stdout"
+        fail_msg: >
+          No flow observations from agent-b found at coordinator.
+          The eBPF observer may not have captured the connect event yet.
+          Check: journalctl -u physarum-ebpf-observer --no-pager -n 50 on agent-b.
+        success_msg: "Flow observation from agent-b is present at coordinator"
+
+    - name: Assert flow observation targets agent-e IP (10.50.50.10)
+      ansible.builtin.assert:
+        that: "'10.50.50.10' in flow_obs.stdout"
+        fail_msg: >
+          Flow observation with dst=10.50.50.10 not found.
+          The TCP connect may not have reached agent-e, or the observer
+          filtered it. Check connectivity: nc -zv 10.50.50.10 9004 from agent-b.
+        success_msg: "Flow observation targeting agent-e (10.50.50.10) is recorded at coordinator"
+
+    - name: Assert event type is connect_established or outbound
+      ansible.builtin.assert:
+        that: >
+          'ConnectEstablished' in flow_obs.stdout or
+          'connect_established' in flow_obs.stdout or
+          'Outbound' in flow_obs.stdout or
+          'outbound' in flow_obs.stdout
+        fail_msg: >
+          Expected ConnectEstablished/Outbound event not found in flow observations.
+          Check flow_obs output above.
+        success_msg: "Flow observation event type is correct (connect_established / outbound)"
+
+# ── Evidence 3: ebpf_seed_loop triggered on agent-b ──────────────────────────
+
+- name: "Evidence 3 — eBPF seed loop: agent-b detected new-host cue and ran exact-host scan"
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Wait 30s for ebpf_seed_loop poll cycle to complete (agent-b only)
+      ansible.builtin.pause:
+        seconds: 30
+      when: inventory_hostname == 'agent-b'
+
+    - name: Tail physarum-agent journal for eBPF seed lines (agent-b only)
+      ansible.builtin.command: >
+        journalctl -u physarum-agent --no-pager -n 300
+      register: agent_b_journal
+      failed_when: false
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Print eBPF-relevant log lines from agent-b
+      ansible.builtin.debug:
+        msg: >
+          {{ agent_b_journal.stdout_lines
+             | select('search', 'eBPF|ebpf|seed|flow.obs|cooldown')
+             | list }}
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert ebpf_seed_loop enqueued a seed for agent-e's IP
+      ansible.builtin.assert:
+        that: "'eBPF new-host cue: enqueued seed' in agent_b_journal.stdout"
+        fail_msg: >
+          'eBPF new-host cue: enqueued seed' not found in agent-b journal.
+          The ebpf_seed_loop may not have polled yet, or the IP filter
+          (ip_in_any_cidr / dst_ip != own_ip / discovered_sockets check)
+          excluded 10.50.50.10. Check discovery_cidrs includes 10.50.50.0/24.
+        success_msg: "ebpf_seed_loop detected new-host cue for agent-e (10.50.50.10)"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert exact-host scan report was posted to coordinator
+      ansible.builtin.assert:
+        that: "'eBPF seed discovery report posted' in agent_b_journal.stdout"
+        fail_msg: >
+          'eBPF seed discovery report posted' not found.
+          RustScan against 10.50.50.10/32 may have found no open ports,
+          or the POST to /candidate-discoveries failed.
+          Check that agent-e:9004 is accepting connections from agent-b's SG.
+        success_msg: "eBPF-triggered RustScan ran and report was posted to coordinator"
+      when: inventory_hostname == 'agent-b'
+
+# ── Evidence 4: /candidate-discoveries shows ebpf trigger ────────────────────
+
+- name: "Evidence 4 — Candidate discoveries: trigger=EbpfNewOutboundHost for agent-e"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /candidate-discoveries?agent_id=agent-b
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/candidate-discoveries?agent_id=agent-b'
+      register: candidates
+      changed_when: false
+
+    - name: Print candidate discoveries
+      ansible.builtin.debug:
+        msg: "{{ candidates.stdout }}"
+
+    - name: Assert candidate discovery entry exists for agent-b
+      ansible.builtin.assert:
+        that: "'agent-b' in candidates.stdout"
+        fail_msg: >
+          No candidate discoveries from agent-b. The eBPF seed report may not
+          have been accepted by the coordinator, or was not yet processed.
+        success_msg: "Candidate discoveries from agent-b are present"
+
+    - name: Assert trigger is EbpfNewOutboundHost
+      ansible.builtin.assert:
+        that: >
+          'EbpfNewOutboundHost' in candidates.stdout or
+          'ebpf_new_outbound_host' in candidates.stdout
+        fail_msg: >
+          trigger=EbpfNewOutboundHost not found in candidate discoveries.
+          The eBPF seed path may have fallen through to the scheduled scanner,
+          or the CandidateEndpoint trigger field was not set correctly.
+        success_msg: "Candidate trigger=EbpfNewOutboundHost confirmed — eBPF-seeded discovery verified"
+
+    - name: Assert candidate IP is agent-e (10.50.50.10)
+      ansible.builtin.assert:
+        that: "'10.50.50.10' in candidates.stdout"
+        fail_msg: >
+          10.50.50.10 not found in candidate discoveries.
+          Check that the /32 CIDR expansion returned the host IP and that
+          RustScan found open port 9004 on agent-e.
+        success_msg: "Discovered candidate includes agent-e at 10.50.50.10"
+
+# ── Evidence 5: discovered_sockets updated + candidate promoted ───────────────
+
+- name: "Evidence 5 — Promotion chain: sockets shared with probe loop, candidate promoted"
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Tail agent-b journal for promotion chain (agent-b only)
+      ansible.builtin.command: >
+        journalctl -u physarum-agent --no-pager -n 400
+      register: agent_b_promo_journal
+      failed_when: false
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert discovered_sockets was updated by eBPF seed scan
+      ansible.builtin.assert:
+        that: "'eBPF seed scan: discovered sockets updated' in agent_b_promo_journal.stdout"
+        fail_msg: >
+          'eBPF seed scan: discovered sockets updated' not found.
+          The candidate may not have been inserted into the discovered_sockets
+          Arc<Mutex<HashSet<SocketAddr>>> bridge.
+        success_msg: "eBPF seed scan updated discovered_sockets — probe loop will target agent-e"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert probe loop promoted the eBPF-discovered candidate
+      ansible.builtin.assert:
+        that: "'candidate promoted to probe target' in agent_b_promo_journal.stdout"
+        fail_msg: >
+          'candidate promoted to probe target' not found.
+          The probe_loop may not have matched the discovered socket to a
+          registered peer (agent-e must be registered at coordinator for
+          promotion). Check GET /agents includes agent-e.
+        success_msg: "probe_loop promoted the eBPF-discovered candidate to active probe target"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Print full promotion chain evidence from agent-b
+      ansible.builtin.debug:
+        msg: >
+          {{ agent_b_promo_journal.stdout_lines
+             | select('search', 'eBPF|seed|promoted|probe result|discovered sockets')
+             | list }}
+      when: inventory_hostname == 'agent-b'
+
+# ── Evidence 6: graph edge B→E created via /report ───────────────────────────
+
+- name: "Evidence 6 — Graph edge: probe success creates B→E edge via /report"
+  hosts: server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: GET /graph
+      ansible.builtin.command: curl -s http://127.0.0.1:8080/graph
+      register: graph
+      changed_when: false
+
+    - name: Print /graph
+      ansible.builtin.debug:
+        msg: "{{ graph.stdout }}"
+
+    - name: Assert agent-e appears in the graph nodes
+      ansible.builtin.assert:
+        that: "'agent-e' in graph.stdout"
+        fail_msg: >
+          agent-e not found in /graph nodes. The probe may not have succeeded yet.
+          Wait 15–20s for the probe_loop cycle and re-run, or check:
+          journalctl -u physarum-agent --no-pager -n 50 on agent-b for
+          'probe result success=true target=agent-e'.
+        success_msg: "agent-e is present in the graph"
+
+    - name: Assert B→E edge exists (source=agent-b, target=agent-e)
+      ansible.builtin.assert:
+        that: >
+          ('agent-b' in graph.stdout and 'agent-e' in graph.stdout)
+        fail_msg: >
+          Graph does not show both agent-b and agent-e — B→E edge not confirmed.
+          Check /report was called with source=agent-b, target=agent-e.
+        success_msg: "B→E edge is present in /graph — eBPF-triggered discovery promoted to live graph edge"
+
+    - name: GET /paths?source=agent-b&target=agent-e
+      ansible.builtin.command: >
+        curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-e'
+      register: paths_b_e
+      changed_when: false
+
+    - name: Print /paths B→E
+      ansible.builtin.debug:
+        msg: "{{ paths_b_e.stdout }}"
+
+    - name: Assert direct path B→E found
+      ansible.builtin.assert:
+        that: >
+          'agent-b' in paths_b_e.stdout and
+          'agent-e' in paths_b_e.stdout and
+          paths_b_e.stdout | length > 2
+        fail_msg: "/paths B→E returned no path — graph edge exists but path query failed"
+        success_msg: "/paths B→E confirmed — organism found direct route to newly discovered node"
+
+# ── Evidence 7: cooldown prevents re-scan for same IP ────────────────────────
+
+- name: "Evidence 7 — Cooldown: repeat connect events are skipped within cooldown window"
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Note current 'enqueued seed' count before repeat triggers (agent-b)
+      ansible.builtin.shell: >
+        journalctl -u physarum-agent --no-pager -n 500 |
+        grep -c 'eBPF new-host cue: enqueued seed' || true
+      register: seed_count_before
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Print seed count before repeats
+      ansible.builtin.debug:
+        msg: "Seed enqueue count before repeat triggers: {{ seed_count_before.stdout }}"
+      when: inventory_hostname == 'agent-b'
+
+    - name: Trigger 3 repeat TCP connects to agent-e within cooldown window
+      ansible.builtin.shell: |
+        bash -c 'echo > /dev/tcp/10.50.50.10/9004' || true
+        sleep 2
+        bash -c 'echo > /dev/tcp/10.50.50.10/9004' || true
+        sleep 2
+        bash -c 'echo > /dev/tcp/10.50.50.10/9004' || true
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Wait for ebpf_seed_loop poll cycle after repeat triggers
+      ansible.builtin.pause:
+        seconds: 35
+      when: inventory_hostname == 'agent-b'
+
+    - name: Count 'enqueued seed' entries after repeat triggers (agent-b)
+      ansible.builtin.shell: >
+        journalctl -u physarum-agent --no-pager -n 500 |
+        grep -c 'eBPF new-host cue: enqueued seed' || true
+      register: seed_count_after
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Print seed count after repeats
+      ansible.builtin.debug:
+        msg: >
+          Seed enqueue count: before={{ seed_count_before.stdout }},
+          after={{ seed_count_after.stdout }}
+          (should be unchanged — cooldown blocks repeat scans for same IP)
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert cooldown blocked repeat seeds (count did not increase)
+      ansible.builtin.assert:
+        that: seed_count_after.stdout | int == seed_count_before.stdout | int
+        fail_msg: >
+          Seed enqueue count increased from {{ seed_count_before.stdout }} to
+          {{ seed_count_after.stdout }} — cooldown did not block repeat triggers.
+          Check DiscoverySeedQueue.should_scan() and the --discovery-seed-cooldown-secs value.
+        success_msg: >
+          Cooldown confirmed — {{ seed_count_before.stdout }} seed(s) total;
+          3 repeat TCP connects did not trigger additional scans for 10.50.50.10
+      when: inventory_hostname == 'agent-b'

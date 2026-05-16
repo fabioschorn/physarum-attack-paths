@@ -164,7 +164,7 @@ resource "aws_instance" "agent_d" {
 }
 
 resource "aws_instance" "agent_e" {
-  count = contains(["weighted-paths", "gate-k"], var.lab_phase) ? 1 : 0
+  count = contains(["weighted-paths", "gate-k", "gate-l"], var.lab_phase) ? 1 : 0
 
   ami                    = local.ami_id
   instance_type          = var.instance_type
