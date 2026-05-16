@@ -284,6 +284,14 @@ if [ "$errors" -eq 0 ]; then
   echo '  MY_IP=$(curl -s https://checkip.amazonaws.com)'
   echo '  echo "operator_cidr=${MY_IP}/32"'
   echo ""
+  echo "  # Lookup AL2023 AMI (contorna permissão ssm:GetParameter se necessário):"
+  echo '  AMI_ID=$(aws ec2 describe-images \'
+  echo '    --owners amazon \'
+  echo '    --filters "Name=name,Values=al2023-ami-*-kernel-*-x86_64" "Name=state,Values=available" \'
+  echo '    --query '"'"'sort_by(Images, &CreationDate)[-1].ImageId'"'"' \'
+  echo '    --output text --region us-east-1)'
+  echo '  echo "ami_id_override=${AMI_ID}"'
+  echo ""
   echo "  terraform apply \\"
   echo "    -var lab_phase=gate-l \\"
   echo "    -var enable_discovery=true \\"
@@ -292,6 +300,7 @@ if [ "$errors" -eq 0 ]; then
   echo "    -var artifact_prefix=${ARTIFACT_PREFIX} \\"
   echo "    -var artifact_region=${ARTIFACT_REGION} \\"
   echo '    -var operator_cidr="${MY_IP}/32" \'
+  echo '    -var ami_id_override="${AMI_ID}" \'
   echo '    -var enable_observer=false'
   echo ""
   echo -e "${BOLD}Passo 2 — aguardar cloud-init (~5 min):${NC}"
@@ -317,7 +326,8 @@ if [ "$errors" -eq 0 ]; then
   echo "    -var artifact_bucket=${ARTIFACT_BUCKET} \\"
   echo "    -var artifact_prefix=${ARTIFACT_PREFIX} \\"
   echo "    -var artifact_region=${ARTIFACT_REGION} \\"
-  echo '    -var operator_cidr="${MY_IP}/32"'
+  echo '    -var operator_cidr="${MY_IP}/32" \'
+  echo '    -var ami_id_override="${AMI_ID}"'
   echo ""
 fi
 
