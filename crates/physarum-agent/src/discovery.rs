@@ -133,9 +133,14 @@ fn is_rfc1918(cidr: &str) -> bool {
 // ── CIDR host expansion ───────────────────────────────────────────────────────
 
 /// Expands each IPv4 CIDR into its host addresses (excludes network + broadcast).
-pub(crate) fn expand_cidrs(cidrs: &[String]) -> Vec<IpAddr> {
+///
+/// Stops early once `max_hosts` addresses have been collected, preventing large
+/// allocations when an oversized CIDR (e.g. 10.0.0.0/8) is passed. The cap is
+/// checked *during* the inner loop so no more than `max_hosts` entries are ever
+/// allocated, regardless of CIDR size.
+pub(crate) fn expand_cidrs(cidrs: &[String], max_hosts: usize) -> Vec<IpAddr> {
     let mut ips = Vec::new();
-    for cidr in cidrs {
+    'outer: for cidr in cidrs {
         let mut parts = cidr.splitn(2, '/');
         let ip_str = parts.next().unwrap_or("");
         let prefix_str = parts.next().unwrap_or("32");
@@ -156,6 +161,13 @@ pub(crate) fn expand_cidrs(cidrs: &[String]) -> Vec<IpAddr> {
         let network = base_u32 & mask;
         let broadcast = network | !mask;
         for host in (network + 1)..broadcast {
+            if ips.len() >= max_hosts {
+                tracing::warn!(
+                    cap = max_hosts,
+                    "CIDR expansion capped before full allocation — reduce CIDR prefix or raise max_candidates"
+                );
+                break 'outer;
+            }
             ips.push(IpAddr::V4(std::net::Ipv4Addr::from(host)));
         }
     }
@@ -212,18 +224,7 @@ impl CandidateDiscovery for RustScanDiscovery {
     ) -> Pin<Box<dyn Future<Output = Vec<CandidateEndpoint>> + Send + 'a>> {
         Box::pin(async move {
             let max_hosts = scope.max_candidates.saturating_mul(10).max(1024);
-            let ips = {
-                let mut all = expand_cidrs(&scope.cidrs);
-                if all.len() > max_hosts {
-                    tracing::warn!(
-                        expanded = all.len(),
-                        cap = max_hosts,
-                        "CIDR expansion capped — reduce discovery CIDRs or raise max_candidates"
-                    );
-                    all.truncate(max_hosts);
-                }
-                all
-            };
+            let ips = expand_cidrs(&scope.cidrs, max_hosts);
             let ports = PortList::explicit(scope.ports.clone());
 
             tracing::debug!(
@@ -434,7 +435,7 @@ mod tests {
     #[test]
     fn cidr_expansion_slash_30_returns_two_hosts() {
         // 10.0.0.0/30 → hosts .1 and .2 (network=.0, broadcast=.3)
-        let ips = expand_cidrs(&["10.0.0.0/30".to_string()]);
+        let ips = expand_cidrs(&["10.0.0.0/30".to_string()], usize::MAX);
         assert_eq!(ips.len(), 2);
         assert!(ips.contains(&"10.0.0.1".parse::<IpAddr>().unwrap()));
         assert!(ips.contains(&"10.0.0.2".parse::<IpAddr>().unwrap()));
@@ -443,15 +444,22 @@ mod tests {
     #[test]
     fn cidr_expansion_deduplicates_overlapping_cidrs() {
         let cidrs = vec!["10.0.0.0/30".to_string(), "10.0.0.0/30".to_string()];
-        let ips = expand_cidrs(&cidrs);
+        let ips = expand_cidrs(&cidrs, usize::MAX);
         assert_eq!(ips.len(), 2);
     }
 
     #[test]
     fn cidr_expansion_slash_32_returns_empty() {
         // /32 host route: network == broadcast, no hosts in range
-        let ips = expand_cidrs(&["10.0.0.1/32".to_string()]);
+        let ips = expand_cidrs(&["10.0.0.1/32".to_string()], usize::MAX);
         assert!(ips.is_empty());
+    }
+
+    #[test]
+    fn cidr_expansion_caps_before_full_allocation() {
+        // /24 has 254 hosts; cap at 10 — must stop at exactly 10 without allocating all 254
+        let ips = expand_cidrs(&["10.0.0.0/24".to_string()], 10);
+        assert_eq!(ips.len(), 10);
     }
 
     #[test]

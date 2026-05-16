@@ -195,7 +195,6 @@
           Check that --discovery-enabled was passed and the first scan cycle has elapsed.
         success_msg: "agent-b discovery scan confirmed in journal"
       when: inventory_hostname == 'agent-b'
-      failed_when: false
 
     - name: Assert discovery report was posted (coordinator accepted)
       ansible.builtin.assert:
@@ -205,7 +204,6 @@
           The agent may have found no open sockets, or the coordinator POST failed.
         success_msg: "agent-b posted discovery report to coordinator"
       when: inventory_hostname == 'agent-b'
-      failed_when: false
 
 
 - name: "Evidence 5 — Promotion chain: discovery drives probe, not probe-all"
@@ -240,7 +238,6 @@
           discovered_sockets bridge is not writing to the shared set.
         success_msg: "discovery worker shared sockets with probe loop"
       when: inventory_hostname == 'agent-b'
-      failed_when: false
 
     - name: Assert at least one candidate was promoted to probe target
       ansible.builtin.assert:
@@ -251,7 +248,6 @@
           is not filtering through discovered_sockets.
         success_msg: "at least one discovery candidate was promoted to active probe target"
       when: inventory_hostname == 'agent-b'
-      failed_when: false
 
     - name: Print promotion evidence from agent-b journal
       ansible.builtin.debug:
