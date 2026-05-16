@@ -87,10 +87,13 @@
 
     - name: Assert local-interface scope derivation logged
       ansible.builtin.assert:
-        that: >
-          'local' in node_a_journal.stdout and
-          ('derived' in node_a_journal.stdout or 'local' in node_a_journal.stdout)
-        fail_msg: "Expected local-interface scope derivation log on node A"
+        that: "'discovery scope derived from local interfaces' in node_a_journal.stdout"
+        fail_msg: "Expected 'discovery scope derived from local interfaces' in node A journal"
+
+    - name: Assert derived CIDR 10.50.20.0/24 logged
+      ansible.builtin.assert:
+        that: "'10.50.20.0/24' in node_a_journal.stdout"
+        fail_msg: "Expected derived CIDR 10.50.20.0/24 in node A journal — local-interface scope must log the concrete network"
 
     - name: Assert discovery enabled log present
       ansible.builtin.assert:
@@ -196,12 +199,15 @@
           ('eBPF cue: known host' in node_a_journal_post.stdout and '10.50.20.30' in node_a_journal_post.stdout)
         fail_msg: "Expected eBPF inbound cue for 10.50.20.30 (node C) in node A journal"
 
-    - name: Assert exact-host /32 scan logged for node B or C
+    - name: Assert exact-host /32 scan logged for node B (10.50.20.20)
       ansible.builtin.assert:
-        that: >
-          'seed_cidr=10.50.20.20/32' in node_a_journal_post.stdout or
-          'seed_cidr=10.50.20.30/32' in node_a_journal_post.stdout
-        fail_msg: "Expected seed_cidr=<ip>/32 log confirming exact-host scan scope"
+        that: "'seed_cidr=10.50.20.20/32' in node_a_journal_post.stdout"
+        fail_msg: "Expected seed_cidr=10.50.20.20/32 in node A journal — exact-host scan for node B must be logged"
+
+    - name: Assert exact-host /32 scan logged for node C (10.50.20.30)
+      ansible.builtin.assert:
+        that: "'seed_cidr=10.50.20.30/32' in node_a_journal_post.stdout"
+        fail_msg: "Expected seed_cidr=10.50.20.30/32 in node A journal — exact-host scan for node C must be logged"
 
     - name: Assert eBPF seed report posted (seed or provenance)
       ansible.builtin.assert:
@@ -237,12 +243,31 @@
         that: "'10.50.20.30' in candidates.content"
         fail_msg: "10.50.20.30 (node C) not in /candidate-discoveries for agent-b"
 
-    - name: Assert trigger=ebpf_new_inbound_host in API response
+    - name: Parse candidates JSON
+      ansible.builtin.set_fact:
+        candidates_list: "{{ candidates.content | from_json }}"
+
+    - name: Serialize candidates for per-entry trigger assertions
+      ansible.builtin.set_fact:
+        candidates_serialized: "{{ candidates_list | map('to_json') | list }}"
+
+    - name: Assert node B (10.50.20.20) candidate has trigger=ebpf_new_inbound_host
       ansible.builtin.assert:
         that: >
-          'ebpf_new_inbound_host' in candidates.content or
-          'EbpfNewInboundHost' in candidates.content
-        fail_msg: "Expected trigger=ebpf_new_inbound_host in /candidate-discoveries — the inbound eBPF trigger must be preserved in the API"
+          candidates_serialized
+          | select('search', '10\\.50\\.20\\.20')
+          | select('search', 'ebpf_new_inbound_host')
+          | list | length > 0
+        fail_msg: "No candidate for 10.50.20.20 with trigger=ebpf_new_inbound_host — each stimulus host must carry its inbound trigger in /candidate-discoveries"
+
+    - name: Assert node C (10.50.20.30) candidate has trigger=ebpf_new_inbound_host
+      ansible.builtin.assert:
+        that: >
+          candidates_serialized
+          | select('search', '10\\.50\\.20\\.30')
+          | select('search', 'ebpf_new_inbound_host')
+          | list | length > 0
+        fail_msg: "No candidate for 10.50.20.30 with trigger=ebpf_new_inbound_host — each stimulus host must carry its inbound trigger in /candidate-discoveries"
 
 # ── Evidence 5: probe validation and graph safety ─────────────────────────────
 
@@ -330,14 +355,37 @@
     - name: Assert candidate promoted to probe target (agent-c = node B)
       ansible.builtin.assert:
         that: >
-          'candidate promoted to probe target' in node_a_journal_final.stdout and
-          'agent-c' in node_a_journal_final.stdout
+          node_a_journal_final.stdout_lines
+          | select('search', 'candidate promoted to probe target')
+          | select('search', 'agent_id=agent-c')
+          | list | length > 0
         fail_msg: "Expected 'candidate promoted to probe target agent_id=agent-c' in node A journal"
+
+    - name: Assert candidate promoted to probe target (agent-d = node C)
+      ansible.builtin.assert:
+        that: >
+          node_a_journal_final.stdout_lines
+          | select('search', 'candidate promoted to probe target')
+          | select('search', 'agent_id=agent-d')
+          | list | length > 0
+        fail_msg: "Expected 'candidate promoted to probe target agent_id=agent-d' in node A journal"
 
     - name: Assert probe success for node B (agent-c)
       ansible.builtin.assert:
         that: >
-          'probe result' in node_a_journal_final.stdout and
-          'agent-c' in node_a_journal_final.stdout and
-          'success=true' in node_a_journal_final.stdout
-        fail_msg: "Expected probe result success=true for agent-c in node A journal"
+          node_a_journal_final.stdout_lines
+          | select('search', 'probe result')
+          | select('search', 'target=agent-c')
+          | select('search', 'success=true')
+          | list | length > 0
+        fail_msg: "Expected probe result success=true target=agent-c in node A journal"
+
+    - name: Assert probe success for node C (agent-d)
+      ansible.builtin.assert:
+        that: >
+          node_a_journal_final.stdout_lines
+          | select('search', 'probe result')
+          | select('search', 'target=agent-d')
+          | select('search', 'success=true')
+          | list | length > 0
+        fail_msg: "Expected probe result success=true target=agent-d in node A journal"
