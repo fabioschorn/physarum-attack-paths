@@ -6,9 +6,8 @@ use std::net::IpAddr;
 /// What initiated a discovery run.
 ///
 /// `Startup` and `Scheduled` are Gate L MVP triggers.
-/// `EbpfNew*` variants are placeholders for Gate L.1 — they are serialised
-/// correctly today so that future reports containing them round-trip without
-/// a protocol version bump.
+/// `EbpfNew*` variants are Gate L.1 — they are serialised correctly so that
+/// future reports containing them round-trip without a protocol version bump.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiscoveryTrigger {
@@ -19,6 +18,22 @@ pub enum DiscoveryTrigger {
     EbpfNewOutboundHost,
     /// Gate L.1: eBPF observed an inbound TCP accept from an unknown host.
     EbpfNewInboundHost,
+}
+
+impl DiscoveryTrigger {
+    /// Trigger strength for upsert conflict resolution.
+    ///
+    /// When the same (discovered_by, ip, port) key is reported more than once,
+    /// the server keeps the entry with the highest priority trigger.  eBPF
+    /// triggers always win over scheduling-based triggers, so a later
+    /// scheduled re-discovery cannot erase eBPF provenance.
+    pub fn priority(&self) -> u8 {
+        match self {
+            Self::EbpfNewOutboundHost | Self::EbpfNewInboundHost => 2,
+            Self::Scheduled => 1,
+            Self::Startup => 0,
+        }
+    }
 }
 
 /// Lifecycle state of a discovered candidate endpoint.

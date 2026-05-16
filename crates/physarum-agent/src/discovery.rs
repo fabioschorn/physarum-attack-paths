@@ -479,6 +479,11 @@ pub async fn ebpf_seed_loop(
                 timeout_ms: config.timeout_ms,
                 max_candidates: config.max_candidates,
             };
+            tracing::info!(
+                ip = %dst_ip,
+                seed_cidr = %format!("{dst_ip}/32"),
+                "eBPF seed scan: starting exact-host scan"
+            );
 
             let mut candidates = discovery.run(&seed_scope, &agent_id).await;
             if candidates.is_empty() {
