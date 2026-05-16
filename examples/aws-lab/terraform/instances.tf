@@ -1,8 +1,10 @@
 locals {
   server_private_ip  = cidrhost(local.subnets.management.cidr, 10)
   agent_b_private_ip = cidrhost(local.subnets.outer.cidr, 10)
-  agent_c_private_ip = cidrhost(local.subnets.middle.cidr, 10)
-  agent_d_private_ip = cidrhost(local.subnets.inner.cidr, 10)
+  # Gate L.2: place B and C in the outer /24 so A's local-interface derivation covers them.
+  # All other phases: use the original middle/inner subnets.
+  agent_c_private_ip = var.lab_phase == "gate-l2" ? cidrhost(local.subnets.outer.cidr, 20) : cidrhost(local.subnets.middle.cidr, 10)
+  agent_d_private_ip = var.lab_phase == "gate-l2" ? cidrhost(local.subnets.outer.cidr, 30) : cidrhost(local.subnets.inner.cidr, 10)
   agent_e_private_ip = cidrhost(local.subnets.secondary.cidr, 10)
 
   resolved_artifact_region = var.artifact_region != "" ? var.artifact_region : var.aws_region
@@ -16,6 +18,7 @@ locals {
     "weighted-paths" = "weighted-competing-paths"
     "gate-k"         = "segmented-adaptive-flow-path"
     "gate-l"         = "blind-candidate-discovery"
+    "gate-l2"        = "local-interface-scope-inbound-ebpf"
   }
 
   # Common tags applied to all taggable resources.
@@ -91,6 +94,7 @@ resource "aws_instance" "agent_b" {
     enable_observer          = var.enable_observer
     enable_discovery         = var.enable_discovery
     discovery_cidrs          = var.discovery_cidrs
+    discovery_scope_mode     = var.discovery_scope_mode
   })
 
   tags = merge(local.phase_tags, {
@@ -102,7 +106,7 @@ resource "aws_instance" "agent_b" {
 resource "aws_instance" "agent_c" {
   ami                    = local.ami_id
   instance_type          = var.instance_type
-  subnet_id              = aws_subnet.lab["middle"].id
+  subnet_id              = var.lab_phase == "gate-l2" ? aws_subnet.lab["outer"].id : aws_subnet.lab["middle"].id
   private_ip             = local.agent_c_private_ip
   vpc_security_group_ids = [aws_security_group.agent_c.id]
   key_name               = aws_key_pair.lab.key_name
@@ -123,6 +127,7 @@ resource "aws_instance" "agent_c" {
     enable_observer          = false
     enable_discovery         = false
     discovery_cidrs          = ""
+    discovery_scope_mode     = "explicit"
   })
 
   tags = merge(local.phase_tags, {
@@ -134,7 +139,7 @@ resource "aws_instance" "agent_c" {
 resource "aws_instance" "agent_d" {
   ami                    = local.ami_id
   instance_type          = var.instance_type
-  subnet_id              = aws_subnet.lab["inner"].id
+  subnet_id              = var.lab_phase == "gate-l2" ? aws_subnet.lab["outer"].id : aws_subnet.lab["inner"].id
   private_ip             = local.agent_d_private_ip
   vpc_security_group_ids = [aws_security_group.agent_d.id]
   key_name               = aws_key_pair.lab.key_name
@@ -155,6 +160,7 @@ resource "aws_instance" "agent_d" {
     enable_observer          = false
     enable_discovery         = false
     discovery_cidrs          = ""
+    discovery_scope_mode     = "explicit"
   })
 
   tags = merge(local.phase_tags, {
@@ -189,6 +195,7 @@ resource "aws_instance" "agent_e" {
     enable_observer          = false
     enable_discovery         = false
     discovery_cidrs          = ""
+    discovery_scope_mode     = "explicit"
   })
 
   tags = merge(local.phase_tags, {

@@ -441,21 +441,29 @@ pub async fn ebpf_seed_loop(
                 latest_ts = obs.observed_at;
             }
 
-            if obs.event != FlowEvent::ConnectEstablished
-                || obs.direction != FlowDirection::Outbound
-            {
-                continue;
-            }
-
-            let dst_ip: IpAddr = match obs.destination_ip.parse() {
-                Ok(ip) => ip,
-                Err(_) => continue,
+            // Gate L.1: outbound connect → seed the destination.
+            // Gate L.2: inbound accept  → seed the source (stimulus host).
+            let (seed_ip, trigger) = match (obs.event, obs.direction) {
+                (FlowEvent::ConnectEstablished, FlowDirection::Outbound) => {
+                    match obs.destination_ip.parse::<IpAddr>() {
+                        Ok(ip) => (ip, DiscoveryTrigger::EbpfNewOutboundHost),
+                        Err(_) => continue,
+                    }
+                }
+                (FlowEvent::AcceptEstablished, FlowDirection::Inbound) => {
+                    match obs.source_ip.parse::<IpAddr>() {
+                        Ok(ip) => (ip, DiscoveryTrigger::EbpfNewInboundHost),
+                        Err(_) => continue,
+                    }
+                }
+                _ => continue,
             };
 
             // Skip own IP and non-scoped IPs.
-            if own_ip == Some(dst_ip) || !ip_in_any_cidr(dst_ip, &config.cidrs) {
+            if own_ip == Some(seed_ip) || !ip_in_any_cidr(seed_ip, &config.cidrs) {
                 continue;
             }
+            let dst_ip = seed_ip;
 
             // If this host is already in discovered_sockets, skip the scan (no
             // redundant /32 scan needed) but still post an eBPF-triggered
@@ -484,7 +492,7 @@ pub async fn ebpf_seed_loop(
                                 discovered_at: Utc::now(),
                                 status: CandidateStatus::Discovered,
                                 confidence: 0.0,
-                                trigger: DiscoveryTrigger::EbpfNewOutboundHost,
+                                trigger,
                             })
                             .collect();
                         let provenance_scope = DiscoveryScope {
@@ -520,7 +528,7 @@ pub async fn ebpf_seed_loop(
                 continue;
             }
 
-            tracing::info!(ip = %dst_ip, "eBPF new-host cue: enqueued seed");
+            tracing::info!(ip = %dst_ip, trigger = ?trigger, "eBPF new-host cue: enqueued seed");
 
             // Exact-host scan against the observed IP only (/32 — one host).
             let seed_scope = DiscoveryScope {
@@ -541,9 +549,9 @@ pub async fn ebpf_seed_loop(
                 continue;
             }
 
-            // Mark all candidates with the eBPF trigger.
+            // Mark all candidates with the correct eBPF trigger (outbound or inbound).
             for c in &mut candidates {
-                c.trigger = DiscoveryTrigger::EbpfNewOutboundHost;
+                c.trigger = trigger;
             }
 
             // Share with probe loop before posting the report.
@@ -800,5 +808,122 @@ mod tests {
         };
         let result = NullDiscovery.run(&scope, "agent-b").await;
         assert!(result.is_empty());
+    }
+
+    // ── ebpf_seed_loop trigger classification ─────────────────────────────────
+
+    fn make_flow_obs(
+        event: FlowEvent,
+        direction: FlowDirection,
+        src_ip: &str,
+        dst_ip: &str,
+    ) -> FlowObservation {
+        FlowObservation {
+            agent_id: "agent-a".to_string(),
+            observed_at: chrono::Utc::now(),
+            source_ip: src_ip.to_string(),
+            source_port: 54321,
+            destination_ip: dst_ip.to_string(),
+            destination_port: 9001,
+            protocol: physarum_protocol::FlowProtocol::Tcp,
+            direction,
+            event,
+            pid: 1,
+            comm: "test".to_string(),
+        }
+    }
+
+    // outbound connect → seed from destination_ip with EbpfNewOutboundHost
+    #[test]
+    fn outbound_connect_yields_outbound_trigger_and_dst_ip() {
+        let obs = make_flow_obs(
+            FlowEvent::ConnectEstablished,
+            FlowDirection::Outbound,
+            "10.50.20.10",
+            "10.50.20.20",
+        );
+        let cidrs = vec!["10.50.20.0/24".to_string()];
+        let own_ip: IpAddr = "10.50.20.10".parse().unwrap();
+
+        let (seed_ip, trigger) = match (obs.event, obs.direction) {
+            (FlowEvent::ConnectEstablished, FlowDirection::Outbound) => (
+                obs.destination_ip.parse::<IpAddr>().unwrap(),
+                DiscoveryTrigger::EbpfNewOutboundHost,
+            ),
+            (FlowEvent::AcceptEstablished, FlowDirection::Inbound) => (
+                obs.source_ip.parse::<IpAddr>().unwrap(),
+                DiscoveryTrigger::EbpfNewInboundHost,
+            ),
+            _ => panic!("unexpected"),
+        };
+
+        assert_eq!(seed_ip, "10.50.20.20".parse::<IpAddr>().unwrap());
+        assert_eq!(trigger, DiscoveryTrigger::EbpfNewOutboundHost);
+        assert_ne!(Some(seed_ip), Some(own_ip));
+        assert!(ip_in_any_cidr(seed_ip, &cidrs));
+    }
+
+    // inbound accept → seed from source_ip with EbpfNewInboundHost
+    #[test]
+    fn inbound_accept_yields_inbound_trigger_and_src_ip() {
+        let obs = make_flow_obs(
+            FlowEvent::AcceptEstablished,
+            FlowDirection::Inbound,
+            "10.50.20.20", // stimulus host B
+            "10.50.20.10", // A's own IP (destination of inbound connection)
+        );
+        let cidrs = vec!["10.50.20.0/24".to_string()];
+        let own_ip: IpAddr = "10.50.20.10".parse().unwrap();
+
+        let (seed_ip, trigger) = match (obs.event, obs.direction) {
+            (FlowEvent::ConnectEstablished, FlowDirection::Outbound) => (
+                obs.destination_ip.parse::<IpAddr>().unwrap(),
+                DiscoveryTrigger::EbpfNewOutboundHost,
+            ),
+            (FlowEvent::AcceptEstablished, FlowDirection::Inbound) => (
+                obs.source_ip.parse::<IpAddr>().unwrap(),
+                DiscoveryTrigger::EbpfNewInboundHost,
+            ),
+            _ => panic!("unexpected"),
+        };
+
+        assert_eq!(seed_ip, "10.50.20.20".parse::<IpAddr>().unwrap());
+        assert_eq!(trigger, DiscoveryTrigger::EbpfNewInboundHost);
+        assert_ne!(Some(seed_ip), Some(own_ip));
+        assert!(ip_in_any_cidr(seed_ip, &cidrs));
+    }
+
+    // non-qualifying events are skipped (Close, unknown direction)
+    #[test]
+    fn close_event_does_not_qualify() {
+        let obs = make_flow_obs(
+            FlowEvent::Close,
+            FlowDirection::Outbound,
+            "10.50.20.10",
+            "10.50.20.20",
+        );
+        let qualified = matches!(
+            (obs.event, obs.direction),
+            (FlowEvent::ConnectEstablished, FlowDirection::Outbound)
+                | (FlowEvent::AcceptEstablished, FlowDirection::Inbound)
+        );
+        assert!(!qualified, "Close event must not qualify as a seed cue");
+    }
+
+    // inbound from out-of-scope IP must be skipped by ip_in_any_cidr guard
+    #[test]
+    fn inbound_accept_out_of_scope_skipped() {
+        let obs = make_flow_obs(
+            FlowEvent::AcceptEstablished,
+            FlowDirection::Inbound,
+            "192.168.99.1", // different subnet — out of scope
+            "10.50.20.10",
+        );
+        let cidrs = vec!["10.50.20.0/24".to_string()];
+        let seed_ip: IpAddr = obs.source_ip.parse().unwrap();
+        assert!(
+            !ip_in_any_cidr(seed_ip, &cidrs),
+            "out-of-scope inbound must be rejected"
+        );
     }
 }

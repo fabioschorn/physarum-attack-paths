@@ -1,0 +1,343 @@
+---
+# physarum AWS lab — Gate L.2 local-interface scope + inbound eBPF discovery validation.
+#
+# Validates that:
+#   1. Node A derives its discovery scope from its own network interface (eth0 → 10.50.20.0/24).
+#   2. Nodes B and C send inbound TCP stimulus to A.
+#   3. A's eBPF observer records accept_established inbound events from B and C.
+#   4. A's ebpf_seed_loop seeds exact-host scans against B_IP/32 and C_IP/32.
+#   5. Discovered candidates carry trigger=ebpf_new_inbound_host.
+#   6. Probe validation runs; graph edges only appear after probe success.
+#
+# Topology (gate-l2 lab_phase — all three nodes in the same /24):
+#   server-a : 10.50.10.10   (coordinator, separate management subnet)
+#   agent-b  : 10.50.20.10   (node A — eBPF observer + discovery, local-interfaces mode)
+#   agent-c  : 10.50.20.20   (node B — stimulus host, ports 9002 open)
+#   agent-d  : 10.50.20.30   (node C — stimulus host, ports 9003 open)
+#
+# Prerequisites:
+#   terraform apply \
+#     -var="lab_phase=gate-l2" \
+#     -var="operator_cidr=$(curl -s -4 ifconfig.me)/32" \
+#     -var="ami_id_override=ami-02fe376e6ac9632c8" \
+#     -var="enable_artifact_download=true" \
+#     -var="artifact_bucket=physarum-artifacts-168740128169" \
+#     -var="enable_observer=true" \
+#     -var="enable_discovery=true" \
+#     -var="discovery_scope_mode=local-interfaces"
+#
+#   Update inventory.local.ini with correct public IPs for all four nodes.
+#   Wait ~3 min for cloud-init to complete before running this playbook.
+#
+#   ansible-playbook -i ansible/inventory.local.ini \
+#     ansible/validate-gate-l2-local-interface.yml
+#
+# Evidence collected (maps to Issue #86 acceptance criteria):
+#   1. A derives local scope:   eth0 → 10.50.20.0/24 confirmed in journal
+#   2. B/C stimulus observed:   FlowObservation accept_established inbound from B and C
+#   3. Seeds created:           eBPF inbound cues → exact-host scans B_IP/32 + C_IP/32
+#   4. Candidates with trigger: /candidate-discoveries trigger=ebpf_new_inbound_host
+#   5. Probe + graph safety:    no edge before probe; edge appears after probe success
+
+# ── Evidence 1: A derives discovery scope from local interface ────────────────
+
+- name: "Evidence 1 — A derives local-interface discovery scope"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: List all registered agents
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/agents"
+        method: GET
+        return_content: true
+      register: agents_response
+
+    - name: Show registered agents
+      ansible.builtin.debug:
+        var: agents_response.content
+
+    - name: Assert agent-b (node A) is registered
+      ansible.builtin.assert:
+        that: "'agent-b' in agents_response.content"
+        fail_msg: "agent-b (node A) not registered — check cloud-init on agent-b"
+
+    - name: Assert agent-c (node B) is registered
+      ansible.builtin.assert:
+        that: "'agent-c' in agents_response.content"
+        fail_msg: "agent-c (node B) not registered"
+
+    - name: Assert agent-d (node C) is registered
+      ansible.builtin.assert:
+        that: "'agent-d' in agents_response.content"
+        fail_msg: "agent-d (node C) not registered"
+
+- name: "Evidence 1 (cont.) — A journal shows local-interface scope derivation"
+  hosts: node_a
+  gather_facts: false
+  tasks:
+    - name: Collect agent-b journal (last 200 lines)
+      ansible.builtin.command:
+        cmd: journalctl -u physarum-agent --no-pager -n 200
+      register: node_a_journal
+      become: true
+
+    - name: Show relevant journal lines
+      ansible.builtin.debug:
+        msg: "{{ node_a_journal.stdout_lines | select('search', 'local.interface|local_interface|derived|discovery.scope|discovery enabled|discovery-scope-mode') | list }}"
+
+    - name: Assert local-interface scope derivation logged
+      ansible.builtin.assert:
+        that: >
+          'local' in node_a_journal.stdout and
+          ('derived' in node_a_journal.stdout or 'local' in node_a_journal.stdout)
+        fail_msg: "Expected local-interface scope derivation log on node A"
+
+    - name: Assert discovery enabled log present
+      ansible.builtin.assert:
+        that: "'discovery enabled' in node_a_journal.stdout"
+        fail_msg: "Expected 'discovery enabled' log on node A"
+
+    - name: Check eBPF observer is active
+      ansible.builtin.command:
+        cmd: systemctl is-active physarum-ebpf-observer
+      register: observer_status
+      become: true
+
+    - name: Assert observer is active on node A
+      ansible.builtin.assert:
+        that: "observer_status.stdout == 'active'"
+        fail_msg: "physarum-ebpf-observer is not active on node A"
+
+# ── Evidence 2: B and C send inbound TCP stimulus to A ───────────────────────
+
+- name: "Evidence 2 — B and C send inbound TCP stimulus to A"
+  hosts: node_b,node_c
+  gather_facts: false
+  tasks:
+    - name: Record stimulus timestamp
+      ansible.builtin.set_fact:
+        stimulus_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: Send TCP stimulus from node B/C to node A (port 9001)
+      ansible.builtin.shell:
+        cmd: "bash -c 'echo > /dev/tcp/{{ node_a_ip }}/9001' 2>/dev/null; true"
+      ignore_errors: true
+
+    - name: Show stimulus timestamp
+      ansible.builtin.debug:
+        msg: "Stimulus sent from {{ inventory_hostname }} to {{ node_a_ip }}:9001 at {{ stimulus_time }}"
+
+- name: "Evidence 2 (cont.) — Verify flow observations posted to coordinator"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: Wait for eBPF poll cycle (15 seconds)
+      ansible.builtin.pause:
+        seconds: 15
+
+    - name: Poll flow observations for agent-b (node A)
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/flow-observations?agent_id=agent-b&limit=50"
+        method: GET
+        return_content: true
+      register: flow_obs
+
+    - name: Show flow observations
+      ansible.builtin.debug:
+        var: flow_obs.content
+
+    - name: Assert accept_established inbound observation from node B (10.50.20.20)
+      ansible.builtin.assert:
+        that: >
+          'accept_established' in flow_obs.content and
+          'inbound' in flow_obs.content and
+          '10.50.20.20' in flow_obs.content
+        fail_msg: "Expected accept_established inbound flow from 10.50.20.20 (node B)"
+
+    - name: Assert accept_established inbound observation from node C (10.50.20.30)
+      ansible.builtin.assert:
+        that: >
+          'accept_established' in flow_obs.content and
+          'inbound' in flow_obs.content and
+          '10.50.20.30' in flow_obs.content
+        fail_msg: "Expected accept_established inbound flow from 10.50.20.30 (node C)"
+
+# ── Evidence 3: ebpf_seed_loop creates seeds from inbound cues ───────────────
+
+- name: "Evidence 3 — ebpf_seed_loop creates exact-host seeds from inbound cues"
+  hosts: node_a
+  gather_facts: false
+  tasks:
+    - name: Wait for ebpf_seed_loop poll cycle (25 seconds)
+      ansible.builtin.pause:
+        seconds: 25
+
+    - name: Collect node A journal (last 300 lines)
+      ansible.builtin.command:
+        cmd: journalctl -u physarum-agent --no-pager -n 300
+      register: node_a_journal_post
+      become: true
+
+    - name: Show eBPF-related journal lines
+      ansible.builtin.debug:
+        msg: "{{ node_a_journal_post.stdout_lines | select('search', 'eBPF|ebpf|seed|inbound|10.50.20.20|10.50.20.30') | list }}"
+
+    - name: Assert eBPF inbound cue logged for node B (10.50.20.20)
+      ansible.builtin.assert:
+        that: >
+          ('eBPF new-host cue' in node_a_journal_post.stdout and '10.50.20.20' in node_a_journal_post.stdout) or
+          ('eBPF cue: known host' in node_a_journal_post.stdout and '10.50.20.20' in node_a_journal_post.stdout)
+        fail_msg: "Expected eBPF inbound cue for 10.50.20.20 (node B) in node A journal"
+
+    - name: Assert eBPF inbound cue logged for node C (10.50.20.30)
+      ansible.builtin.assert:
+        that: >
+          ('eBPF new-host cue' in node_a_journal_post.stdout and '10.50.20.30' in node_a_journal_post.stdout) or
+          ('eBPF cue: known host' in node_a_journal_post.stdout and '10.50.20.30' in node_a_journal_post.stdout)
+        fail_msg: "Expected eBPF inbound cue for 10.50.20.30 (node C) in node A journal"
+
+    - name: Assert exact-host /32 scan logged for node B or C
+      ansible.builtin.assert:
+        that: >
+          'seed_cidr=10.50.20.20/32' in node_a_journal_post.stdout or
+          'seed_cidr=10.50.20.30/32' in node_a_journal_post.stdout
+        fail_msg: "Expected seed_cidr=<ip>/32 log confirming exact-host scan scope"
+
+    - name: Assert eBPF seed report posted (seed or provenance)
+      ansible.builtin.assert:
+        that: >
+          'eBPF seed discovery report posted' in node_a_journal_post.stdout or
+          'eBPF trigger provenance report posted' in node_a_journal_post.stdout
+        fail_msg: "Expected eBPF seed or provenance report posted in node A journal"
+
+# ── Evidence 4: /candidate-discoveries shows trigger=ebpf_new_inbound_host ───
+
+- name: "Evidence 4 — Candidates carry trigger=ebpf_new_inbound_host"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: Get candidate discoveries reported by agent-b (node A)
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/candidate-discoveries?agent_id=agent-b"
+        method: GET
+        return_content: true
+      register: candidates
+
+    - name: Show candidate discoveries
+      ansible.builtin.debug:
+        var: candidates.content
+
+    - name: Assert node B (10.50.20.20) present in candidates
+      ansible.builtin.assert:
+        that: "'10.50.20.20' in candidates.content"
+        fail_msg: "10.50.20.20 (node B) not in /candidate-discoveries for agent-b"
+
+    - name: Assert node C (10.50.20.30) present in candidates
+      ansible.builtin.assert:
+        that: "'10.50.20.30' in candidates.content"
+        fail_msg: "10.50.20.30 (node C) not in /candidate-discoveries for agent-b"
+
+    - name: Assert trigger=ebpf_new_inbound_host in API response
+      ansible.builtin.assert:
+        that: >
+          'ebpf_new_inbound_host' in candidates.content or
+          'EbpfNewInboundHost' in candidates.content
+        fail_msg: "Expected trigger=ebpf_new_inbound_host in /candidate-discoveries — the inbound eBPF trigger must be preserved in the API"
+
+# ── Evidence 5: probe validation and graph safety ─────────────────────────────
+
+- name: "Evidence 5 — Probe validation and graph safety"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: Wait for probe loop promotion (30 seconds)
+      ansible.builtin.pause:
+        seconds: 30
+
+    - name: Get graph state
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/graph"
+        method: GET
+        return_content: true
+      register: graph
+
+    - name: Show graph
+      ansible.builtin.debug:
+        var: graph.content
+
+    - name: Assert node B (agent-c) present in graph nodes
+      ansible.builtin.assert:
+        that: "'agent-c' in graph.content"
+        fail_msg: "agent-c (node B) not in graph — probe validation may not have run yet"
+
+    - name: Assert node C (agent-d) present in graph nodes
+      ansible.builtin.assert:
+        that: "'agent-d' in graph.content"
+        fail_msg: "agent-d (node C) not in graph — probe validation may not have run yet"
+
+    - name: Get path A→B
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/paths?source=agent-b&target=agent-c"
+        method: GET
+        return_content: true
+        status_code: [200, 404]
+      register: path_a_b
+
+    - name: Show path A→B
+      ansible.builtin.debug:
+        var: path_a_b.content
+
+    - name: Get path A→C
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/paths?source=agent-b&target=agent-d"
+        method: GET
+        return_content: true
+        status_code: [200, 404]
+      register: path_a_c
+
+    - name: Show path A→C
+      ansible.builtin.debug:
+        var: path_a_c.content
+
+    - name: Assert A→B direct path exists
+      ansible.builtin.assert:
+        that: >
+          path_a_b.status == 200 and
+          ('agent-b' in path_a_b.content and 'agent-c' in path_a_b.content)
+        fail_msg: "Expected A→B path in /paths after probe validation"
+
+    - name: Assert A→C direct path exists
+      ansible.builtin.assert:
+        that: >
+          path_a_c.status == 200 and
+          ('agent-b' in path_a_c.content and 'agent-d' in path_a_c.content)
+        fail_msg: "Expected A→C path in /paths after probe validation"
+
+- name: "Evidence 5 (cont.) — Promotion chain confirmed in node A journal"
+  hosts: node_a
+  gather_facts: false
+  tasks:
+    - name: Collect final node A journal (last 400 lines)
+      ansible.builtin.command:
+        cmd: journalctl -u physarum-agent --no-pager -n 400
+      register: node_a_journal_final
+      become: true
+
+    - name: Show promotion lines
+      ansible.builtin.debug:
+        msg: "{{ node_a_journal_final.stdout_lines | select('search', 'promoted|probe result|candidate') | list }}"
+
+    - name: Assert candidate promoted to probe target (agent-c = node B)
+      ansible.builtin.assert:
+        that: >
+          'candidate promoted to probe target' in node_a_journal_final.stdout and
+          'agent-c' in node_a_journal_final.stdout
+        fail_msg: "Expected 'candidate promoted to probe target agent_id=agent-c' in node A journal"
+
+    - name: Assert probe success for node B (agent-c)
+      ansible.builtin.assert:
+        that: >
+          'probe result' in node_a_journal_final.stdout and
+          'agent-c' in node_a_journal_final.stdout and
+          'success=true' in node_a_journal_final.stdout
+        fail_msg: "Expected probe result success=true for agent-c in node A journal"
