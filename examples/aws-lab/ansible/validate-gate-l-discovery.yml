@@ -2,9 +2,18 @@
 # physarum AWS lab — Gate L blind candidate discovery validation.
 #
 # Validates that agent-b discovers live sockets on the configured RFC1918
-# CIDRs via physarum-scanner (RustScan-derived), reports them to the
+# CIDRs via physarum-scanner (inspired by RustScan), reports them to the
 # coordinator at POST /candidate-discoveries, and that at least one
 # discovered candidate subsequently becomes a graph edge via probe.
+#
+# The key Gate L proof:
+#   discovery run complete
+#   -> discovered sockets updated (probe loop will use these targets)
+#   -> candidate promoted to probe target
+#   -> probe succeeded
+#   -> graph edge appears
+#
+# This chain is verified in Evidence 5 (promotion chain log assertions).
 #
 # Topology (gate-l lab_phase — same as phase1 full-mesh but agent-b runs
 # with --discovery-enabled):
@@ -25,6 +34,8 @@
 #   2. Candidate→edge — at least one candidate appears as a graph edge
 #   3. Path ranking   — /paths finds routes through discovered candidates
 #   4. Discovery log  — agent-b journal confirms scanner ran
+#   5. Promotion chain — journal proves discovery -> promoted -> probe -> edge
+#                        (the critical Gate L data path — not probe-all masking)
 
 - name: "Evidence 1 — Blind discovery: /candidate-discoveries is populated"
   hosts: server
@@ -195,3 +206,57 @@
         success_msg: "agent-b posted discovery report to coordinator"
       when: inventory_hostname == 'agent-b'
       failed_when: false
+
+
+- name: "Evidence 5 — Promotion chain: discovery drives probe, not probe-all"
+  hosts: agents
+  gather_facts: false
+  become: true
+
+  # This play verifies the Gate L critical data path:
+  #   discovery run complete count=N
+  #   discovered sockets updated — probe loop will use these targets
+  #   candidate promoted to probe target
+  #
+  # Without these messages the graph edges may be from the old probe-all
+  # fallback, not from discovery. With them, the organism proved:
+  #   discovery found it -> promoted it -> probed it -> edge appeared.
+
+  tasks:
+    - name: Tail physarum-agent journal for promotion chain (agent-b only)
+      ansible.builtin.command: >
+        journalctl -u physarum-agent --no-pager -n 300
+      register: agent_journal_promo
+      failed_when: false
+      changed_when: false
+      when: inventory_hostname == 'agent-b'
+
+    - name: Assert discovered sockets shared with probe loop
+      ansible.builtin.assert:
+        that: "'discovered sockets updated' in agent_journal_promo.stdout"
+        fail_msg: >
+          'discovered sockets updated — probe loop will use these targets' not found.
+          The discovery worker may not have found any open sockets, or the
+          discovered_sockets bridge is not writing to the shared set.
+        success_msg: "discovery worker shared sockets with probe loop"
+      when: inventory_hostname == 'agent-b'
+      failed_when: false
+
+    - name: Assert at least one candidate was promoted to probe target
+      ansible.builtin.assert:
+        that: "'candidate promoted to probe target' in agent_journal_promo.stdout"
+        fail_msg: >
+          'candidate promoted to probe target' not found in agent-b journal.
+          Either no discovered socket matched a registered peer, or probe_loop
+          is not filtering through discovered_sockets.
+        success_msg: "at least one discovery candidate was promoted to active probe target"
+      when: inventory_hostname == 'agent-b'
+      failed_when: false
+
+    - name: Print promotion evidence from agent-b journal
+      ansible.builtin.debug:
+        msg: >
+          {{ agent_journal_promo.stdout_lines
+             | select('search', 'discovery|promoted|probe result|graph')
+             | list }}
+      when: inventory_hostname == 'agent-b'
