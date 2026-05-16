@@ -1,7 +1,8 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use if_addrs::{get_if_addrs, IfAddr};
 use physarum_protocol::{
     CandidateDiscoveryReport, CandidateEndpoint, CandidateStatus, DiscoveryScope, DiscoveryTrigger,
+    FlowDirection, FlowEvent, FlowObservation,
 };
 use physarum_scanner::{PortList, Scanner};
 use std::collections::{HashMap, HashSet};
@@ -160,6 +161,14 @@ pub(crate) fn expand_cidrs(cidrs: &[String], max_hosts: usize) -> Vec<IpAddr> {
         };
         let network = base_u32 & mask;
         let broadcast = network | !mask;
+        if prefix == 32 {
+            // /32 host route — the host IS the address itself (no network/broadcast split).
+            if ips.len() >= max_hosts {
+                break 'outer;
+            }
+            ips.push(IpAddr::V4(std::net::Ipv4Addr::from(base_u32)));
+            continue;
+        }
         for host in (network + 1)..broadcast {
             if ips.len() >= max_hosts {
                 tracing::warn!(
@@ -180,32 +189,31 @@ pub(crate) fn expand_cidrs(cidrs: &[String], max_hosts: usize) -> Vec<IpAddr> {
 
 /// Cooldown tracker for eBPF-triggered discovery seeds.
 ///
-/// Prevents a single observed IP from triggering repeated scans within the
-/// configured cooldown window. Ready to be populated from `/flow-observations`
-/// polling when Gate L.1 eBPF integration lands.
-#[allow(dead_code)]
+/// Uses interior mutability (`Mutex`) so it can be shared as `Arc<DiscoverySeedQueue>`
+/// across the discovery loop and the eBPF seed loop without requiring `&mut` access.
+/// Prevents a single observed IP from triggering repeated scans within the cooldown window.
 pub struct DiscoverySeedQueue {
-    seen: HashMap<IpAddr, Instant>,
+    seen: Mutex<HashMap<IpAddr, Instant>>,
     cooldown: Duration,
 }
 
 impl DiscoverySeedQueue {
     pub fn new(cooldown: Duration) -> Self {
         Self {
-            seen: HashMap::new(),
+            seen: Mutex::new(HashMap::new()),
             cooldown,
         }
     }
 
     /// Returns `true` and records the scan time if `ip` is outside the cooldown
     /// window; returns `false` and leaves the record unchanged otherwise.
-    #[allow(dead_code)]
-    pub fn should_scan(&mut self, ip: IpAddr) -> bool {
+    pub fn should_scan(&self, ip: IpAddr) -> bool {
+        let mut map = self.seen.lock().unwrap();
         let now = Instant::now();
-        match self.seen.get(&ip) {
+        match map.get(&ip) {
             Some(&last) if now.duration_since(last) < self.cooldown => false,
             _ => {
-                self.seen.insert(ip, now);
+                map.insert(ip, now);
                 true
             }
         }
@@ -349,6 +357,250 @@ pub async fn discovery_loop(
     }
 }
 
+// ── CIDR membership check (Gate L.1) ─────────────────────────────────────────
+
+fn ip_in_cidr(ip: IpAddr, cidr: &str) -> bool {
+    let v4 = match ip {
+        IpAddr::V4(v) => v,
+        IpAddr::V6(_) => return false,
+    };
+    let mut parts = cidr.splitn(2, '/');
+    let net_str = parts.next().unwrap_or("");
+    let prefix_str = parts.next().unwrap_or("32");
+    let net: Ipv4Addr = match net_str.parse() {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+    let prefix: u32 = match prefix_str.parse::<u32>() {
+        Ok(p) if p <= 32 => p,
+        _ => return false,
+    };
+    let mask = if prefix == 0 {
+        0u32
+    } else {
+        !0u32 << (32 - prefix)
+    };
+    (u32::from(v4) & mask) == (u32::from(net) & mask)
+}
+
+pub(crate) fn ip_in_any_cidr(ip: IpAddr, cidrs: &[String]) -> bool {
+    cidrs.iter().any(|c| ip_in_cidr(ip, c))
+}
+
+// ── eBPF seed loop (Gate L.1) ─────────────────────────────────────────────────
+
+/// Polls `GET /flow-observations` for outbound `connect_established` events to unknown
+/// RFC1918 hosts and runs a bounded exact-host scan for each qualifying cue.
+///
+/// This implements the Gate L.1 behavioral rule:
+/// "When eBPF senses a new host via a real kernel-observed established flow,
+///  the organism takes discovery initiative against that exact host."
+#[allow(clippy::too_many_arguments)]
+pub async fn ebpf_seed_loop(
+    config: Arc<DiscoveryConfig>,
+    discovery: Arc<dyn CandidateDiscovery>,
+    agent_id: String,
+    coordinator: String,
+    client: Arc<reqwest::Client>,
+    seed_queue: Arc<DiscoverySeedQueue>,
+    discovered_sockets: Arc<Mutex<HashSet<SocketAddr>>>,
+    own_ip: Option<IpAddr>,
+) {
+    let poll_interval = Duration::from_secs(10);
+    // Only react to observations that arrive after the agent starts up.
+    let mut cursor: DateTime<Utc> = Utc::now();
+
+    loop {
+        tokio::time::sleep(poll_interval).await;
+
+        let url = format!(
+            "{coordinator}/flow-observations?agent_id={agent_id}&since={since}",
+            since = urlencoding_rfc3339(&cursor),
+        );
+        let observations: Vec<FlowObservation> = match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => match resp.json().await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to decode flow-observations");
+                    continue;
+                }
+            },
+            Ok(resp) => {
+                tracing::warn!(status = %resp.status(), "flow-observations poll failed");
+                continue;
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "flow-observations unreachable");
+                continue;
+            }
+        };
+
+        let mut latest_ts = cursor;
+        for obs in &observations {
+            if obs.observed_at > latest_ts {
+                latest_ts = obs.observed_at;
+            }
+
+            if obs.event != FlowEvent::ConnectEstablished
+                || obs.direction != FlowDirection::Outbound
+            {
+                continue;
+            }
+
+            let dst_ip: IpAddr = match obs.destination_ip.parse() {
+                Ok(ip) => ip,
+                Err(_) => continue,
+            };
+
+            // Skip own IP and non-scoped IPs.
+            if own_ip == Some(dst_ip) || !ip_in_any_cidr(dst_ip, &config.cidrs) {
+                continue;
+            }
+
+            // If this host is already in discovered_sockets, skip the scan (no
+            // redundant /32 scan needed) but still post an eBPF-triggered
+            // candidate report so the server can preserve the stronger trigger
+            // provenance via its priority upsert logic.
+            {
+                let known_for_dst: Vec<SocketAddr> = {
+                    let sockets = discovered_sockets.lock().unwrap();
+                    sockets
+                        .iter()
+                        .filter(|s| s.ip() == dst_ip)
+                        .copied()
+                        .collect()
+                };
+                if !known_for_dst.is_empty() {
+                    if seed_queue.should_scan(dst_ip) {
+                        tracing::info!(ip = %dst_ip, "eBPF cue: known host — asserting trigger provenance");
+                        let provenance_candidates: Vec<CandidateEndpoint> = known_for_dst
+                            .iter()
+                            .map(|s| CandidateEndpoint {
+                                discovered_by: agent_id.clone(),
+                                ip: s.ip(),
+                                port: s.port(),
+                                protocol: "tcp".to_string(),
+                                discovery_method: "physarum-scanner".to_string(),
+                                discovered_at: Utc::now(),
+                                status: CandidateStatus::Discovered,
+                                confidence: 0.0,
+                                trigger: DiscoveryTrigger::EbpfNewOutboundHost,
+                            })
+                            .collect();
+                        let provenance_scope = DiscoveryScope {
+                            cidrs: vec![format!("{dst_ip}/32")],
+                            ports: known_for_dst.iter().map(|s| s.port()).collect(),
+                            timeout_ms: config.timeout_ms,
+                            max_candidates: config.max_candidates,
+                        };
+                        let provenance_report = CandidateDiscoveryReport {
+                            discovering_agent: agent_id.clone(),
+                            scope: provenance_scope,
+                            candidates: provenance_candidates,
+                            discovered_at: Utc::now(),
+                        };
+                        let post_url = format!("{coordinator}/candidate-discoveries");
+                        match client.post(&post_url).json(&provenance_report).send().await {
+                            Ok(_) => {
+                                tracing::info!(ip = %dst_ip, "eBPF trigger provenance report posted");
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "failed to post eBPF provenance report");
+                            }
+                        }
+                    } else {
+                        tracing::debug!(ip = %dst_ip, "eBPF cue: known host cooldown active — skipping");
+                    }
+                    continue;
+                }
+            }
+
+            if !seed_queue.should_scan(dst_ip) {
+                tracing::debug!(ip = %dst_ip, "eBPF seed cooldown active — skipping");
+                continue;
+            }
+
+            tracing::info!(ip = %dst_ip, "eBPF new-host cue: enqueued seed");
+
+            // Exact-host scan against the observed IP only (/32 — one host).
+            let seed_scope = DiscoveryScope {
+                cidrs: vec![format!("{dst_ip}/32")],
+                ports: config.ports.clone(),
+                timeout_ms: config.timeout_ms,
+                max_candidates: config.max_candidates,
+            };
+            tracing::info!(
+                ip = %dst_ip,
+                seed_cidr = %format!("{dst_ip}/32"),
+                "eBPF seed scan: starting exact-host scan"
+            );
+
+            let mut candidates = discovery.run(&seed_scope, &agent_id).await;
+            if candidates.is_empty() {
+                tracing::debug!(ip = %dst_ip, "eBPF seed scan: no open ports found");
+                continue;
+            }
+
+            // Mark all candidates with the eBPF trigger.
+            for c in &mut candidates {
+                c.trigger = DiscoveryTrigger::EbpfNewOutboundHost;
+            }
+
+            // Share with probe loop before posting the report.
+            {
+                let mut sockets = discovered_sockets.lock().unwrap();
+                let new_count = candidates
+                    .iter()
+                    .filter(|c| sockets.insert(SocketAddr::new(c.ip, c.port)))
+                    .count();
+                if new_count > 0 {
+                    tracing::info!(
+                        total_known = sockets.len(),
+                        new = new_count,
+                        "eBPF seed scan: discovered sockets updated — probe loop will use these targets"
+                    );
+                }
+            }
+
+            let report = CandidateDiscoveryReport {
+                discovering_agent: agent_id.clone(),
+                scope: seed_scope,
+                candidates,
+                discovered_at: Utc::now(),
+            };
+            let post_url = format!("{coordinator}/candidate-discoveries");
+            match client.post(&post_url).json(&report).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!(ip = %dst_ip, "eBPF seed discovery report posted");
+                }
+                Ok(resp) => {
+                    tracing::warn!(status = %resp.status(), "coordinator rejected eBPF seed report");
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to post eBPF seed report");
+                }
+            }
+        }
+
+        // Advance cursor past all processed events to avoid re-processing.
+        if latest_ts > cursor {
+            cursor = latest_ts + chrono::Duration::microseconds(1);
+        }
+    }
+}
+
+/// Percent-encodes a `DateTime<Utc>` as an RFC3339 string for use in URL query params.
+fn urlencoding_rfc3339(dt: &DateTime<Utc>) -> String {
+    dt.to_rfc3339()
+        .chars()
+        .flat_map(|c| match c {
+            ':' => vec!['%', '3', 'A'],
+            '+' => vec!['%', '2', 'B'],
+            _ => vec![c],
+        })
+        .collect()
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -449,10 +701,11 @@ mod tests {
     }
 
     #[test]
-    fn cidr_expansion_slash_32_returns_empty() {
-        // /32 host route: network == broadcast, no hosts in range
+    fn cidr_expansion_slash_32_returns_single_host() {
+        // /32 host route: exactly the specified host (used for eBPF seed exact-host scans)
         let ips = expand_cidrs(&["10.0.0.1/32".to_string()], usize::MAX);
-        assert!(ips.is_empty());
+        assert_eq!(ips.len(), 1);
+        assert!(ips.contains(&"10.0.0.1".parse::<IpAddr>().unwrap()));
     }
 
     #[test]
@@ -464,13 +717,13 @@ mod tests {
 
     #[test]
     fn seed_queue_allows_first_scan() {
-        let mut q = DiscoverySeedQueue::new(Duration::from_secs(300));
+        let q = DiscoverySeedQueue::new(Duration::from_secs(300));
         assert!(q.should_scan("10.0.0.1".parse().unwrap()));
     }
 
     #[test]
     fn seed_queue_blocks_rescan_within_cooldown() {
-        let mut q = DiscoverySeedQueue::new(Duration::from_secs(300));
+        let q = DiscoverySeedQueue::new(Duration::from_secs(300));
         let ip: IpAddr = "10.0.0.1".parse().unwrap();
         assert!(q.should_scan(ip));
         assert!(!q.should_scan(ip));
@@ -478,7 +731,7 @@ mod tests {
 
     #[test]
     fn seed_queue_zero_cooldown_always_allows() {
-        let mut q = DiscoverySeedQueue::new(Duration::ZERO);
+        let q = DiscoverySeedQueue::new(Duration::ZERO);
         let ip: IpAddr = "10.0.0.1".parse().unwrap();
         assert!(q.should_scan(ip));
         assert!(q.should_scan(ip));
@@ -486,12 +739,55 @@ mod tests {
 
     #[test]
     fn seed_queue_independent_ips_dont_share_cooldown() {
-        let mut q = DiscoverySeedQueue::new(Duration::from_secs(300));
+        let q = DiscoverySeedQueue::new(Duration::from_secs(300));
         let ip1: IpAddr = "10.0.0.1".parse().unwrap();
         let ip2: IpAddr = "10.0.0.2".parse().unwrap();
         assert!(q.should_scan(ip1));
         assert!(!q.should_scan(ip1)); // blocked
         assert!(q.should_scan(ip2)); // different IP — not blocked
+    }
+
+    #[test]
+    fn ip_in_cidr_class_c() {
+        assert!(ip_in_any_cidr(
+            "10.50.30.10".parse().unwrap(),
+            &["10.50.30.0/24".to_string()]
+        ));
+        assert!(!ip_in_any_cidr(
+            "10.50.40.10".parse().unwrap(),
+            &["10.50.30.0/24".to_string()]
+        ));
+    }
+
+    #[test]
+    fn ip_in_cidr_slash_32_exact() {
+        assert!(ip_in_any_cidr(
+            "10.50.30.10".parse().unwrap(),
+            &["10.50.30.10/32".to_string()]
+        ));
+        assert!(!ip_in_any_cidr(
+            "10.50.30.11".parse().unwrap(),
+            &["10.50.30.10/32".to_string()]
+        ));
+    }
+
+    #[test]
+    fn ip_in_cidr_multiple_cidrs() {
+        let cidrs = vec!["10.50.20.0/24".to_string(), "10.50.30.0/24".to_string()];
+        assert!(ip_in_any_cidr("10.50.20.5".parse().unwrap(), &cidrs));
+        assert!(ip_in_any_cidr("10.50.30.5".parse().unwrap(), &cidrs));
+        assert!(!ip_in_any_cidr("10.50.40.5".parse().unwrap(), &cidrs));
+    }
+
+    #[test]
+    fn urlencoding_rfc3339_encodes_colons() {
+        let dt = DateTime::from_timestamp(0, 0).unwrap();
+        let encoded = urlencoding_rfc3339(&dt);
+        assert!(
+            !encoded.contains(':'),
+            "colons must be percent-encoded: {encoded}"
+        );
+        assert!(encoded.contains("%3A"), "expected %3A in: {encoded}");
     }
 
     #[tokio::test]

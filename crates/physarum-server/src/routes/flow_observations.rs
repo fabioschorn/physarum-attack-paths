@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use chrono::{DateTime, Utc};
 use physarum_protocol::{FlowObservation, FlowObservationAck};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -13,6 +14,8 @@ use crate::state::{AppState, FLOW_BUFFER_CAPACITY};
 pub struct ListQuery {
     pub limit: Option<usize>,
     pub agent_id: Option<String>,
+    /// Return only observations with `observed_at` strictly after this timestamp (RFC3339).
+    pub since: Option<DateTime<Utc>>,
 }
 
 pub async fn ingest_flow_observation(
@@ -57,6 +60,7 @@ pub async fn list_flow_observations(
                 .agent_id
                 .as_deref()
                 .map_or(true, |id| obs.agent_id == id)
+                && params.since.map_or(true, |since| obs.observed_at > since)
         })
         .take(limit)
         .cloned()
@@ -173,6 +177,42 @@ mod tests {
         let list: Vec<FlowObservation> = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(list.len(), 2);
         assert!(list.iter().all(|o| o.agent_id == "agent-b"));
+    }
+
+    #[tokio::test]
+    async fn get_with_since_filters_old_observations() {
+        let state = Arc::new(AppState::new());
+
+        // Post an old observation with a fixed timestamp in the past.
+        let mut old_obs = make_obs("agent-b", 9001);
+        old_obs.observed_at = DateTime::from_timestamp(0, 0).unwrap(); // epoch
+        post_obs(build_test_router(state.clone()), &old_obs).await;
+
+        // Post a new observation with a recent timestamp.
+        let mut new_obs = make_obs("agent-b", 9002);
+        new_obs.observed_at = Utc::now();
+        post_obs(build_test_router(state.clone()), &new_obs).await;
+
+        // Query with since=1970-01-01T00:00:01Z — should exclude the epoch observation.
+        let since = DateTime::from_timestamp(1, 0).unwrap();
+        let encoded_since: String = since
+            .to_rfc3339()
+            .chars()
+            .flat_map(|c| match c {
+                ':' => vec!['%', '3', 'A'],
+                '+' => vec!['%', '2', 'B'],
+                _ => vec![c],
+            })
+            .collect();
+        let req = Request::builder()
+            .uri(format!("/flow-observations?since={encoded_since}"))
+            .body(Body::empty())
+            .unwrap();
+        let resp = build_test_router(state).oneshot(req).await.unwrap();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let list: Vec<FlowObservation> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].destination_port, 9002);
     }
 
     #[tokio::test]

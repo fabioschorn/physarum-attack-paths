@@ -3,7 +3,7 @@ mod discovery;
 use axum::{routing::get, Json, Router};
 use chrono::Utc;
 use clap::{Parser, ValueEnum};
-use discovery::{CandidateDiscovery, DiscoveryConfig, RustScanDiscovery};
+use discovery::{CandidateDiscovery, DiscoveryConfig, DiscoverySeedQueue, RustScanDiscovery};
 use physarum_protocol::{PeerInfo, ProbeReport, RegisterRequest};
 use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -480,13 +480,33 @@ async fn main() {
                     interval_secs = cli.discovery_interval_secs,
                     "discovery enabled"
                 );
+
+                // Gate L.1 — shared seed cooldown queue between scheduled and eBPF loops.
+                let seed_queue = Arc::new(DiscoverySeedQueue::new(Duration::from_secs(
+                    cli.discovery_seed_cooldown_secs,
+                )));
+
+                // Own IP used to skip self-seeding in the eBPF seed loop.
+                let own_ip: Option<std::net::IpAddr> = cli.advertise_address.parse().ok();
+
                 tokio::spawn(discovery::discovery_loop(
+                    config.clone(),
+                    disc.clone(),
+                    cli.id.clone(),
+                    cli.coordinator.clone(),
+                    client.clone(),
+                    discovered_sockets.clone(),
+                ));
+
+                tokio::spawn(discovery::ebpf_seed_loop(
                     config,
                     disc,
                     cli.id.clone(),
                     cli.coordinator.clone(),
                     client.clone(),
+                    seed_queue,
                     discovered_sockets.clone(),
+                    own_ip,
                 ));
             }
         }

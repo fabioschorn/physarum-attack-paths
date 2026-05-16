@@ -5,6 +5,7 @@ use axum::{
 };
 use physarum_protocol::{CandidateDiscoveryReport, CandidateEndpoint};
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use crate::state::AppState;
@@ -33,7 +34,19 @@ pub async fn ingest_candidate_discovery(
             candidate.ip,
             candidate.port,
         );
-        store.insert(key, candidate);
+        match store.entry(key) {
+            Entry::Vacant(e) => {
+                e.insert(candidate);
+            }
+            Entry::Occupied(mut e) => {
+                // Prefer the stronger trigger: ebpf_new_outbound_host always
+                // wins over scheduled/startup, so a later scheduled re-discovery
+                // cannot erase eBPF provenance from the API.
+                if candidate.trigger.priority() > e.get().trigger.priority() {
+                    e.insert(candidate);
+                }
+            }
+        }
     }
     tracing::info!(
         agent = %discovering_agent,
@@ -237,7 +250,8 @@ mod tests {
 
     #[tokio::test]
     async fn same_agent_rediscovering_same_endpoint_upserts() {
-        // Same agent discovering same (ip, port) a second time updates the entry in place.
+        // Same agent discovering same (ip, port) a second time with same trigger priority
+        // keeps one entry — no duplicates.
         let state = Arc::new(AppState::new());
 
         let report1 = make_report("agent-b", vec![make_candidate("agent-b", "10.0.0.1", 9001)]);
@@ -250,6 +264,66 @@ mod tests {
             store.len(),
             1,
             "same agent + same (ip,port) → single entry (upsert)"
+        );
+    }
+
+    #[tokio::test]
+    async fn ebpf_trigger_not_overwritten_by_later_scheduled_discovery() {
+        let state = Arc::new(AppState::new());
+
+        // eBPF trigger arrives first.
+        let mut ebpf_candidate = make_candidate("agent-b", "10.0.0.1", 9001);
+        ebpf_candidate.trigger = DiscoveryTrigger::EbpfNewOutboundHost;
+        post_report(
+            build_test_router(state.clone()),
+            &make_report("agent-b", vec![ebpf_candidate]),
+        )
+        .await;
+
+        // Scheduled scanner re-discovers the same endpoint later.
+        let sched_candidate = make_candidate("agent-b", "10.0.0.1", 9001);
+        post_report(
+            build_test_router(state.clone()),
+            &make_report("agent-b", vec![sched_candidate]),
+        )
+        .await;
+
+        let store = state.candidates.read().await;
+        assert_eq!(store.len(), 1);
+        assert_eq!(
+            store.values().next().unwrap().trigger,
+            DiscoveryTrigger::EbpfNewOutboundHost,
+            "eBPF trigger must survive a later scheduled re-discovery"
+        );
+    }
+
+    #[tokio::test]
+    async fn ebpf_trigger_promotes_over_earlier_scheduled_entry() {
+        let state = Arc::new(AppState::new());
+
+        // Scheduled scanner discovers first.
+        let sched_candidate = make_candidate("agent-b", "10.0.0.1", 9001);
+        post_report(
+            build_test_router(state.clone()),
+            &make_report("agent-b", vec![sched_candidate]),
+        )
+        .await;
+
+        // eBPF trigger arrives second — must win regardless of order.
+        let mut ebpf_candidate = make_candidate("agent-b", "10.0.0.1", 9001);
+        ebpf_candidate.trigger = DiscoveryTrigger::EbpfNewOutboundHost;
+        post_report(
+            build_test_router(state.clone()),
+            &make_report("agent-b", vec![ebpf_candidate]),
+        )
+        .await;
+
+        let store = state.candidates.read().await;
+        assert_eq!(store.len(), 1);
+        assert_eq!(
+            store.values().next().unwrap().trigger,
+            DiscoveryTrigger::EbpfNewOutboundHost,
+            "eBPF trigger must win even when scheduled entry arrived first"
         );
     }
 
