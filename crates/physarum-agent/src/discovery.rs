@@ -441,8 +441,9 @@ pub async fn ebpf_seed_loop(
                 latest_ts = obs.observed_at;
             }
 
-            // Gate L.1: outbound connect → seed the destination.
-            // Gate L.2: inbound accept  → seed the source (stimulus host).
+            // Gate L.1: outbound connect → seed the destination (remote peer).
+            // Gate L.2: inbound accept  → seed the destination (kernel daddr = remote peer;
+            //           saddr = local IP, so source_ip is always own IP for accepted sockets).
             let (seed_ip, trigger) = match (obs.event, obs.direction) {
                 (FlowEvent::ConnectEstablished, FlowDirection::Outbound) => {
                     match obs.destination_ip.parse::<IpAddr>() {
@@ -451,7 +452,7 @@ pub async fn ebpf_seed_loop(
                     }
                 }
                 (FlowEvent::AcceptEstablished, FlowDirection::Inbound) => {
-                    match obs.source_ip.parse::<IpAddr>() {
+                    match obs.destination_ip.parse::<IpAddr>() {
                         Ok(ip) => (ip, DiscoveryTrigger::EbpfNewInboundHost),
                         Err(_) => continue,
                     }
@@ -862,14 +863,15 @@ mod tests {
         assert!(ip_in_any_cidr(seed_ip, &cidrs));
     }
 
-    // inbound accept → seed from source_ip with EbpfNewInboundHost
+    // inbound accept → seed from destination_ip (kernel daddr = remote peer) with EbpfNewInboundHost
     #[test]
-    fn inbound_accept_yields_inbound_trigger_and_src_ip() {
+    fn inbound_accept_yields_inbound_trigger_and_dst_ip() {
+        // kernel inet_sock_set_state: saddr = local IP (own), daddr = remote peer (stimulus host)
         let obs = make_flow_obs(
             FlowEvent::AcceptEstablished,
             FlowDirection::Inbound,
-            "10.50.20.20", // stimulus host B
-            "10.50.20.10", // A's own IP (destination of inbound connection)
+            "10.50.20.10", // source_ip = kernel saddr = A's own local IP
+            "10.50.20.20", // destination_ip = kernel daddr = stimulus host B (remote peer)
         );
         let cidrs = vec!["10.50.20.0/24".to_string()];
         let own_ip: IpAddr = "10.50.20.10".parse().unwrap();
@@ -880,7 +882,7 @@ mod tests {
                 DiscoveryTrigger::EbpfNewOutboundHost,
             ),
             (FlowEvent::AcceptEstablished, FlowDirection::Inbound) => (
-                obs.source_ip.parse::<IpAddr>().unwrap(),
+                obs.destination_ip.parse::<IpAddr>().unwrap(),
                 DiscoveryTrigger::EbpfNewInboundHost,
             ),
             _ => panic!("unexpected"),
@@ -912,14 +914,15 @@ mod tests {
     // inbound from out-of-scope IP must be skipped by ip_in_any_cidr guard
     #[test]
     fn inbound_accept_out_of_scope_skipped() {
+        // kernel daddr = remote peer; use destination_ip for the scope check
         let obs = make_flow_obs(
             FlowEvent::AcceptEstablished,
             FlowDirection::Inbound,
-            "192.168.99.1", // different subnet — out of scope
-            "10.50.20.10",
+            "10.50.20.10",  // source_ip = kernel saddr = own local IP
+            "192.168.99.1", // destination_ip = kernel daddr = remote peer, different subnet
         );
         let cidrs = vec!["10.50.20.0/24".to_string()];
-        let seed_ip: IpAddr = obs.source_ip.parse().unwrap();
+        let seed_ip: IpAddr = obs.destination_ip.parse().unwrap();
         assert!(
             !ip_in_any_cidr(seed_ip, &cidrs),
             "out-of-scope inbound must be rejected"
