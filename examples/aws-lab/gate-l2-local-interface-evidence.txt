@@ -1,0 +1,250 @@
+Gate L.2 — Local-Interface Scope + Inbound eBPF Discovery
+AWS Lab Runtime Evidence
+Branch: feat/gate-l2-local-interface-scope
+Head:   4d10fd16c500337ef144c92a4131af806beb317e
+Date:   2026-05-17
+CI:     GREEN
+
+Instances
+  agent-b  10.50.20.10  44.210.93.131  (node A — coordinator + agent + eBPF observer)
+  agent-c  10.50.20.20  44.202.246.182  (node B — stimulus)
+  agent-d  10.50.20.30  44.212.0.105   (node C — stimulus)
+
+================================================================================
+1. terraform state list | grep aws_instance
+================================================================================
+
+$ terraform -chdir=examples/aws-lab/terraform state list | grep aws_instance
+aws_instance.agent_b
+aws_instance.agent_c
+aws_instance.agent_d
+
+No aws_instance.server_a — count = 0 for gate-l2 confirmed.
+
+================================================================================
+2. terraform output
+================================================================================
+
+$ terraform -chdir=examples/aws-lab/terraform output
+agent_b_private_ip = "10.50.20.10"
+agent_b_public_ip  = "44.210.93.131"
+agent_c_private_ip = "10.50.20.20"
+agent_c_public_ip  = "44.202.246.182"
+agent_d_private_ip = "10.50.20.30"
+agent_d_public_ip  = "44.212.0.105"
+lab_mode           = "local-interface-scope-inbound-ebpf"
+lab_phase          = "gate-l2"
+
+Apply complete! Resources: 42 added, 0 changed, 0 destroyed.
+
+================================================================================
+3. ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph
+================================================================================
+
+$ ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph
+@all:
+  |--@aws_ec2:
+  |  |--44.212.0.105
+  |  |--44.202.246.182
+  |  |--44.210.93.131
+  |--@node_c:
+  |  |--44.212.0.105          # agent-d  (node C / stimulus)
+  |--@node_b:
+  |  |--44.202.246.182        # agent-c  (node B / stimulus)
+  |--@server:
+  |  |--44.210.93.131         # agent-b  (node A / coordinator_agent)
+  |--@node_a:
+  |  |--44.210.93.131         # agent-b  (same host — two group memberships)
+  |--@role_coordinator_agent:
+  |  |--44.210.93.131
+  |--@role_stimulus:
+  |  |--44.212.0.105
+  |  |--44.202.246.182
+  |--@phase_gate_l2:
+  |  |--44.212.0.105
+  |  |--44.202.246.182
+  |  |--44.210.93.131
+
+================================================================================
+4. ansible-playbook output — all 5 evidence blocks
+================================================================================
+
+$ ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook \
+    -i examples/aws-lab/ansible/aws_ec2.yml \
+    examples/aws-lab/ansible/validate-gate-l2-local-interface.yml \
+    -e "ansible_ssh_private_key_file=examples/aws-lab/.keys/physarum-lab-devlead"
+
+[Evidence 1] A derives local-interface discovery scope
+  Assert agent-b (node A) is registered              → All assertions passed
+  Assert agent-c (node B) is registered              → All assertions passed
+  Assert agent-d (node C) is registered              → All assertions passed
+  Assert discovery scope derived from local interfaces (cidrs=["10.50.20.0/24"]) → All assertions passed
+
+[Evidence 2] B and C send TCP stimulus to A / flow observations
+  Assert accept_established inbound from node B (10.50.20.20) → All assertions passed
+  Assert accept_established inbound from node C (10.50.20.30) → All assertions passed
+  Assert destination_ip=10.50.20.20 in flow observation       → All assertions passed
+  Assert destination_ip=10.50.20.30 in flow observation       → All assertions passed
+
+[Evidence 3] eBPF inbound cue and seed logged
+  Assert eBPF inbound cue logged for node B (10.50.20.20)           → All assertions passed
+  Assert eBPF inbound cue logged for node C (10.50.20.30)           → All assertions passed
+  Assert eBPF trigger provenance report posted for node B            → All assertions passed
+  Assert eBPF trigger provenance report posted for node C            → All assertions passed
+
+[Evidence 4] Candidate discoveries with trigger=ebpf_new_inbound_host
+  Assert node B (10.50.20.20) present in candidates                  → All assertions passed
+  Assert node C (10.50.20.30) present in candidates                  → All assertions passed
+  Assert node B candidate has trigger=ebpf_new_inbound_host          → All assertions passed
+  Assert node C candidate has trigger=ebpf_new_inbound_host          → All assertions passed
+
+[Evidence 5] Probe validation and graph safety
+  Assert node B (agent-c) present in graph nodes    → All assertions passed
+  Assert node C (agent-d) present in graph nodes    → All assertions passed
+  Assert A→B direct path exists                     → All assertions passed
+  Assert A→C direct path exists                     → All assertions passed
+  Assert candidate promoted to probe target (agent-c = node B) → All assertions passed
+  Assert candidate promoted to probe target (agent-d = node C) → All assertions passed
+  Assert probe success for node B (agent-c)         → All assertions passed
+  Assert probe success for node C (agent-d)         → All assertions passed
+
+PLAY RECAP
+44.202.246.182  : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+44.210.93.131   : ok=54   changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+44.212.0.105    : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+================================================================================
+5. /flow-observations — raw B/C inbound accept entries
+================================================================================
+
+Playbook sends /dev/tcp stimulus from B and C to A (port 9001), waits 15 s,
+then queries /flow-observations?agent_id=agent-b&limit=2000 and filters by
+destination_ip. For inbound accepts on A, the kernel inet_sock_set_state
+tracepoint records: source_ip = A's local socket address; destination_ip =
+remote peer (B or C). The ebpf_seed_loop seeds from destination_ip for
+AcceptEstablished+Inbound events.
+
+Node B → A inbound accept (destination_ip=10.50.20.20):
+{
+    "agent_id": "agent-b",
+    "comm": "swapper/1",
+    "destination_ip": "10.50.20.20",
+    "destination_port": 36756,
+    "direction": "inbound",
+    "event": "accept_established",
+    "observed_at": "2026-05-17T23:26:24.218289663Z",
+    "pid": 0,
+    "protocol": "tcp",
+    "source_ip": "10.50.20.10",
+    "source_port": 9001
+}
+
+Node C → A inbound accept (destination_ip=10.50.20.30):
+{
+    "agent_id": "agent-b",
+    "comm": "swapper/0",
+    "destination_ip": "10.50.20.30",
+    "destination_port": 57838,
+    "direction": "inbound",
+    "event": "accept_established",
+    "observed_at": "2026-05-17T23:26:23.962875790Z",
+    "pid": 0,
+    "protocol": "tcp",
+    "source_ip": "10.50.20.10",
+    "source_port": 9001
+}
+
+================================================================================
+6. /candidate-discoveries?agent_id=agent-b (raw JSON)
+================================================================================
+
+[
+  {
+    "confidence": 0.0,
+    "discovered_at": "2026-05-17T23:25:03.622875879Z",
+    "discovered_by": "agent-b",
+    "discovery_method": "physarum-scanner",
+    "ip": "10.50.20.10",
+    "port": 9001,
+    "protocol": "tcp",
+    "status": "discovered",
+    "trigger": "scheduled"
+  },
+  {
+    "confidence": 0.0,
+    "discovered_at": "2026-05-17T23:25:10.623514723Z",
+    "discovered_by": "agent-b",
+    "discovery_method": "physarum-scanner",
+    "ip": "10.50.20.20",
+    "port": 9002,
+    "protocol": "tcp",
+    "status": "discovered",
+    "trigger": "ebpf_new_inbound_host"
+  },
+  {
+    "confidence": 0.0,
+    "discovered_at": "2026-05-17T23:26:32.141258430Z",
+    "discovered_by": "agent-b",
+    "discovery_method": "physarum-scanner",
+    "ip": "10.50.20.30",
+    "port": 9003,
+    "protocol": "tcp",
+    "status": "discovered",
+    "trigger": "ebpf_new_inbound_host"
+  }
+]
+
+10.50.20.20 → trigger=ebpf_new_inbound_host  (node B)
+10.50.20.30 → trigger=ebpf_new_inbound_host  (node C)
+10.50.20.10 → trigger=scheduled              (node A itself, initial /24 scan)
+
+================================================================================
+7. /paths — agent-b → agent-c (A→B) and agent-b → agent-d (A→C)
+================================================================================
+
+/paths?source=agent-b&target=agent-c  (A→B):
+{
+  "paths": [
+    {
+      "edges": [
+        {
+          "d_ij": 0.8333110405004992,
+          "q_ema": 0.9998852343225262,
+          "source": "agent-b",
+          "target": "agent-c"
+        }
+      ],
+      "hops": 1,
+      "nodes": ["agent-b", "agent-c"],
+      "score": 0.9998852343225262
+    }
+  ]
+}
+
+/paths?source=agent-b&target=agent-d  (A→C):
+{
+  "paths": [
+    {
+      "edges": [
+        {
+          "d_ij": 0.8329830847061177,
+          "q_ema": 0.9981686240831269,
+          "source": "agent-b",
+          "target": "agent-d"
+        }
+      ],
+      "hops": 1,
+      "nodes": ["agent-b", "agent-d"],
+      "score": 0.9981686240831269
+    }
+  ]
+}
+
+Direct 1-hop paths A→B and A→C confirmed. probe_success=true in graph edges.
+
+================================================================================
+8. terraform destroy
+================================================================================
+
+$ terraform -chdir=examples/aws-lab/terraform destroy -auto-approve ...
+Destroy complete! Resources: 42 destroyed.
