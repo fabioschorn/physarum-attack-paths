@@ -75,9 +75,9 @@
   hosts: node_a
   gather_facts: false
   tasks:
-    - name: Collect agent-b journal (last 200 lines)
+    - name: Collect agent-b journal (last 2000 lines)
       ansible.builtin.command:
-        cmd: journalctl -u physarum-agent --no-pager -n 200
+        cmd: journalctl -u physarum-agent --no-pager -n 2000
       register: node_a_journal
       become: true
 
@@ -210,9 +210,9 @@
       ansible.builtin.pause:
         seconds: 120
 
-    - name: Collect node A journal (last 500 lines)
+    - name: Collect node A journal (last 2000 lines)
       ansible.builtin.command:
-        cmd: journalctl -u physarum-agent --no-pager -n 500
+        cmd: journalctl -u physarum-agent --no-pager -n 2000
       register: node_a_journal_post
       become: true
 
@@ -382,9 +382,9 @@
   hosts: node_a
   gather_facts: false
   tasks:
-    - name: Collect final node A journal (last 400 lines)
+    - name: Collect final node A journal (last 2000 lines)
       ansible.builtin.command:
-        cmd: journalctl -u physarum-agent --no-pager -n 400
+        cmd: journalctl -u physarum-agent --no-pager -n 2000
       register: node_a_journal_final
       become: true
 
