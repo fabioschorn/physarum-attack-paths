@@ -50,20 +50,20 @@ compose:
   node_a_ip: "'10.50.20.10'"
 
 keyed_groups:
-  - key: tags.LabNode
+  - key: ec2_tags.LabNode
     prefix: node
     separator: "_"
-  - key: tags.LabRole
+  - key: ec2_tags.LabRole
     prefix: role
     separator: "_"
-  - key: tags.Phase
+  - key: ec2_tags.Phase
     prefix: phase
     separator: "_"
 
 groups:
-  server: "tags.get('LabRole', '') == 'coordinator_agent'"
-  node_a: "tags.get('LabNode', '') == 'A'"
-  node_b: "tags.get('LabNode', '') == 'B'"
-  node_c: "tags.get('LabNode', '') == 'C'"
-  node_d: "tags.get('LabNode', '') == 'D'"
-  node_e: "tags.get('LabNode', '') == 'E'"
+  server: "ec2_tags.get('LabRole', '') == 'coordinator_agent'"
+  node_a: "ec2_tags.get('LabNode', '') == 'A'"
+  node_b: "ec2_tags.get('LabNode', '') == 'B'"
+  node_c: "ec2_tags.get('LabNode', '') == 'C'"
+  node_d: "ec2_tags.get('LabNode', '') == 'D'"
+  node_e: "ec2_tags.get('LabNode', '') == 'E'"
