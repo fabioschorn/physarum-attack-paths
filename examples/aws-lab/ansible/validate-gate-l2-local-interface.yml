@@ -165,6 +165,41 @@
           '10.50.20.30' in flow_obs.content
         fail_msg: "Expected accept_established inbound flow from 10.50.20.30 (node C)"
 
+    - name: Extract node B inbound accept entries (destination_ip=10.50.20.20)
+      ansible.builtin.set_fact:
+        flow_b_accepts: >-
+          {{ (flow_obs.content | from_json)
+             | selectattr('destination_ip', 'defined')
+             | selectattr('destination_ip', 'equalto', '10.50.20.20')
+             | list }}
+        flow_c_accepts: >-
+          {{ (flow_obs.content | from_json)
+             | selectattr('destination_ip', 'defined')
+             | selectattr('destination_ip', 'equalto', '10.50.20.30')
+             | list }}
+
+    - name: Show node B inbound accept — source_ip / destination_ip mapping
+      ansible.builtin.debug:
+        msg:
+          - "=== Node B → A inbound accept (destination_ip=10.50.20.20) ==="
+          - "{{ flow_b_accepts | to_nice_json }}"
+
+    - name: Show node C inbound accept — source_ip / destination_ip mapping
+      ansible.builtin.debug:
+        msg:
+          - "=== Node C → A inbound accept (destination_ip=10.50.20.30) ==="
+          - "{{ flow_c_accepts | to_nice_json }}"
+
+    - name: Assert destination_ip=10.50.20.20 in flow observation (B inbound accept IP mapping)
+      ansible.builtin.assert:
+        that: "flow_b_accepts | length > 0"
+        fail_msg: "No entry with destination_ip=10.50.20.20 — inbound peer IP must appear in destination_ip field for inbound accepts"
+
+    - name: Assert destination_ip=10.50.20.30 in flow observation (C inbound accept IP mapping)
+      ansible.builtin.assert:
+        that: "flow_c_accepts | length > 0"
+        fail_msg: "No entry with destination_ip=10.50.20.30 — inbound peer IP must appear in destination_ip field for inbound accepts"
+
 # ── Evidence 3: ebpf_seed_loop creates seeds from inbound cues ───────────────
 
 - name: "Evidence 3 — ebpf_seed_loop creates exact-host seeds from inbound cues"
