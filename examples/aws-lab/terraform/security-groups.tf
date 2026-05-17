@@ -130,6 +130,20 @@ resource "aws_security_group_rule" "server_a_ssh" {
 
 # ── Agent B ingress rules ─────────────────────────────────────────────────────
 
+# gate-l2: agent-b hosts physarum-server; the outer /24 must reach port 8080.
+# agent-b itself (127.0.0.1) bypasses the SG; agent-c and agent-d are in 10.50.20.0/24.
+resource "aws_security_group_rule" "agent_b_coordinator_port" {
+  count = var.lab_phase == "gate-l2" ? 1 : 0
+
+  type              = "ingress"
+  description       = "Coordinator port gate-l2: A hosts physarum-server, outer subnet only"
+  from_port         = 8080
+  to_port           = 8080
+  protocol          = "tcp"
+  cidr_blocks       = ["10.50.20.0/24"]
+  security_group_id = aws_security_group.agent_b.id
+}
+
 # Mode 2: remove agent_b_from_d to block D->B probes
 resource "aws_security_group_rule" "agent_b_from_c" {
   type                     = "ingress"

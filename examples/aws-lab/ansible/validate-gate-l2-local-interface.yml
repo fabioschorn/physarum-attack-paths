@@ -9,11 +9,10 @@
 #   5. Discovered candidates carry trigger=ebpf_new_inbound_host.
 #   6. Probe validation runs; graph edges only appear after probe success.
 #
-# Topology (gate-l2 lab_phase — all three nodes in the same /24):
-#   server-a : 10.50.10.10   (coordinator, separate management subnet)
-#   agent-b  : 10.50.20.10   (node A — eBPF observer + discovery, local-interfaces mode)
-#   agent-c  : 10.50.20.20   (node B — stimulus host, ports 9002 open)
-#   agent-d  : 10.50.20.30   (node C — stimulus host, ports 9003 open)
+# Topology (gate-l2 lab_phase — three nodes, all in the outer /24):
+#   agent-b  : 10.50.20.10   (node A — coordinator + eBPF observer + discovery)
+#   agent-c  : 10.50.20.20   (node B — stimulus host, port 9002 open)
+#   agent-d  : 10.50.20.30   (node C — stimulus host, port 9003 open)
 #
 # Prerequisites:
 #   terraform apply \
@@ -26,7 +25,8 @@
 #     -var="enable_discovery=true" \
 #     -var="discovery_scope_mode=local-interfaces"
 #
-#   Update inventory.local.ini with correct public IPs for all four nodes.
+#   Update inventory.local.ini with public IPs for agent-b (= [server] + [node_a]),
+#   agent-c (= [node_b]), and agent-d (= [node_c]). coordinator_ip=10.50.20.10.
 #   Wait ~3 min for cloud-init to complete before running this playbook.
 #
 #   ansible-playbook -i ansible/inventory.local.ini \
