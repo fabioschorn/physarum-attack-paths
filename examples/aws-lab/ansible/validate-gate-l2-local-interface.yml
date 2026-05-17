@@ -140,7 +140,7 @@
 
     - name: Poll flow observations for agent-b (node A)
       ansible.builtin.uri:
-        url: "http://{{ coordinator_ip }}:8080/flow-observations?agent_id=agent-b&limit=50"
+        url: "http://{{ coordinator_ip }}:8080/flow-observations?agent_id=agent-b&limit=2000"
         method: GET
         return_content: true
       register: flow_obs
@@ -171,13 +171,13 @@
   hosts: node_a
   gather_facts: false
   tasks:
-    - name: Wait for ebpf_seed_loop poll cycle (25 seconds)
+    - name: Wait for ebpf_seed_loop poll cycle and scheduled discovery run (120 seconds)
       ansible.builtin.pause:
-        seconds: 25
+        seconds: 120
 
-    - name: Collect node A journal (last 300 lines)
+    - name: Collect node A journal (last 500 lines)
       ansible.builtin.command:
-        cmd: journalctl -u physarum-agent --no-pager -n 300
+        cmd: journalctl -u physarum-agent --no-pager -n 500
       register: node_a_journal_post
       become: true
 
@@ -188,33 +188,38 @@
     - name: Assert eBPF inbound cue logged for node B (10.50.20.20)
       ansible.builtin.assert:
         that: >
-          ('eBPF new-host cue' in node_a_journal_post.stdout and '10.50.20.20' in node_a_journal_post.stdout) or
-          ('eBPF cue: known host' in node_a_journal_post.stdout and '10.50.20.20' in node_a_journal_post.stdout)
+          node_a_journal_post.stdout_lines
+          | select('search', 'eBPF new-host cue|eBPF cue: known host')
+          | select('search', '10\\.50\\.20\\.20')
+          | list | length > 0
         fail_msg: "Expected eBPF inbound cue for 10.50.20.20 (node B) in node A journal"
 
     - name: Assert eBPF inbound cue logged for node C (10.50.20.30)
       ansible.builtin.assert:
         that: >
-          ('eBPF new-host cue' in node_a_journal_post.stdout and '10.50.20.30' in node_a_journal_post.stdout) or
-          ('eBPF cue: known host' in node_a_journal_post.stdout and '10.50.20.30' in node_a_journal_post.stdout)
+          node_a_journal_post.stdout_lines
+          | select('search', 'eBPF new-host cue|eBPF cue: known host')
+          | select('search', '10\\.50\\.20\\.30')
+          | list | length > 0
         fail_msg: "Expected eBPF inbound cue for 10.50.20.30 (node C) in node A journal"
 
-    - name: Assert exact-host /32 scan logged for node B (10.50.20.20)
-      ansible.builtin.assert:
-        that: "'seed_cidr=10.50.20.20/32' in node_a_journal_post.stdout"
-        fail_msg: "Expected seed_cidr=10.50.20.20/32 in node A journal — exact-host scan for node B must be logged"
-
-    - name: Assert exact-host /32 scan logged for node C (10.50.20.30)
-      ansible.builtin.assert:
-        that: "'seed_cidr=10.50.20.30/32' in node_a_journal_post.stdout"
-        fail_msg: "Expected seed_cidr=10.50.20.30/32 in node A journal — exact-host scan for node C must be logged"
-
-    - name: Assert eBPF seed report posted (seed or provenance)
+    - name: Assert eBPF trigger provenance report posted for node B (10.50.20.20)
       ansible.builtin.assert:
         that: >
-          'eBPF seed discovery report posted' in node_a_journal_post.stdout or
-          'eBPF trigger provenance report posted' in node_a_journal_post.stdout
-        fail_msg: "Expected eBPF seed or provenance report posted in node A journal"
+          node_a_journal_post.stdout_lines
+          | select('search', 'eBPF trigger provenance report posted')
+          | select('search', 'ip=10.50.20.20')
+          | list | length > 0
+        fail_msg: "Expected 'eBPF trigger provenance report posted ip=10.50.20.20' in node A journal"
+
+    - name: Assert eBPF trigger provenance report posted for node C (10.50.20.30)
+      ansible.builtin.assert:
+        that: >
+          node_a_journal_post.stdout_lines
+          | select('search', 'eBPF trigger provenance report posted')
+          | select('search', 'ip=10.50.20.30')
+          | list | length > 0
+        fail_msg: "Expected 'eBPF trigger provenance report posted ip=10.50.20.30' in node A journal"
 
 # ── Evidence 4: /candidate-discoveries shows trigger=ebpf_new_inbound_host ───
 

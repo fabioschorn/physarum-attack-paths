@@ -29,7 +29,8 @@ impl DiscoveryTrigger {
     /// scheduled re-discovery cannot erase eBPF provenance.
     pub fn priority(&self) -> u8 {
         match self {
-            Self::EbpfNewOutboundHost | Self::EbpfNewInboundHost => 2,
+            Self::EbpfNewInboundHost => 3,
+            Self::EbpfNewOutboundHost => 2,
             Self::Scheduled => 1,
             Self::Startup => 0,
         }
