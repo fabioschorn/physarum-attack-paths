@@ -130,6 +130,20 @@ resource "aws_security_group_rule" "server_a_ssh" {
 
 # ── Agent B ingress rules ─────────────────────────────────────────────────────
 
+# gate-l2: agent-b hosts physarum-server; the outer /24 must reach port 8080.
+# agent-b itself (127.0.0.1) bypasses the SG; agent-c and agent-d are in 10.50.20.0/24.
+resource "aws_security_group_rule" "agent_b_coordinator_port" {
+  count = var.lab_phase == "gate-l2" ? 1 : 0
+
+  type              = "ingress"
+  description       = "Coordinator port gate-l2: A hosts physarum-server, outer subnet only"
+  from_port         = 8080
+  to_port           = 8080
+  protocol          = "tcp"
+  cidr_blocks       = ["10.50.20.0/24"]
+  security_group_id = aws_security_group.agent_b.id
+}
+
 # Mode 2: remove agent_b_from_d to block D->B probes
 resource "aws_security_group_rule" "agent_b_from_c" {
   type                     = "ingress"
@@ -142,10 +156,11 @@ resource "aws_security_group_rule" "agent_b_from_c" {
 }
 
 resource "aws_security_group_rule" "agent_b_from_d" {
-  count = var.lab_phase == "phase1" ? 1 : 0
+  # phase1: full-mesh probe; gate-l2: C (agent_d) sends inbound TCP stimulus to A (agent_b).
+  count = contains(["phase1", "gate-l2"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe from agent-d (phase1/full-mesh only)"
+  description              = "Probe/stimulus from agent-d (phase1: full-mesh; gate-l2: inbound TCP stimulus from node C)"
   from_port                = 9001
   to_port                  = 9001
   protocol                 = "tcp"
@@ -199,10 +214,11 @@ resource "aws_security_group_rule" "agent_c_ssh" {
 
 # Mode 2: remove agent_d_from_b to block B->D probes
 resource "aws_security_group_rule" "agent_d_from_b" {
-  count = var.lab_phase == "phase1" ? 1 : 0
+  # phase1: full-mesh probe; gate-l2: A (agent_b) probes discovered node C (agent_d:9003).
+  count = contains(["phase1", "gate-l2"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe from agent-b (phase1/full-mesh only)"
+  description              = "Probe from agent-b (phase1: full-mesh; gate-l2: A probes discovered node C)"
   from_port                = 9003
   to_port                  = 9003
   protocol                 = "tcp"

@@ -1,8 +1,12 @@
 locals {
   server_private_ip  = cidrhost(local.subnets.management.cidr, 10)
   agent_b_private_ip = cidrhost(local.subnets.outer.cidr, 10)
-  agent_c_private_ip = cidrhost(local.subnets.middle.cidr, 10)
-  agent_d_private_ip = cidrhost(local.subnets.inner.cidr, 10)
+  # gate-l2: agent-b hosts both coordinator and agent; all peers point to agent-b's IP.
+  effective_coordinator_ip = var.lab_phase == "gate-l2" ? cidrhost(local.subnets.outer.cidr, 10) : local.server_private_ip
+  # Gate L.2: place B and C in the outer /24 so A's local-interface derivation covers them.
+  # All other phases: use the original middle/inner subnets.
+  agent_c_private_ip = var.lab_phase == "gate-l2" ? cidrhost(local.subnets.outer.cidr, 20) : cidrhost(local.subnets.middle.cidr, 10)
+  agent_d_private_ip = var.lab_phase == "gate-l2" ? cidrhost(local.subnets.outer.cidr, 30) : cidrhost(local.subnets.inner.cidr, 10)
   agent_e_private_ip = cidrhost(local.subnets.secondary.cidr, 10)
 
   resolved_artifact_region = var.artifact_region != "" ? var.artifact_region : var.aws_region
@@ -16,6 +20,7 @@ locals {
     "weighted-paths" = "weighted-competing-paths"
     "gate-k"         = "segmented-adaptive-flow-path"
     "gate-l"         = "blind-candidate-discovery"
+    "gate-l2"        = "local-interface-scope-inbound-ebpf"
   }
 
   # Common tags applied to all taggable resources.
@@ -44,6 +49,9 @@ locals {
 }
 
 resource "aws_instance" "server_a" {
+  # gate-l2: coordinator is co-located on agent-b; no separate server instance needed.
+  count = var.lab_phase == "gate-l2" ? 0 : 1
+
   ami                    = local.ami_id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.lab["management"].id
@@ -62,12 +70,16 @@ resource "aws_instance" "server_a" {
   })
 
   tags = merge(local.phase_tags, {
-    Name = "${local.effective_name_prefix}-server-a"
-    Role = "coordinator"
+    Name    = "${local.effective_name_prefix}-server-a"
+    Role    = "coordinator"
+    LabNode = "coordinator"
+    LabRole = "infrastructure"
   })
 }
 
 resource "aws_instance" "agent_b" {
+  # gate-l2: use coordinator-agent.sh (runs physarum-server + physarum-agent on node A).
+  # All other phases: use agent.sh only.
   ami                    = local.ami_id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.lab["outer"].id
@@ -77,7 +89,21 @@ resource "aws_instance" "agent_b" {
   iam_instance_profile   = aws_iam_instance_profile.physarum_ec2.name
 
   user_data_replace_on_change = true
-  user_data = templatefile("${path.module}/user-data/agent.sh", {
+  user_data = var.lab_phase == "gate-l2" ? templatefile("${path.module}/user-data/coordinator-agent.sh", {
+    agent_id                 = "agent-b"
+    listen_port              = 9001
+    advertise_address        = local.agent_b_private_ip
+    probe_targets            = local.effective_probe_targets
+    name_prefix              = var.name_prefix
+    enable_artifact_download = var.enable_artifact_download
+    artifact_bucket          = var.artifact_bucket
+    artifact_prefix          = var.artifact_prefix
+    artifact_region          = local.resolved_artifact_region
+    enable_observer          = var.enable_observer
+    enable_discovery         = var.enable_discovery
+    discovery_cidrs          = var.discovery_cidrs
+    discovery_scope_mode     = var.discovery_scope_mode
+  }) : templatefile("${path.module}/user-data/agent.sh", {
     agent_id                 = "agent-b"
     listen_port              = 9001
     coordinator_ip           = local.server_private_ip
@@ -91,18 +117,21 @@ resource "aws_instance" "agent_b" {
     enable_observer          = var.enable_observer
     enable_discovery         = var.enable_discovery
     discovery_cidrs          = var.discovery_cidrs
+    discovery_scope_mode     = var.discovery_scope_mode
   })
 
   tags = merge(local.phase_tags, {
-    Name = "${local.effective_name_prefix}-agent-b"
-    Role = "agent"
+    Name    = "${local.effective_name_prefix}-agent-b"
+    Role    = "agent"
+    LabNode = var.lab_phase == "gate-l2" ? "A" : "B"
+    LabRole = var.lab_phase == "gate-l2" ? "coordinator_agent" : "agent"
   })
 }
 
 resource "aws_instance" "agent_c" {
   ami                    = local.ami_id
   instance_type          = var.instance_type
-  subnet_id              = aws_subnet.lab["middle"].id
+  subnet_id              = var.lab_phase == "gate-l2" ? aws_subnet.lab["outer"].id : aws_subnet.lab["middle"].id
   private_ip             = local.agent_c_private_ip
   vpc_security_group_ids = [aws_security_group.agent_c.id]
   key_name               = aws_key_pair.lab.key_name
@@ -112,7 +141,7 @@ resource "aws_instance" "agent_c" {
   user_data = templatefile("${path.module}/user-data/agent.sh", {
     agent_id                 = "agent-c"
     listen_port              = 9002
-    coordinator_ip           = local.server_private_ip
+    coordinator_ip           = local.effective_coordinator_ip
     advertise_address        = local.agent_c_private_ip
     probe_targets            = local.effective_agent_c_probe_targets
     name_prefix              = var.name_prefix
@@ -123,18 +152,21 @@ resource "aws_instance" "agent_c" {
     enable_observer          = false
     enable_discovery         = false
     discovery_cidrs          = ""
+    discovery_scope_mode     = "explicit"
   })
 
   tags = merge(local.phase_tags, {
-    Name = "${local.effective_name_prefix}-agent-c"
-    Role = "agent"
+    Name    = "${local.effective_name_prefix}-agent-c"
+    Role    = "agent"
+    LabNode = var.lab_phase == "gate-l2" ? "B" : "C"
+    LabRole = var.lab_phase == "gate-l2" ? "stimulus" : "agent"
   })
 }
 
 resource "aws_instance" "agent_d" {
   ami                    = local.ami_id
   instance_type          = var.instance_type
-  subnet_id              = aws_subnet.lab["inner"].id
+  subnet_id              = var.lab_phase == "gate-l2" ? aws_subnet.lab["outer"].id : aws_subnet.lab["inner"].id
   private_ip             = local.agent_d_private_ip
   vpc_security_group_ids = [aws_security_group.agent_d.id]
   key_name               = aws_key_pair.lab.key_name
@@ -144,7 +176,7 @@ resource "aws_instance" "agent_d" {
   user_data = templatefile("${path.module}/user-data/agent.sh", {
     agent_id                 = "agent-d"
     listen_port              = 9003
-    coordinator_ip           = local.server_private_ip
+    coordinator_ip           = local.effective_coordinator_ip
     advertise_address        = local.agent_d_private_ip
     probe_targets            = local.effective_agent_d_probe_targets
     name_prefix              = var.name_prefix
@@ -155,11 +187,14 @@ resource "aws_instance" "agent_d" {
     enable_observer          = false
     enable_discovery         = false
     discovery_cidrs          = ""
+    discovery_scope_mode     = "explicit"
   })
 
   tags = merge(local.phase_tags, {
-    Name = "${local.effective_name_prefix}-agent-d"
-    Role = "agent"
+    Name    = "${local.effective_name_prefix}-agent-d"
+    Role    = "agent"
+    LabNode = var.lab_phase == "gate-l2" ? "C" : "D"
+    LabRole = var.lab_phase == "gate-l2" ? "stimulus" : "agent"
   })
 }
 
@@ -189,10 +224,13 @@ resource "aws_instance" "agent_e" {
     enable_observer          = false
     enable_discovery         = false
     discovery_cidrs          = ""
+    discovery_scope_mode     = "explicit"
   })
 
   tags = merge(local.phase_tags, {
-    Name = "${local.effective_name_prefix}-agent-e"
-    Role = "agent"
+    Name    = "${local.effective_name_prefix}-agent-e"
+    Role    = "agent"
+    LabNode = "E"
+    LabRole = "agent"
   })
 }

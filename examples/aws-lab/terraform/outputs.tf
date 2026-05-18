@@ -9,13 +9,13 @@ output "lab_mode" {
 }
 
 output "server_public_ip" {
-  description = "Public IP of physarum-server (A) — SSH access only, port 8080 not exposed"
-  value       = aws_instance.server_a.public_ip
+  description = "Public IP of physarum coordinator — server-a for most phases; agent-b for gate-l2"
+  value       = var.lab_phase == "gate-l2" ? aws_instance.agent_b.public_ip : aws_instance.server_a[0].public_ip
 }
 
 output "server_private_ip" {
-  description = "Private IP of physarum-server (A)"
-  value       = aws_instance.server_a.private_ip
+  description = "Private IP of physarum coordinator"
+  value       = var.lab_phase == "gate-l2" ? aws_instance.agent_b.private_ip : aws_instance.server_a[0].private_ip
 }
 
 output "agent_b_public_ip" {
@@ -58,14 +58,14 @@ output "agent_e_private_ip" {
   value       = contains(["weighted-paths", "gate-k"], var.lab_phase) ? aws_instance.agent_e[0].private_ip : null
 }
 
-output "ssh_server_a" {
-  description = "SSH command to connect to server-a"
-  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@${aws_instance.server_a.public_ip}"
+output "ssh_coordinator" {
+  description = "SSH command to connect to the coordinator (server-a for most phases; agent-b for gate-l2)"
+  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@${var.lab_phase == "gate-l2" ? aws_instance.agent_b.public_ip : aws_instance.server_a[0].public_ip}"
 }
 
 output "ssh_tunnel_8080" {
-  description = "SSH tunnel command — forwards server-a:8080 to localhost:18080 for manual curl"
-  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead -L 18080:127.0.0.1:8080 ec2-user@${aws_instance.server_a.public_ip}"
+  description = "SSH tunnel command — forwards coordinator:8080 to localhost:18080 for manual curl"
+  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead -L 18080:127.0.0.1:8080 ec2-user@${var.lab_phase == "gate-l2" ? aws_instance.agent_b.public_ip : aws_instance.server_a[0].public_ip}"
 }
 
 output "ansible_run" {

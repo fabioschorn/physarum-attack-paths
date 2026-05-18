@@ -441,21 +441,30 @@ pub async fn ebpf_seed_loop(
                 latest_ts = obs.observed_at;
             }
 
-            if obs.event != FlowEvent::ConnectEstablished
-                || obs.direction != FlowDirection::Outbound
-            {
-                continue;
-            }
-
-            let dst_ip: IpAddr = match obs.destination_ip.parse() {
-                Ok(ip) => ip,
-                Err(_) => continue,
+            // Gate L.1: outbound connect → seed the destination (remote peer).
+            // Gate L.2: inbound accept  → seed the destination (kernel daddr = remote peer;
+            //           saddr = local IP, so source_ip is always own IP for accepted sockets).
+            let (seed_ip, trigger) = match (obs.event, obs.direction) {
+                (FlowEvent::ConnectEstablished, FlowDirection::Outbound) => {
+                    match obs.destination_ip.parse::<IpAddr>() {
+                        Ok(ip) => (ip, DiscoveryTrigger::EbpfNewOutboundHost),
+                        Err(_) => continue,
+                    }
+                }
+                (FlowEvent::AcceptEstablished, FlowDirection::Inbound) => {
+                    match obs.destination_ip.parse::<IpAddr>() {
+                        Ok(ip) => (ip, DiscoveryTrigger::EbpfNewInboundHost),
+                        Err(_) => continue,
+                    }
+                }
+                _ => continue,
             };
 
             // Skip own IP and non-scoped IPs.
-            if own_ip == Some(dst_ip) || !ip_in_any_cidr(dst_ip, &config.cidrs) {
+            if own_ip == Some(seed_ip) || !ip_in_any_cidr(seed_ip, &config.cidrs) {
                 continue;
             }
+            let dst_ip = seed_ip;
 
             // If this host is already in discovered_sockets, skip the scan (no
             // redundant /32 scan needed) but still post an eBPF-triggered
@@ -471,45 +480,44 @@ pub async fn ebpf_seed_loop(
                         .collect()
                 };
                 if !known_for_dst.is_empty() {
-                    if seed_queue.should_scan(dst_ip) {
-                        tracing::info!(ip = %dst_ip, "eBPF cue: known host — asserting trigger provenance");
-                        let provenance_candidates: Vec<CandidateEndpoint> = known_for_dst
-                            .iter()
-                            .map(|s| CandidateEndpoint {
-                                discovered_by: agent_id.clone(),
-                                ip: s.ip(),
-                                port: s.port(),
-                                protocol: "tcp".to_string(),
-                                discovery_method: "physarum-scanner".to_string(),
-                                discovered_at: Utc::now(),
-                                status: CandidateStatus::Discovered,
-                                confidence: 0.0,
-                                trigger: DiscoveryTrigger::EbpfNewOutboundHost,
-                            })
-                            .collect();
-                        let provenance_scope = DiscoveryScope {
-                            cidrs: vec![format!("{dst_ip}/32")],
-                            ports: known_for_dst.iter().map(|s| s.port()).collect(),
-                            timeout_ms: config.timeout_ms,
-                            max_candidates: config.max_candidates,
-                        };
-                        let provenance_report = CandidateDiscoveryReport {
-                            discovering_agent: agent_id.clone(),
-                            scope: provenance_scope,
-                            candidates: provenance_candidates,
+                    // No cooldown gate here: provenance reports are cheap (no scan) and
+                    // inbound (priority=3) must be able to override outbound (priority=2)
+                    // regardless of which event arrived first.
+                    tracing::info!(ip = %dst_ip, "eBPF cue: known host — asserting trigger provenance");
+                    let provenance_candidates: Vec<CandidateEndpoint> = known_for_dst
+                        .iter()
+                        .map(|s| CandidateEndpoint {
+                            discovered_by: agent_id.clone(),
+                            ip: s.ip(),
+                            port: s.port(),
+                            protocol: "tcp".to_string(),
+                            discovery_method: "physarum-scanner".to_string(),
                             discovered_at: Utc::now(),
-                        };
-                        let post_url = format!("{coordinator}/candidate-discoveries");
-                        match client.post(&post_url).json(&provenance_report).send().await {
-                            Ok(_) => {
-                                tracing::info!(ip = %dst_ip, "eBPF trigger provenance report posted");
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "failed to post eBPF provenance report");
-                            }
+                            status: CandidateStatus::Discovered,
+                            confidence: 0.0,
+                            trigger,
+                        })
+                        .collect();
+                    let provenance_scope = DiscoveryScope {
+                        cidrs: vec![format!("{dst_ip}/32")],
+                        ports: known_for_dst.iter().map(|s| s.port()).collect(),
+                        timeout_ms: config.timeout_ms,
+                        max_candidates: config.max_candidates,
+                    };
+                    let provenance_report = CandidateDiscoveryReport {
+                        discovering_agent: agent_id.clone(),
+                        scope: provenance_scope,
+                        candidates: provenance_candidates,
+                        discovered_at: Utc::now(),
+                    };
+                    let post_url = format!("{coordinator}/candidate-discoveries");
+                    match client.post(&post_url).json(&provenance_report).send().await {
+                        Ok(_) => {
+                            tracing::info!(ip = %dst_ip, "eBPF trigger provenance report posted");
                         }
-                    } else {
-                        tracing::debug!(ip = %dst_ip, "eBPF cue: known host cooldown active — skipping");
+                        Err(e) => {
+                            tracing::warn!(error = %e, "failed to post eBPF provenance report");
+                        }
                     }
                     continue;
                 }
@@ -520,7 +528,7 @@ pub async fn ebpf_seed_loop(
                 continue;
             }
 
-            tracing::info!(ip = %dst_ip, "eBPF new-host cue: enqueued seed");
+            tracing::info!(ip = %dst_ip, trigger = ?trigger, "eBPF new-host cue: enqueued seed");
 
             // Exact-host scan against the observed IP only (/32 — one host).
             let seed_scope = DiscoveryScope {
@@ -541,9 +549,9 @@ pub async fn ebpf_seed_loop(
                 continue;
             }
 
-            // Mark all candidates with the eBPF trigger.
+            // Mark all candidates with the correct eBPF trigger (outbound or inbound).
             for c in &mut candidates {
-                c.trigger = DiscoveryTrigger::EbpfNewOutboundHost;
+                c.trigger = trigger;
             }
 
             // Share with probe loop before posting the report.
@@ -800,5 +808,124 @@ mod tests {
         };
         let result = NullDiscovery.run(&scope, "agent-b").await;
         assert!(result.is_empty());
+    }
+
+    // ── ebpf_seed_loop trigger classification ─────────────────────────────────
+
+    fn make_flow_obs(
+        event: FlowEvent,
+        direction: FlowDirection,
+        src_ip: &str,
+        dst_ip: &str,
+    ) -> FlowObservation {
+        FlowObservation {
+            agent_id: "agent-a".to_string(),
+            observed_at: chrono::Utc::now(),
+            source_ip: src_ip.to_string(),
+            source_port: 54321,
+            destination_ip: dst_ip.to_string(),
+            destination_port: 9001,
+            protocol: physarum_protocol::FlowProtocol::Tcp,
+            direction,
+            event,
+            pid: 1,
+            comm: "test".to_string(),
+        }
+    }
+
+    // outbound connect → seed from destination_ip with EbpfNewOutboundHost
+    #[test]
+    fn outbound_connect_yields_outbound_trigger_and_dst_ip() {
+        let obs = make_flow_obs(
+            FlowEvent::ConnectEstablished,
+            FlowDirection::Outbound,
+            "10.50.20.10",
+            "10.50.20.20",
+        );
+        let cidrs = vec!["10.50.20.0/24".to_string()];
+        let own_ip: IpAddr = "10.50.20.10".parse().unwrap();
+
+        let (seed_ip, trigger) = match (obs.event, obs.direction) {
+            (FlowEvent::ConnectEstablished, FlowDirection::Outbound) => (
+                obs.destination_ip.parse::<IpAddr>().unwrap(),
+                DiscoveryTrigger::EbpfNewOutboundHost,
+            ),
+            (FlowEvent::AcceptEstablished, FlowDirection::Inbound) => (
+                obs.source_ip.parse::<IpAddr>().unwrap(),
+                DiscoveryTrigger::EbpfNewInboundHost,
+            ),
+            _ => panic!("unexpected"),
+        };
+
+        assert_eq!(seed_ip, "10.50.20.20".parse::<IpAddr>().unwrap());
+        assert_eq!(trigger, DiscoveryTrigger::EbpfNewOutboundHost);
+        assert_ne!(Some(seed_ip), Some(own_ip));
+        assert!(ip_in_any_cidr(seed_ip, &cidrs));
+    }
+
+    // inbound accept → seed from destination_ip (kernel daddr = remote peer) with EbpfNewInboundHost
+    #[test]
+    fn inbound_accept_yields_inbound_trigger_and_dst_ip() {
+        // kernel inet_sock_set_state: saddr = local IP (own), daddr = remote peer (stimulus host)
+        let obs = make_flow_obs(
+            FlowEvent::AcceptEstablished,
+            FlowDirection::Inbound,
+            "10.50.20.10", // source_ip = kernel saddr = A's own local IP
+            "10.50.20.20", // destination_ip = kernel daddr = stimulus host B (remote peer)
+        );
+        let cidrs = vec!["10.50.20.0/24".to_string()];
+        let own_ip: IpAddr = "10.50.20.10".parse().unwrap();
+
+        let (seed_ip, trigger) = match (obs.event, obs.direction) {
+            (FlowEvent::ConnectEstablished, FlowDirection::Outbound) => (
+                obs.destination_ip.parse::<IpAddr>().unwrap(),
+                DiscoveryTrigger::EbpfNewOutboundHost,
+            ),
+            (FlowEvent::AcceptEstablished, FlowDirection::Inbound) => (
+                obs.destination_ip.parse::<IpAddr>().unwrap(),
+                DiscoveryTrigger::EbpfNewInboundHost,
+            ),
+            _ => panic!("unexpected"),
+        };
+
+        assert_eq!(seed_ip, "10.50.20.20".parse::<IpAddr>().unwrap());
+        assert_eq!(trigger, DiscoveryTrigger::EbpfNewInboundHost);
+        assert_ne!(Some(seed_ip), Some(own_ip));
+        assert!(ip_in_any_cidr(seed_ip, &cidrs));
+    }
+
+    // non-qualifying events are skipped (Close, unknown direction)
+    #[test]
+    fn close_event_does_not_qualify() {
+        let obs = make_flow_obs(
+            FlowEvent::Close,
+            FlowDirection::Outbound,
+            "10.50.20.10",
+            "10.50.20.20",
+        );
+        let qualified = matches!(
+            (obs.event, obs.direction),
+            (FlowEvent::ConnectEstablished, FlowDirection::Outbound)
+                | (FlowEvent::AcceptEstablished, FlowDirection::Inbound)
+        );
+        assert!(!qualified, "Close event must not qualify as a seed cue");
+    }
+
+    // inbound from out-of-scope IP must be skipped by ip_in_any_cidr guard
+    #[test]
+    fn inbound_accept_out_of_scope_skipped() {
+        // kernel daddr = remote peer; use destination_ip for the scope check
+        let obs = make_flow_obs(
+            FlowEvent::AcceptEstablished,
+            FlowDirection::Inbound,
+            "10.50.20.10",  // source_ip = kernel saddr = own local IP
+            "192.168.99.1", // destination_ip = kernel daddr = remote peer, different subnet
+        );
+        let cidrs = vec!["10.50.20.0/24".to_string()];
+        let seed_ip: IpAddr = obs.destination_ip.parse().unwrap();
+        assert!(
+            !ip_in_any_cidr(seed_ip, &cidrs),
+            "out-of-scope inbound must be rejected"
+        );
     }
 }

@@ -18,6 +18,7 @@ const TCP_ESTABLISHED: i32 = 1;
 const TCP_CLOSE: i32 = 7;
 const TCP_SYN_SENT: i32 = 2; // client sent SYN — becomes ESTABLISHED on outbound connect
 const TCP_SYN_RECV: i32 = 3; // server received SYN — becomes ESTABLISHED on inbound accept
+const TCP_NEW_SYN_RECV: i32 = 12; // SYN-cookie path — EC2 skips SYN_RECV; use this to capture accepts
 
 // Event type codes (must match mapper.rs in physarum-ebpf-observer)
 const EVT_CONNECT: u8 = 0; // connect_established (outbound)
@@ -96,7 +97,9 @@ fn handle(ctx: &TracePointContext) -> Result<(), i64> {
 
     let event_type = match newstate {
         TCP_ESTABLISHED if oldstate == TCP_SYN_SENT => EVT_CONNECT,
-        TCP_ESTABLISHED if oldstate == TCP_SYN_RECV => EVT_ACCEPT,
+        // TCP_SYN_RECV: standard inbound accept path.
+        // TCP_NEW_SYN_RECV: SYN-cookie path on EC2 — kernel skips SYN_RECV state entirely.
+        TCP_ESTABLISHED if oldstate == TCP_SYN_RECV || oldstate == TCP_NEW_SYN_RECV => EVT_ACCEPT,
         TCP_CLOSE => EVT_CLOSE,
         _ => return Ok(()),
     };

@@ -10,8 +10,8 @@ variable "lab_phase" {
   default     = "phase1"
 
   validation {
-    condition     = contains(["phase1", "phase2", "weighted-paths", "gate-k", "gate-l"], var.lab_phase)
-    error_message = "lab_phase must be phase1, phase2, weighted-paths, gate-k, or gate-l."
+    condition     = contains(["phase1", "phase2", "weighted-paths", "gate-k", "gate-l", "gate-l2"], var.lab_phase)
+    error_message = "lab_phase must be phase1, phase2, weighted-paths, gate-k, gate-l, or gate-l2."
   }
 }
 
@@ -116,4 +116,15 @@ variable "discovery_cidrs" {
   description = "Comma-separated RFC1918 CIDRs for agent-b blind discovery (Gate L). Defaults to the three agent subnets of the lab VPC. Must be RFC1918; Internet-facing CIDRs are rejected by the agent at startup."
   type        = string
   default     = "10.50.20.0/24,10.50.30.0/24,10.50.40.0/24"
+}
+
+variable "discovery_scope_mode" {
+  description = "How agent-b builds its discovery CIDR scope. 'explicit' (default): use --discovery-cidrs. 'local-interfaces': derive from host interfaces (RFC1918, non-loopback, prefix >= /16). Gate L.2 uses local-interfaces."
+  type        = string
+  default     = "explicit"
+
+  validation {
+    condition     = contains(["explicit", "local-interfaces", "merged"], var.discovery_scope_mode)
+    error_message = "discovery_scope_mode must be explicit, local-interfaces, or merged."
+  }
 }

@@ -8,7 +8,7 @@ use std::net::IpAddr;
 /// `Startup` and `Scheduled` are Gate L MVP triggers.
 /// `EbpfNew*` variants are Gate L.1 — they are serialised correctly so that
 /// future reports containing them round-trip without a protocol version bump.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiscoveryTrigger {
     Startup,
@@ -29,7 +29,8 @@ impl DiscoveryTrigger {
     /// scheduled re-discovery cannot erase eBPF provenance.
     pub fn priority(&self) -> u8 {
         match self {
-            Self::EbpfNewOutboundHost | Self::EbpfNewInboundHost => 2,
+            Self::EbpfNewInboundHost => 3,
+            Self::EbpfNewOutboundHost => 2,
             Self::Scheduled => 1,
             Self::Startup => 0,
         }

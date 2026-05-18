@@ -328,6 +328,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inbound_trigger_not_overwritten_by_later_outbound() {
+        // Gate L.2: inbound (priority=3) must survive a later outbound (priority=2) provenance.
+        let state = Arc::new(AppState::new());
+
+        let mut inbound_candidate = make_candidate("agent-b", "10.0.0.1", 9001);
+        inbound_candidate.trigger = DiscoveryTrigger::EbpfNewInboundHost;
+        post_report(
+            build_test_router(state.clone()),
+            &make_report("agent-b", vec![inbound_candidate]),
+        )
+        .await;
+
+        let mut outbound_candidate = make_candidate("agent-b", "10.0.0.1", 9001);
+        outbound_candidate.trigger = DiscoveryTrigger::EbpfNewOutboundHost;
+        post_report(
+            build_test_router(state.clone()),
+            &make_report("agent-b", vec![outbound_candidate]),
+        )
+        .await;
+
+        let store = state.candidates.read().await;
+        assert_eq!(store.len(), 1);
+        assert_eq!(
+            store.values().next().unwrap().trigger,
+            DiscoveryTrigger::EbpfNewInboundHost,
+            "inbound trigger must survive a later outbound provenance report"
+        );
+    }
+
+    #[tokio::test]
+    async fn inbound_trigger_promotes_over_earlier_outbound() {
+        // Gate L.2: inbound (priority=3) must win even when outbound (priority=2) arrived first.
+        let state = Arc::new(AppState::new());
+
+        let mut outbound_candidate = make_candidate("agent-b", "10.0.0.1", 9001);
+        outbound_candidate.trigger = DiscoveryTrigger::EbpfNewOutboundHost;
+        post_report(
+            build_test_router(state.clone()),
+            &make_report("agent-b", vec![outbound_candidate]),
+        )
+        .await;
+
+        let mut inbound_candidate = make_candidate("agent-b", "10.0.0.1", 9001);
+        inbound_candidate.trigger = DiscoveryTrigger::EbpfNewInboundHost;
+        post_report(
+            build_test_router(state.clone()),
+            &make_report("agent-b", vec![inbound_candidate]),
+        )
+        .await;
+
+        let store = state.candidates.read().await;
+        assert_eq!(store.len(), 1);
+        assert_eq!(
+            store.values().next().unwrap().trigger,
+            DiscoveryTrigger::EbpfNewInboundHost,
+            "inbound trigger must win even when outbound entry arrived first"
+        );
+    }
+
+    #[tokio::test]
     async fn empty_candidates_accepted() {
         let state = Arc::new(AppState::new());
         let report = make_report("agent-b", vec![]);

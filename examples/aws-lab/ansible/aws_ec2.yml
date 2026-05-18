@@ -1,0 +1,69 @@
+# AWS EC2 dynamic inventory for physarum aws-lab.
+#
+# Prerequisites:
+#   pip install boto3 botocore
+#   ansible-galaxy collection install amazon.aws
+#   AWS credentials available (env vars, ~/.aws/credentials, or IAM role)
+#
+# Usage (from repo root, after terraform apply):
+#   ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph
+#   ansible-playbook -i examples/aws-lab/ansible/aws_ec2.yml \
+#     examples/aws-lab/ansible/validate-gate-l2-local-interface.yml
+#
+# Filters running instances tagged Project=physarum-attack-paths, Lab=aws-lab.
+# Filter by Phase to isolate a specific lab deployment (uncomment below).
+#
+# Groups created (match static inventory.local.ini group names exactly):
+#   server   — host with LabRole=coordinator_agent (agent-b in gate-l2)
+#   node_a   — host with LabNode=A
+#   node_b   — host with LabNode=B
+#   node_c   — host with LabNode=C
+#   node_d   — host with LabNode=D (gate-k, weighted-paths)
+#   node_e   — host with LabNode=E
+#
+# gate-l2 topology: agent-b in both server + node_a (same host, two group memberships).
+
+plugin: amazon.aws.aws_ec2
+
+regions:
+  - us-east-1
+
+filters:
+  tag:Project: physarum-attack-paths
+  tag:Lab: aws-lab
+  instance-state-name: running
+  # Uncomment to restrict to a single phase (useful when multiple phases deployed):
+  # tag:Phase: gate-l2
+
+hostnames:
+  - ip-address
+
+compose:
+  ansible_host: public_ip_address
+  ansible_user: "'ec2-user'"
+  ansible_ssh_private_key_file: "'examples/aws-lab/.keys/physarum-lab-devlead'"
+  ansible_ssh_common_args: "'-o StrictHostKeyChecking=no'"
+  private_ip: private_ip_address
+  # Private IPs are deterministic (cidrhost) and do not change between apply/destroy cycles.
+  # gate-l2: coordinator_ip = agent-b private IP (10.50.20.10, outer /24 host 10).
+  coordinator_ip: "'10.50.20.10'"
+  node_a_ip: "'10.50.20.10'"
+
+keyed_groups:
+  - key: ec2_tags.LabNode
+    prefix: node
+    separator: "_"
+  - key: ec2_tags.LabRole
+    prefix: role
+    separator: "_"
+  - key: ec2_tags.Phase
+    prefix: phase
+    separator: "_"
+
+groups:
+  server: "ec2_tags.get('LabRole', '') == 'coordinator_agent'"
+  node_a: "ec2_tags.get('LabNode', '') == 'A'"
+  node_b: "ec2_tags.get('LabNode', '') == 'B'"
+  node_c: "ec2_tags.get('LabNode', '') == 'C'"
+  node_d: "ec2_tags.get('LabNode', '') == 'D'"
+  node_e: "ec2_tags.get('LabNode', '') == 'E'"

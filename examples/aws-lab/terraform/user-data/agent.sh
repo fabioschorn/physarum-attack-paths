@@ -16,9 +16,10 @@ set -euxo pipefail
 #   artifact_bucket          = ${artifact_bucket}
 #   artifact_prefix          = ${artifact_prefix}
 #   artifact_region          = ${artifact_region}
-#   enable_observer          = ${enable_observer}   (Gate J: start physarum-ebpf-observer on this node)
-#   enable_discovery         = ${enable_discovery}  (Gate L: start blind RustScan discovery loop)
-#   discovery_cidrs          = ${discovery_cidrs}   (Gate L: RFC1918 CIDRs to scan, comma-separated)
+#   enable_observer          = ${enable_observer}      (Gate J: start physarum-ebpf-observer on this node)
+#   enable_discovery         = ${enable_discovery}     (Gate L: start blind RustScan discovery loop)
+#   discovery_cidrs          = ${discovery_cidrs}      (Gate L: RFC1918 CIDRs to scan, comma-separated)
+#   discovery_scope_mode     = ${discovery_scope_mode} (Gate L.2: explicit|local-interfaces|merged)
 
 AGENT_ID="${agent_id}"
 LISTEN_PORT="${listen_port}"
@@ -33,6 +34,7 @@ ARTIFACT_REGION="${artifact_region}"
 ENABLE_OBSERVER="${enable_observer}"
 ENABLE_DISCOVERY="${enable_discovery}"
 DISCOVERY_CIDRS="${discovery_cidrs}"
+DISCOVERY_SCOPE_MODE="${discovery_scope_mode}"
 
 # Build optional --probe-targets flag (lab-only topology control; empty = probe all)
 PROBE_TARGETS_FLAG=""
@@ -40,10 +42,19 @@ if [ -n "$PROBE_TARGETS" ]; then
   PROBE_TARGETS_FLAG="--probe-targets $PROBE_TARGETS"
 fi
 
-# Build optional Gate L discovery flags (agent-b only in gate-l lab_phase)
+# Build optional Gate L / L.2 discovery flags (agent-b only).
+# Gate L  (explicit mode): requires --discovery-cidrs.
+# Gate L.2 (local-interfaces mode): derives scope from eth0 netmask — no --discovery-cidrs needed.
 DISCOVERY_FLAGS=""
-if [ "$ENABLE_DISCOVERY" = "true" ] && [ -n "$DISCOVERY_CIDRS" ]; then
-  DISCOVERY_FLAGS="--discovery-enabled --discovery-cidrs $DISCOVERY_CIDRS --discovery-ports 9001,9002,9003,9004 --discovery-interval-secs 300 --discovery-timeout-ms 1500 --discovery-max-candidates 50 --discovery-seed-cooldown-secs 300"
+if [ "$ENABLE_DISCOVERY" = "true" ]; then
+  BASE_FLAGS="--discovery-enabled --discovery-ports 9001,9002,9003,9004 --discovery-interval-secs 300 --discovery-timeout-ms 1500 --discovery-max-candidates 50 --discovery-seed-cooldown-secs 30"
+  if [ "$DISCOVERY_SCOPE_MODE" = "local-interfaces" ]; then
+    DISCOVERY_FLAGS="$BASE_FLAGS --discovery-scope-mode local-interfaces"
+  elif [ "$DISCOVERY_SCOPE_MODE" = "merged" ]; then
+    DISCOVERY_FLAGS="$BASE_FLAGS --discovery-scope-mode merged --discovery-cidrs $DISCOVERY_CIDRS"
+  elif [ -n "$DISCOVERY_CIDRS" ]; then
+    DISCOVERY_FLAGS="$BASE_FLAGS --discovery-cidrs $DISCOVERY_CIDRS"
+  fi
 fi
 
 # Install dependencies
@@ -87,7 +98,8 @@ if [ "$ENABLE_ARTIFACT_DOWNLOAD" = "true" ]; then
   #   --discovery-interval-secs <N>          [Gate L: default 300]
   #   --discovery-timeout-ms <N>             [Gate L: default 1500]
   #   --discovery-max-candidates <N>         [Gate L: default 50]
-  #   --discovery-seed-cooldown-secs <N>     [Gate L: default 300]
+  #   --discovery-seed-cooldown-secs <N>     [Gate L: default 300; gate-l2 lab uses 30]
+  #   --discovery-scope-mode <MODE>          [Gate L.2: explicit|local-interfaces|merged]
   cat > /etc/systemd/system/physarum-agent.service << UNIT
 [Unit]
 Description=physarum-agent ($AGENT_ID)
