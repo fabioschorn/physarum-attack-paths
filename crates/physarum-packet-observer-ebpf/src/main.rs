@@ -29,9 +29,9 @@ const ETH_HLEN: usize = 14;
 
 // ── IP header offsets (from start of IP header, i.e. ETH_HLEN + offset) ──────
 //
-// We assume a fixed 20-byte IPv4 header (no options).  The IHL field at
-// ETH_HLEN byte 0 could be checked, but EC2 AL2023 VPC packets never carry
-// options in normal operation.  If the IHL check is ever needed add it.
+// Gate L.3 lab assumption: fixed 20-byte IPv4 header (IHL = 5, no options).
+// AWS VPC / AL2023 ICMP echo traffic does not use IP options in practice.
+// Future hardening: parse IHL = (first_byte & 0x0f) * 4 before indexing.
 const IP_OFF_PROTO: usize = 9;
 const IP_OFF_SADDR: usize = 12;
 const IP_OFF_DADDR: usize = 16;

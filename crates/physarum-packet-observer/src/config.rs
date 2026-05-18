@@ -65,8 +65,7 @@ mod tests {
 
     #[test]
     fn dry_run_flag_is_parsed() {
-        let config =
-            Config::try_parse_from(["pkt-obs", "--agent-id", "a", "--dry-run"]).unwrap();
+        let config = Config::try_parse_from(["pkt-obs", "--agent-id", "a", "--dry-run"]).unwrap();
         assert!(config.dry_run);
     }
 }

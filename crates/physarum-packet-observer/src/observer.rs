@@ -118,7 +118,7 @@ pub async fn run(config: &Config) -> Result<()> {
 fn parse_event(bytes: &[u8]) -> Option<mapper::IcmpEvent> {
     if bytes.len() < core::mem::size_of::<mapper::IcmpEvent>() {
         tracing::warn!(
-            got  = bytes.len(),
+            got = bytes.len(),
             want = core::mem::size_of::<mapper::IcmpEvent>(),
             "ring buffer entry too small — possible ABI mismatch"
         );
