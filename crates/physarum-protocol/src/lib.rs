@@ -8,6 +8,11 @@ pub use discovery::{
     CandidateDiscoveryReport, CandidateEndpoint, CandidateStatus, DiscoveryScope, DiscoveryTrigger,
 };
 
+pub mod packet_observation;
+pub use packet_observation::{
+    IcmpType, PacketDirection, PacketObservation, PacketObservationAck, PacketProtocol,
+};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

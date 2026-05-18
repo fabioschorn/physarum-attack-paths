@@ -1,0 +1,30 @@
+[workspace]
+
+[package]
+name    = "physarum-packet-observer-ebpf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# This crate targets bpfel-unknown-none (eBPF bytecode).
+# It is intentionally excluded from the main workspace.
+# Build via: cargo xtask build-ebpf-packet [--release]
+
+[[bin]]
+name = "physarum-packet-observer-ebpf"
+path = "src/main.rs"
+
+[dependencies]
+aya-ebpf     = "0.1"
+aya-log-ebpf = "0.1"
+
+[profile.dev]
+opt-level = 2
+lto       = true
+panic     = "abort"
+
+[profile.release]
+opt-level     = 3
+lto           = true
+panic         = "abort"
+codegen-units = 1
