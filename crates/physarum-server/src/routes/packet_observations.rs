@@ -62,10 +62,10 @@ pub async fn list_packet_observations(
                 .as_deref()
                 .map_or(true, |id| obs.agent_id == id)
                 && params.protocol.as_deref().map_or(true, |proto| {
-                    serde_json::to_value(&obs.protocol)
+                    serde_json::to_value(obs.protocol)
                         .ok()
                         .and_then(|v| v.as_str().map(|s| s.to_string()))
-                        .map_or(false, |s| s.eq_ignore_ascii_case(proto))
+                        .is_some_and(|s| s.eq_ignore_ascii_case(proto))
                 })
                 && params.since.map_or(true, |since| obs.observed_at > since)
         })
