@@ -38,6 +38,11 @@ fn build_router(state: Arc<AppState>) -> Router {
             post(routes::candidate_discoveries::ingest_candidate_discovery)
                 .get(routes::candidate_discoveries::list_candidate_discoveries),
         )
+        .route(
+            "/packet-observations",
+            post(routes::packet_observations::ingest_packet_observation)
+                .get(routes::packet_observations::list_packet_observations),
+        )
         .with_state(state)
 }
 

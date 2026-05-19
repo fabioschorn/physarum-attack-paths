@@ -4,15 +4,18 @@ members = [
     "crates/physarum-protocol",
     "crates/physarum-server",
     "crates/physarum-agent",
-    "crates/physarum-scanner",         # Gate L — async TCP-connect port scanner (internal, inspired by RustScan)
-    "crates/physarum-ebpf-observer",   # Gate J — userspace TCP flow observer
+    "crates/physarum-scanner",          # Gate L  — async TCP-connect port scanner (internal, inspired by RustScan)
+    "crates/physarum-ebpf-observer",    # Gate J  — userspace TCP flow observer
+    "crates/physarum-packet-observer",  # Gate L.3 — userspace ICMP packet observer (tc ingress)
     # Future members (uncomment as crates are scaffolded):
     # "crates/physarum-graph",
     # "crates/physarum-coordinator",
     # "crates/physarum-cli",
 ]
-# physarum-ebpf-observer-ebpf targets bpfel-unknown-none; build via `cargo xtask build-ebpf`.
-# xtask is a standalone build-tool binary; both are intentionally outside this workspace.
+# eBPF crates target bpfel-unknown-none; built via `cargo xtask`:
+#   cargo xtask build-ebpf         — TCP tracepoint program (physarum-ebpf-observer-ebpf)
+#   cargo xtask build-ebpf-packet  — ICMP tc ingress program (physarum-packet-observer-ebpf)
+# Both xtask and the eBPF crates are intentionally outside this workspace.
 
 [workspace.package]
 version       = "0.0.1"

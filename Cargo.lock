@@ -1036,6 +1036,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "physarum-packet-observer"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "aya",
+ "aya-log",
+ "chrono",
+ "clap",
+ "physarum-protocol",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "physarum-protocol"
 version = "0.0.1"
 dependencies = [
