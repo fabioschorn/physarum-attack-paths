@@ -99,6 +99,14 @@ struct Cli {
         env = "PHYSARUM_DISCOVERY_SCOPE_MODE"
     )]
     discovery_scope_mode: DiscoveryScopeMode,
+
+    /// Enable TCP socket-state sensing via eBPF flow-observations (Gate L.2). Default: true.
+    #[arg(long, default_value_t = true, env = "PHYSARUM_SENSE_TCP_SOCKET_STATE")]
+    sense_tcp_socket_state: bool,
+
+    /// Enable ICMP packet-level sensing via packet-observations (Gate L.3). Default: false.
+    #[arg(long, default_value_t = false, env = "PHYSARUM_SENSE_ICMP_PACKET")]
+    sense_icmp_packet: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -498,16 +506,31 @@ async fn main() {
                     discovered_sockets.clone(),
                 ));
 
-                tokio::spawn(discovery::ebpf_seed_loop(
-                    config,
-                    disc,
-                    cli.id.clone(),
-                    cli.coordinator.clone(),
-                    client.clone(),
-                    seed_queue,
-                    discovered_sockets.clone(),
-                    own_ip,
-                ));
+                if cli.sense_tcp_socket_state {
+                    tokio::spawn(discovery::ebpf_seed_loop(
+                        config.clone(),
+                        disc.clone(),
+                        cli.id.clone(),
+                        cli.coordinator.clone(),
+                        client.clone(),
+                        seed_queue.clone(),
+                        discovered_sockets.clone(),
+                        own_ip,
+                    ));
+                }
+
+                if cli.sense_icmp_packet {
+                    tokio::spawn(discovery::icmp_seed_loop(
+                        config,
+                        disc,
+                        cli.id.clone(),
+                        cli.coordinator.clone(),
+                        client.clone(),
+                        seed_queue,
+                        discovered_sockets.clone(),
+                        own_ip,
+                    ));
+                }
             }
         }
     }
@@ -537,6 +560,8 @@ mod tests {
             discovery_timeout_ms: 1500,
             discovery_seed_cooldown_secs: 300,
             discovery_scope_mode: DiscoveryScopeMode::Explicit,
+            sense_tcp_socket_state: true,
+            sense_icmp_packet: false,
         }
     }
 

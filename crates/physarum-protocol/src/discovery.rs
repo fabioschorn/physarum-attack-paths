@@ -6,7 +6,7 @@ use std::net::IpAddr;
 /// What initiated a discovery run.
 ///
 /// `Startup` and `Scheduled` are Gate L MVP triggers.
-/// `EbpfNew*` variants are Gate L.1 — they are serialised correctly so that
+/// `EbpfNew*` variants are Gate L.1/L.3 — they are serialised correctly so that
 /// future reports containing them round-trip without a protocol version bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -18,6 +18,9 @@ pub enum DiscoveryTrigger {
     EbpfNewOutboundHost,
     /// Gate L.1: eBPF observed an inbound TCP accept from an unknown host.
     EbpfNewInboundHost,
+    /// Gate L.3: eBPF tc ingress captured an inbound ICMP echo request from
+    /// an unknown host — direct ping stimulus from a host in scope.
+    EbpfIcmpEchoRequest,
 }
 
 impl DiscoveryTrigger {
@@ -29,6 +32,7 @@ impl DiscoveryTrigger {
     /// scheduled re-discovery cannot erase eBPF provenance.
     pub fn priority(&self) -> u8 {
         match self {
+            Self::EbpfIcmpEchoRequest => 4,
             Self::EbpfNewInboundHost => 3,
             Self::EbpfNewOutboundHost => 2,
             Self::Scheduled => 1,
@@ -148,6 +152,18 @@ mod tests {
 
         let v = serde_json::to_value(DiscoveryTrigger::Scheduled).unwrap();
         assert_eq!(v, "scheduled");
+
+        let v = serde_json::to_value(DiscoveryTrigger::EbpfIcmpEchoRequest).unwrap();
+        assert_eq!(v, "ebpf_icmp_echo_request");
+    }
+
+    #[test]
+    fn ebpf_icmp_echo_request_priority_above_inbound() {
+        assert!(
+            DiscoveryTrigger::EbpfIcmpEchoRequest.priority()
+                > DiscoveryTrigger::EbpfNewInboundHost.priority()
+        );
+        assert_eq!(DiscoveryTrigger::EbpfIcmpEchoRequest.priority(), 4);
     }
 
     #[test]

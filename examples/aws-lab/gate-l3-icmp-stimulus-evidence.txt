@@ -1,0 +1,70 @@
+Gate L.3 — ICMP Packet-Level Sensing Evidence
+==============================================
+
+Lab phase   : gate-l3
+Issue       : #87
+PR          : (this PR — feat/gate-l3-pr2-agent-icmp-seed-lab)
+Date        : (to be filled after AWS lab run)
+AWS account : 168740128169 (authorized lab account only)
+Topology    :
+  agent-b   : 10.50.20.10  (node A — coordinator + packet observer)
+  agent-c   : 10.50.20.20  (node B — ICMP stimulus host)
+  agent-d   : 10.50.20.30  (node C — ICMP stimulus host)
+
+Build info
+----------
+  Binaries built  : physarum-agent, physarum-server, physarum-packet-observer
+  eBPF bytecode   : physarum-packet-observer-ebpf (tc ingress, bpfel-unknown-none)
+  Docker builder  : (cloud-fs09-physarum-attack-paths | local docker — to be filled)
+  S3 prefix       : physarum-attack-paths/dev/linux-x86_64
+  cargo xtask     : build-ebpf-packet --release
+  eBPF bytecode path: crates/physarum-packet-observer-ebpf/target/bpfel-unknown-none/release/physarum-packet-observer-ebpf
+
+Evidence 1 — Agents registered and packet observer active
+----------------------------------------------------------
+  (to be filled with Ansible output after lab run)
+  Expected: agent-b, agent-c, agent-d registered
+  Expected: physarum-packet-observer systemd service active on node A
+  Expected: "packet observer attached to tc ingress" in journal
+
+Evidence 2 — BEFORE snapshot (no ICMP observations after baseline_time)
+------------------------------------------------------------------------
+  baseline_time : (to be filled)
+  Expected: GET /packet-observations?agent_id=agent-b&protocol=icmp&since=<baseline_time> → []
+  Expected: no ebpf_icmp_echo_request candidates before ping
+
+Evidence 3 — ICMP stimulus (B and C ping A)
+-------------------------------------------
+  Commands: ping -c 3 10.50.20.10 (from agent-c and agent-d)
+  Expected: 3 packets transmitted from each stimulus host
+
+Evidence 4 — AFTER snapshot (packet observations and candidates)
+----------------------------------------------------------------
+  (to be filled with Ansible output after lab run)
+
+  Expected packet observations:
+    source_ip=10.50.20.20, destination_ip=10.50.20.10, icmp_type=echo_request, direction=inbound
+    source_ip=10.50.20.30, destination_ip=10.50.20.10, icmp_type=echo_request, direction=inbound
+
+  Expected candidates:
+    ip=10.50.20.20, trigger=ebpf_icmp_echo_request, status=discovered
+    ip=10.50.20.30, trigger=ebpf_icmp_echo_request, status=discovered
+
+Evidence 5 — Before/after delta table and probe validation
+----------------------------------------------------------
+  Signal                                    Before ping   After ping
+  ───────────────────────────────────────── ──────────────────────────
+  PacketObservation B→A ICMP echo_request   absent        (to be filled)
+  PacketObservation C→A ICMP echo_request   absent        (to be filled)
+  Candidate B  trigger=ebpf_icmp_echo_req   absent        (to be filled)
+  Candidate C  trigger=ebpf_icmp_echo_req   absent        (to be filled)
+  Graph edge A→B (after probe validation)   absent        (to be filled)
+  Graph edge A→C (after probe validation)   absent        (to be filled)
+
+  Expected paths after probe validation:
+    GET /paths?source=agent-b&target=agent-c → direct 1-hop path
+    GET /paths?source=agent-b&target=agent-d → direct 1-hop path
+
+NOTE: This file will be updated with the actual Ansible playbook output after the
+      AWS lab run in PR 2. No edges appear before probe validation — ICMP stimulus
+      triggers discovery only; the probe loop must succeed before graph edges exist.

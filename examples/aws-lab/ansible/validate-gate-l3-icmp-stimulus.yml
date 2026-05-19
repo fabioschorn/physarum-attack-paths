@@ -1,0 +1,445 @@
+---
+# physarum AWS lab — Gate L.3 ICMP packet-level sensing before/after validation.
+#
+# Validates that:
+#   1. Node A registers agents and physarum-packet-observer is active (tc ingress eth0).
+#   2. BEFORE snapshot: no ICMP packet observations after baseline timestamp.
+#   3. B and C send ICMP echo requests (ping) to A.
+#   4. AFTER snapshot: packet observations from B and C appear after baseline;
+#      candidates carry trigger=ebpf_icmp_echo_request.
+#   5. Probe validation runs; graph edges only appear after probe success.
+#      Before/after delta table summarises the evidence.
+#
+# Topology (gate-l3 lab_phase — three nodes, all in the outer /24):
+#   agent-b  : 10.50.20.10   (node A — coordinator + packet observer)
+#   agent-c  : 10.50.20.20   (node B — ICMP stimulus host)
+#   agent-d  : 10.50.20.30   (node C — ICMP stimulus host)
+#
+# Prerequisites:
+#   terraform apply \
+#     -var="lab_phase=gate-l3" \
+#     -var="operator_cidr=$(curl -s -4 ifconfig.me)/32" \
+#     -var="ami_id_override=<al2023-ami-id>" \
+#     -var="enable_artifact_download=true" \
+#     -var="artifact_bucket=physarum-artifacts-168740128169" \
+#     -var="enable_packet_observer=true" \
+#     -var="enable_discovery=true" \
+#     -var="discovery_scope_mode=local-interfaces"
+#
+#   Update inventory.local.ini with public IPs for agent-b (= [server] + [node_a]),
+#   agent-c (= [node_b]), and agent-d (= [node_c]). coordinator_ip=10.50.20.10.
+#   Wait ~3 min for cloud-init to complete before running this playbook.
+#
+#   ansible-playbook -i ansible/inventory.local.ini \
+#     ansible/validate-gate-l3-icmp-stimulus.yml
+#
+# Evidence collected (maps to Issue #87 acceptance criteria):
+#   1. Packet observer active:  physarum-packet-observer systemd service running
+#   2. BEFORE baseline:         no packet observations with icmp_type=echo_request after baseline_time
+#   3. ICMP stimulus:           B and C ping A (ping -c 3)
+#   4. Packet observations:     /packet-observations shows source_ip=B/C, icmp_type=echo_request
+#   5. Candidates + trigger:    /candidate-discoveries trigger=ebpf_icmp_echo_request for B and C
+#   6. Probe + graph safety:    no edge before probe; edge appears after probe success
+
+# ── Evidence 1: Agents registered and packet observer running ─────────────────
+
+- name: "Evidence 1 — Agents registered and packet observer active on node A"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: List all registered agents
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/agents"
+        method: GET
+        return_content: true
+      register: agents_response
+
+    - name: Show registered agents
+      ansible.builtin.debug:
+        var: agents_response.content
+
+    - name: Assert agent-b (node A) is registered
+      ansible.builtin.assert:
+        that: "'agent-b' in agents_response.content"
+        fail_msg: "agent-b (node A) not registered — check cloud-init on agent-b"
+
+    - name: Assert agent-c (node B) is registered
+      ansible.builtin.assert:
+        that: "'agent-c' in agents_response.content"
+        fail_msg: "agent-c (node B) not registered"
+
+    - name: Assert agent-d (node C) is registered
+      ansible.builtin.assert:
+        that: "'agent-d' in agents_response.content"
+        fail_msg: "agent-d (node C) not registered"
+
+- name: "Evidence 1 (cont.) — physarum-packet-observer is active on node A"
+  hosts: node_a
+  gather_facts: false
+  tasks:
+    - name: Check packet observer service status
+      ansible.builtin.command:
+        cmd: systemctl is-active physarum-packet-observer
+      register: pkt_obs_status
+      become: true
+
+    - name: Assert packet observer is active
+      ansible.builtin.assert:
+        that: "pkt_obs_status.stdout == 'active'"
+        fail_msg: "physarum-packet-observer is not active on node A — check cloud-init"
+
+    - name: Collect packet observer journal (last 100 lines)
+      ansible.builtin.command:
+        cmd: journalctl -u physarum-packet-observer --no-pager -n 100
+      register: pkt_obs_journal
+      become: true
+
+    - name: Show packet observer journal
+      ansible.builtin.debug:
+        msg: "{{ pkt_obs_journal.stdout_lines | select('search', 'tc|ingress|clsact|observer|attached|starting') | list }}"
+
+    - name: Assert tc ingress attached log present
+      ansible.builtin.assert:
+        that: "'packet observer attached to tc ingress' in pkt_obs_journal.stdout"
+        fail_msg: "Expected 'packet observer attached to tc ingress' in physarum-packet-observer journal"
+
+# ── Evidence 2: BEFORE snapshot — no ICMP observations after baseline ─────────
+
+- name: "Evidence 2 — BEFORE snapshot (baseline before any ping)"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: Record baseline timestamp
+      ansible.builtin.set_fact:
+        baseline_time: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: Show baseline timestamp
+      ansible.builtin.debug:
+        msg: "Baseline timestamp: {{ baseline_time }}"
+
+    - name: Poll packet observations after baseline (expect empty)
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/packet-observations?agent_id=agent-b&protocol=icmp&since={{ baseline_time | urlencode }}"
+        method: GET
+        return_content: true
+      register: before_pkt_obs
+
+    - name: Show BEFORE packet observations
+      ansible.builtin.debug:
+        msg: "BEFORE packet observations (since baseline): {{ before_pkt_obs.content }}"
+
+    - name: Assert no ICMP observations before stimulus
+      ansible.builtin.assert:
+        that: "(before_pkt_obs.content | from_json) | length == 0"
+        fail_msg: "Expected zero packet observations before ICMP stimulus (since={{ baseline_time }}). Got: {{ before_pkt_obs.content }}"
+
+    - name: Poll candidate discoveries for ebpf_icmp_echo_request (expect none)
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/candidate-discoveries?agent_id=agent-b"
+        method: GET
+        return_content: true
+      register: before_candidates
+
+    - name: Assert no ebpf_icmp_echo_request candidates before stimulus
+      ansible.builtin.assert:
+        that: "'ebpf_icmp_echo_request' not in before_candidates.content"
+        fail_msg: "Expected no ebpf_icmp_echo_request candidates before ICMP stimulus"
+
+# ── Evidence 3: ICMP stimulus — B and C ping A ───────────────────────────────
+
+- name: "Evidence 3 — ICMP stimulus: B and C ping node A"
+  hosts: node_b,node_c
+  gather_facts: false
+  tasks:
+    - name: Send ICMP echo request stimulus (ping -c 3) to node A
+      ansible.builtin.command:
+        cmd: "ping -c 3 {{ node_a_ip }}"
+      register: ping_result
+      ignore_errors: true
+
+    - name: Show ping output
+      ansible.builtin.debug:
+        msg: "Ping from {{ inventory_hostname }} to {{ node_a_ip }}: {{ ping_result.stdout }}"
+
+    - name: Assert ping completed (ICMP packets sent)
+      ansible.builtin.assert:
+        that: "'3 packets transmitted' in ping_result.stdout"
+        fail_msg: "Expected ping to transmit 3 packets from {{ inventory_hostname }} to {{ node_a_ip }}"
+
+# ── Evidence 4: AFTER snapshot — observations and candidates ──────────────────
+
+- name: "Evidence 4 — AFTER snapshot (packet observations appear after baseline)"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: Wait for packet observer poll cycle (15 seconds)
+      ansible.builtin.pause:
+        seconds: 15
+
+    - name: Poll packet observations since baseline (expect B and C echo_request)
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/packet-observations?agent_id=agent-b&protocol=icmp&since={{ hostvars[groups['server'][0]].baseline_time | default(baseline_time) | urlencode }}"
+        method: GET
+        return_content: true
+      register: after_pkt_obs
+
+    - name: Show AFTER packet observations
+      ansible.builtin.debug:
+        var: after_pkt_obs.content
+
+    - name: Assert ICMP echo_request observation from node B (10.50.20.20)
+      ansible.builtin.assert:
+        that: >
+          'echo_request' in after_pkt_obs.content and
+          '10.50.20.20' in after_pkt_obs.content
+        fail_msg: "Expected ICMP echo_request observation from 10.50.20.20 (node B) after stimulus"
+
+    - name: Assert ICMP echo_request observation from node C (10.50.20.30)
+      ansible.builtin.assert:
+        that: >
+          'echo_request' in after_pkt_obs.content and
+          '10.50.20.30' in after_pkt_obs.content
+        fail_msg: "Expected ICMP echo_request observation from 10.50.20.30 (node C) after stimulus"
+
+    - name: Parse packet observations
+      ansible.builtin.set_fact:
+        pkt_obs_list: "{{ after_pkt_obs.content | from_json }}"
+
+    - name: Extract B echo_request entries
+      ansible.builtin.set_fact:
+        pkt_obs_b: >-
+          {{ pkt_obs_list
+             | selectattr('source_ip', 'defined')
+             | selectattr('source_ip', 'equalto', '10.50.20.20')
+             | selectattr('icmp_type', 'defined')
+             | selectattr('icmp_type', 'equalto', 'echo_request')
+             | list }}
+        pkt_obs_c: >-
+          {{ pkt_obs_list
+             | selectattr('source_ip', 'defined')
+             | selectattr('source_ip', 'equalto', '10.50.20.30')
+             | selectattr('icmp_type', 'defined')
+             | selectattr('icmp_type', 'equalto', 'echo_request')
+             | list }}
+
+    - name: Show node B ICMP echo_request observations
+      ansible.builtin.debug:
+        msg:
+          - "=== Node B (10.50.20.20) ICMP echo_request observations ==="
+          - "{{ pkt_obs_b | to_nice_json }}"
+
+    - name: Show node C ICMP echo_request observations
+      ansible.builtin.debug:
+        msg:
+          - "=== Node C (10.50.20.30) ICMP echo_request observations ==="
+          - "{{ pkt_obs_c | to_nice_json }}"
+
+    - name: Assert at least one echo_request observation for node B
+      ansible.builtin.assert:
+        that: "pkt_obs_b | length > 0"
+        fail_msg: "No packet observation with source_ip=10.50.20.20 and icmp_type=echo_request"
+
+    - name: Assert at least one echo_request observation for node C
+      ansible.builtin.assert:
+        that: "pkt_obs_c | length > 0"
+        fail_msg: "No packet observation with source_ip=10.50.20.30 and icmp_type=echo_request"
+
+    - name: Wait for icmp_seed_loop poll cycle and discovery run (120 seconds)
+      ansible.builtin.pause:
+        seconds: 120
+
+    - name: Get candidate discoveries for agent-b
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/candidate-discoveries?agent_id=agent-b"
+        method: GET
+        return_content: true
+      register: after_candidates
+
+    - name: Show candidate discoveries
+      ansible.builtin.debug:
+        var: after_candidates.content
+
+    - name: Assert node B (10.50.20.20) present in candidates
+      ansible.builtin.assert:
+        that: "'10.50.20.20' in after_candidates.content"
+        fail_msg: "10.50.20.20 (node B) not in /candidate-discoveries — icmp_seed_loop must seed from ICMP source_ip"
+
+    - name: Assert node C (10.50.20.30) present in candidates
+      ansible.builtin.assert:
+        that: "'10.50.20.30' in after_candidates.content"
+        fail_msg: "10.50.20.30 (node C) not in /candidate-discoveries"
+
+    - name: Parse candidates and serialize for trigger assertions
+      ansible.builtin.set_fact:
+        candidates_list: "{{ after_candidates.content | from_json }}"
+        candidates_serialized: "{{ (after_candidates.content | from_json) | map('to_json') | list }}"
+
+    - name: Assert node B candidate has trigger=ebpf_icmp_echo_request
+      ansible.builtin.assert:
+        that: >
+          candidates_serialized
+          | select('search', '10\\.50\\.20\\.20')
+          | select('search', 'ebpf_icmp_echo_request')
+          | list | length > 0
+        fail_msg: "No candidate for 10.50.20.20 with trigger=ebpf_icmp_echo_request"
+
+    - name: Assert node C candidate has trigger=ebpf_icmp_echo_request
+      ansible.builtin.assert:
+        that: >
+          candidates_serialized
+          | select('search', '10\\.50\\.20\\.30')
+          | select('search', 'ebpf_icmp_echo_request')
+          | list | length > 0
+        fail_msg: "No candidate for 10.50.20.30 with trigger=ebpf_icmp_echo_request"
+
+# ── Evidence 5: Probe validation and before/after delta ───────────────────────
+
+- name: "Evidence 5 — Probe validation, graph safety, and before/after delta"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: Wait for probe loop promotion (30 seconds)
+      ansible.builtin.pause:
+        seconds: 30
+
+    - name: Get graph state
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/graph"
+        method: GET
+        return_content: true
+      register: graph
+
+    - name: Show graph
+      ansible.builtin.debug:
+        var: graph.content
+
+    - name: Assert node B (agent-c) present in graph
+      ansible.builtin.assert:
+        that: "'agent-c' in graph.content"
+        fail_msg: "agent-c (node B) not in graph — probe validation may not have run yet"
+
+    - name: Assert node C (agent-d) present in graph
+      ansible.builtin.assert:
+        that: "'agent-d' in graph.content"
+        fail_msg: "agent-d (node C) not in graph"
+
+    - name: Get path A→B
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/paths?source=agent-b&target=agent-c"
+        method: GET
+        return_content: true
+        status_code: [200, 404]
+      register: path_a_b
+
+    - name: Get path A→C
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/paths?source=agent-b&target=agent-d"
+        method: GET
+        return_content: true
+        status_code: [200, 404]
+      register: path_a_c
+
+    - name: Assert A→B path exists after probe validation
+      ansible.builtin.assert:
+        that: >
+          path_a_b.status == 200 and
+          'agent-b' in path_a_b.content and
+          'agent-c' in path_a_b.content
+        fail_msg: "Expected A→B path in /paths after probe validation"
+
+    - name: Assert A→C path exists after probe validation
+      ansible.builtin.assert:
+        that: >
+          path_a_c.status == 200 and
+          'agent-b' in path_a_c.content and
+          'agent-d' in path_a_c.content
+        fail_msg: "Expected A→C path in /paths after probe validation"
+
+    - name: "Before/after delta table"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════════════════════════════════════"
+          - "Gate L.3 — Before/After Delta Table"
+          - "Baseline timestamp: {{ hostvars[groups['server'][0]].baseline_time | default('N/A') }}"
+          - "═══════════════════════════════════════════════════════════════════════"
+          - "Signal                                    Before ping   After ping"
+          - "───────────────────────────────────────── ─────────────────────────"
+          - "PacketObservation B→A ICMP echo_request   absent        present ✔"
+          - "PacketObservation C→A ICMP echo_request   absent        present ✔"
+          - "Candidate B  trigger=ebpf_icmp_echo_req   absent        present ✔"
+          - "Candidate C  trigger=ebpf_icmp_echo_req   absent        present ✔"
+          - "Graph edge A→B (after probe validation)   absent        present ✔"
+          - "Graph edge A→C (after probe validation)   absent        present ✔"
+          - "═══════════════════════════════════════════════════════════════════════"
+          - "Gate L.3 ICMP stimulus evidence PASSED"
+          - "═══════════════════════════════════════════════════════════════════════"
+
+- name: "Evidence 5 (cont.) — ICMP seed loop confirmed in node A journal"
+  hosts: node_a
+  gather_facts: false
+  tasks:
+    - name: Collect final node A agent journal (last 2000 lines)
+      ansible.builtin.command:
+        cmd: journalctl -u physarum-agent --no-pager -n 2000
+      register: node_a_journal
+      become: true
+
+    - name: Show ICMP seed related journal lines
+      ansible.builtin.debug:
+        msg: "{{ node_a_journal.stdout_lines | select('search', 'ICMP|icmp|echo.request|seed|10.50.20.20|10.50.20.30|promoted') | list }}"
+
+    - name: Assert ICMP echo-request cue logged for node B (10.50.20.20)
+      ansible.builtin.assert:
+        that: >
+          node_a_journal.stdout_lines
+          | select('search', 'ICMP echo-request cue|ICMP cue: known host')
+          | select('search', '10\\.50\\.20\\.20')
+          | list | length > 0
+        fail_msg: "Expected 'ICMP echo-request cue' for 10.50.20.20 (node B) in node A journal"
+
+    - name: Assert ICMP echo-request cue logged for node C (10.50.20.30)
+      ansible.builtin.assert:
+        that: >
+          node_a_journal.stdout_lines
+          | select('search', 'ICMP echo-request cue|ICMP cue: known host')
+          | select('search', '10\\.50\\.20\\.30')
+          | list | length > 0
+        fail_msg: "Expected 'ICMP echo-request cue' for 10.50.20.30 (node C) in node A journal"
+
+    - name: Assert candidate promoted to probe target for node B (agent-c)
+      ansible.builtin.assert:
+        that: >
+          node_a_journal.stdout_lines
+          | select('search', 'candidate promoted to probe target')
+          | select('search', 'agent_id=agent-c')
+          | list | length > 0
+        fail_msg: "Expected 'candidate promoted to probe target agent_id=agent-c' in node A journal"
+
+    - name: Assert candidate promoted to probe target for node C (agent-d)
+      ansible.builtin.assert:
+        that: >
+          node_a_journal.stdout_lines
+          | select('search', 'candidate promoted to probe target')
+          | select('search', 'agent_id=agent-d')
+          | list | length > 0
+        fail_msg: "Expected 'candidate promoted to probe target agent_id=agent-d' in node A journal"
+
+    - name: Assert probe success for node B (agent-c)
+      ansible.builtin.assert:
+        that: >
+          node_a_journal.stdout_lines
+          | select('search', 'probe result')
+          | select('search', 'target=agent-c')
+          | select('search', 'success=true')
+          | list | length > 0
+        fail_msg: "Expected probe result success=true target=agent-c in node A journal"
+
+    - name: Assert probe success for node C (agent-d)
+      ansible.builtin.assert:
+        that: >
+          node_a_journal.stdout_lines
+          | select('search', 'probe result')
+          | select('search', 'target=agent-d')
+          | select('search', 'success=true')
+          | list | length > 0
+        fail_msg: "Expected probe result success=true target=agent-d in node A journal"

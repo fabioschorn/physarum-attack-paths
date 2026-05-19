@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use if_addrs::{get_if_addrs, IfAddr};
 use physarum_protocol::{
     CandidateDiscoveryReport, CandidateEndpoint, CandidateStatus, DiscoveryScope, DiscoveryTrigger,
-    FlowDirection, FlowEvent, FlowObservation,
+    FlowDirection, FlowEvent, FlowObservation, IcmpType, PacketDirection, PacketObservation,
 };
 use physarum_scanner::{PortList, Scanner};
 use std::collections::{HashMap, HashSet};
@@ -597,6 +597,192 @@ pub async fn ebpf_seed_loop(
     }
 }
 
+// ── ICMP seed loop (Gate L.3) ─────────────────────────────────────────────────
+
+/// Polls `GET /packet-observations` for inbound ICMP echo requests from
+/// unknown RFC1918 hosts and runs a bounded exact-host scan for each cue.
+///
+/// Gate L.3 behavioral rule:
+/// "When eBPF tc ingress senses an inbound ICMP echo request from a host in
+///  scope, the organism takes discovery initiative against that exact host."
+#[allow(clippy::too_many_arguments)]
+pub async fn icmp_seed_loop(
+    config: Arc<DiscoveryConfig>,
+    discovery: Arc<dyn CandidateDiscovery>,
+    agent_id: String,
+    coordinator: String,
+    client: Arc<reqwest::Client>,
+    seed_queue: Arc<DiscoverySeedQueue>,
+    discovered_sockets: Arc<Mutex<HashSet<SocketAddr>>>,
+    own_ip: Option<IpAddr>,
+) {
+    let poll_interval = Duration::from_secs(10);
+    let mut cursor: DateTime<Utc> = Utc::now();
+
+    loop {
+        tokio::time::sleep(poll_interval).await;
+
+        let url = format!(
+            "{coordinator}/packet-observations?agent_id={agent_id}&protocol=icmp&since={since}",
+            since = urlencoding_rfc3339(&cursor),
+        );
+        let observations: Vec<PacketObservation> = match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => match resp.json().await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to decode packet-observations");
+                    continue;
+                }
+            },
+            Ok(resp) => {
+                tracing::warn!(status = %resp.status(), "packet-observations poll failed");
+                continue;
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "packet-observations unreachable");
+                continue;
+            }
+        };
+
+        let mut latest_ts = cursor;
+        for obs in &observations {
+            if obs.observed_at > latest_ts {
+                latest_ts = obs.observed_at;
+            }
+
+            // Only react to inbound ICMP echo requests from in-scope hosts.
+            if obs.icmp_type != IcmpType::EchoRequest || obs.direction != PacketDirection::Inbound {
+                continue;
+            }
+
+            let src_ip: IpAddr = match obs.source_ip.parse() {
+                Ok(ip) => ip,
+                Err(_) => continue,
+            };
+
+            if own_ip == Some(src_ip) || !ip_in_any_cidr(src_ip, &config.cidrs) {
+                continue;
+            }
+
+            let dst_ip = src_ip;
+
+            // Known host: assert trigger provenance without re-scanning.
+            {
+                let known_for_dst: Vec<SocketAddr> = {
+                    let sockets = discovered_sockets.lock().unwrap();
+                    sockets
+                        .iter()
+                        .filter(|s| s.ip() == dst_ip)
+                        .copied()
+                        .collect()
+                };
+                if !known_for_dst.is_empty() {
+                    tracing::info!(ip = %dst_ip, "ICMP cue: known host — asserting EbpfIcmpEchoRequest provenance");
+                    let provenance_candidates: Vec<CandidateEndpoint> = known_for_dst
+                        .iter()
+                        .map(|s| CandidateEndpoint {
+                            discovered_by: agent_id.clone(),
+                            ip: s.ip(),
+                            port: s.port(),
+                            protocol: "tcp".to_string(),
+                            discovery_method: "physarum-scanner".to_string(),
+                            discovered_at: Utc::now(),
+                            status: CandidateStatus::Discovered,
+                            confidence: 0.0,
+                            trigger: DiscoveryTrigger::EbpfIcmpEchoRequest,
+                        })
+                        .collect();
+                    let provenance_scope = DiscoveryScope {
+                        cidrs: vec![format!("{dst_ip}/32")],
+                        ports: known_for_dst.iter().map(|s| s.port()).collect(),
+                        timeout_ms: config.timeout_ms,
+                        max_candidates: config.max_candidates,
+                    };
+                    let provenance_report = CandidateDiscoveryReport {
+                        discovering_agent: agent_id.clone(),
+                        scope: provenance_scope,
+                        candidates: provenance_candidates,
+                        discovered_at: Utc::now(),
+                    };
+                    let post_url = format!("{coordinator}/candidate-discoveries");
+                    match client.post(&post_url).json(&provenance_report).send().await {
+                        Ok(_) => {
+                            tracing::info!(ip = %dst_ip, "ICMP trigger provenance report posted")
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "failed to post ICMP provenance report")
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            if !seed_queue.should_scan(dst_ip) {
+                tracing::debug!(ip = %dst_ip, "ICMP seed cooldown active — skipping");
+                continue;
+            }
+
+            tracing::info!(ip = %dst_ip, trigger = ?DiscoveryTrigger::EbpfIcmpEchoRequest, "ICMP echo-request cue: enqueued seed");
+
+            let seed_scope = DiscoveryScope {
+                cidrs: vec![format!("{dst_ip}/32")],
+                ports: config.ports.clone(),
+                timeout_ms: config.timeout_ms,
+                max_candidates: config.max_candidates,
+            };
+            tracing::info!(ip = %dst_ip, seed_cidr = %format!("{dst_ip}/32"), "ICMP seed scan: starting exact-host scan");
+
+            let mut candidates = discovery.run(&seed_scope, &agent_id).await;
+            if candidates.is_empty() {
+                tracing::debug!(ip = %dst_ip, "ICMP seed scan: no open ports found");
+                continue;
+            }
+
+            for c in &mut candidates {
+                c.trigger = DiscoveryTrigger::EbpfIcmpEchoRequest;
+            }
+
+            {
+                let mut sockets = discovered_sockets.lock().unwrap();
+                let new_count = candidates
+                    .iter()
+                    .filter(|c| sockets.insert(SocketAddr::new(c.ip, c.port)))
+                    .count();
+                if new_count > 0 {
+                    tracing::info!(
+                        total_known = sockets.len(),
+                        new = new_count,
+                        "ICMP seed scan: discovered sockets updated — probe loop will use these targets"
+                    );
+                }
+            }
+
+            let report = CandidateDiscoveryReport {
+                discovering_agent: agent_id.clone(),
+                scope: seed_scope,
+                candidates,
+                discovered_at: Utc::now(),
+            };
+            let post_url = format!("{coordinator}/candidate-discoveries");
+            match client.post(&post_url).json(&report).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!(ip = %dst_ip, "ICMP seed discovery report posted");
+                }
+                Ok(resp) => {
+                    tracing::warn!(status = %resp.status(), "coordinator rejected ICMP seed report");
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to post ICMP seed report");
+                }
+            }
+        }
+
+        if latest_ts > cursor {
+            cursor = latest_ts + chrono::Duration::microseconds(1);
+        }
+    }
+}
+
 /// Percent-encodes a `DateTime<Utc>` as an RFC3339 string for use in URL query params.
 fn urlencoding_rfc3339(dt: &DateTime<Utc>) -> String {
     dt.to_rfc3339()
@@ -927,5 +1113,135 @@ mod tests {
             !ip_in_any_cidr(seed_ip, &cidrs),
             "out-of-scope inbound must be rejected"
         );
+    }
+
+    // ── icmp_seed_loop trigger classification (Gate L.3) ─────────────────────
+
+    fn make_packet_obs(
+        icmp_type: IcmpType,
+        direction: PacketDirection,
+        src_ip: &str,
+        dst_ip: &str,
+    ) -> PacketObservation {
+        use physarum_protocol::PacketProtocol;
+        PacketObservation {
+            agent_id: "agent-a".to_string(),
+            observed_at: chrono::Utc::now(),
+            source_ip: src_ip.to_string(),
+            destination_ip: dst_ip.to_string(),
+            protocol: PacketProtocol::Icmp,
+            icmp_type,
+            icmp_code: 0,
+            direction,
+            interface_name: "eth0".to_string(),
+            packet_size: None,
+            ttl: None,
+        }
+    }
+
+    // inbound ICMP echo request from in-scope host → seed from source_ip
+    #[test]
+    fn icmp_echo_request_inbound_in_scope_yields_seed_ip() {
+        let obs = make_packet_obs(
+            IcmpType::EchoRequest,
+            PacketDirection::Inbound,
+            "10.50.20.20", // stimulus host B
+            "10.50.20.10", // own IP (A)
+        );
+        let cidrs = vec!["10.50.20.0/24".to_string()];
+        let own_ip: IpAddr = "10.50.20.10".parse().unwrap();
+
+        // Gate L.3 rule: seed from source_ip (the pinging host)
+        assert_eq!(obs.icmp_type, IcmpType::EchoRequest);
+        assert_eq!(obs.direction, PacketDirection::Inbound);
+        let seed_ip: IpAddr = obs.source_ip.parse().unwrap();
+        assert_ne!(Some(seed_ip), Some(own_ip));
+        assert!(ip_in_any_cidr(seed_ip, &cidrs));
+        assert_eq!(seed_ip, "10.50.20.20".parse::<IpAddr>().unwrap());
+    }
+
+    // outbound ICMP echo request must be skipped (tc ingress captures inbound only)
+    #[test]
+    fn icmp_echo_request_outbound_skipped() {
+        let obs = make_packet_obs(
+            IcmpType::EchoRequest,
+            PacketDirection::Outbound,
+            "10.50.20.10",
+            "10.50.20.20",
+        );
+        let qualified =
+            obs.icmp_type == IcmpType::EchoRequest && obs.direction == PacketDirection::Inbound;
+        assert!(!qualified, "outbound must not qualify as a seed cue");
+    }
+
+    // ICMP echo reply must be skipped (not a discovery stimulus)
+    #[test]
+    fn icmp_echo_reply_inbound_skipped() {
+        let obs = make_packet_obs(
+            IcmpType::EchoReply,
+            PacketDirection::Inbound,
+            "10.50.20.20",
+            "10.50.20.10",
+        );
+        let qualified =
+            obs.icmp_type == IcmpType::EchoRequest && obs.direction == PacketDirection::Inbound;
+        assert!(!qualified, "echo reply must not qualify as a seed cue");
+    }
+
+    // ICMP echo request from out-of-scope host must be rejected
+    #[test]
+    fn icmp_echo_request_out_of_scope_skipped() {
+        let obs = make_packet_obs(
+            IcmpType::EchoRequest,
+            PacketDirection::Inbound,
+            "192.168.99.5", // different subnet
+            "10.50.20.10",
+        );
+        let cidrs = vec!["10.50.20.0/24".to_string()];
+        let seed_ip: IpAddr = obs.source_ip.parse().unwrap();
+        assert!(
+            !ip_in_any_cidr(seed_ip, &cidrs),
+            "out-of-scope ICMP source must be rejected"
+        );
+    }
+
+    // ICMP echo request from own IP must be skipped (no self-seeding)
+    #[test]
+    fn icmp_echo_request_from_own_ip_skipped() {
+        let own_ip: IpAddr = "10.50.20.10".parse().unwrap();
+        let obs = make_packet_obs(
+            IcmpType::EchoRequest,
+            PacketDirection::Inbound,
+            "10.50.20.10", // loopback from own IP
+            "10.50.20.10",
+        );
+        let seed_ip: IpAddr = obs.source_ip.parse().unwrap();
+        assert_eq!(Some(seed_ip), Some(own_ip), "own IP must be skipped");
+    }
+
+    // ICMP seed uses source_ip (pinging host), not destination_ip (own IP)
+    #[test]
+    fn icmp_seed_uses_source_ip_not_destination_ip() {
+        let obs = make_packet_obs(
+            IcmpType::EchoRequest,
+            PacketDirection::Inbound,
+            "10.50.20.30", // C pings A
+            "10.50.20.10", // A = own IP
+        );
+        let seed_ip: IpAddr = obs.source_ip.parse().unwrap();
+        let dst_ip: IpAddr = obs.destination_ip.parse().unwrap();
+        assert_eq!(seed_ip, "10.50.20.30".parse::<IpAddr>().unwrap());
+        assert_ne!(seed_ip, dst_ip, "must seed from source, not destination");
+    }
+
+    // ICMP and TCP seed loops share the same cooldown queue
+    #[test]
+    fn icmp_seed_and_tcp_seed_share_cooldown_queue() {
+        let q = DiscoverySeedQueue::new(Duration::from_secs(300));
+        let ip: IpAddr = "10.50.20.20".parse().unwrap();
+        // TCP seed loop claims the IP first
+        assert!(q.should_scan(ip));
+        // ICMP seed loop on same IP is blocked (shared cooldown)
+        assert!(!q.should_scan(ip));
     }
 }

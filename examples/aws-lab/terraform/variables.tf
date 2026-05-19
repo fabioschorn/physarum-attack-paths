@@ -10,8 +10,8 @@ variable "lab_phase" {
   default     = "phase1"
 
   validation {
-    condition     = contains(["phase1", "phase2", "weighted-paths", "gate-k", "gate-l", "gate-l2"], var.lab_phase)
-    error_message = "lab_phase must be phase1, phase2, weighted-paths, gate-k, gate-l, or gate-l2."
+    condition     = contains(["phase1", "phase2", "weighted-paths", "gate-k", "gate-l", "gate-l2", "gate-l3"], var.lab_phase)
+    error_message = "lab_phase must be phase1, phase2, weighted-paths, gate-k, gate-l, gate-l2, or gate-l3."
   }
 }
 
@@ -127,4 +127,10 @@ variable "discovery_scope_mode" {
     condition     = contains(["explicit", "local-interfaces", "merged"], var.discovery_scope_mode)
     error_message = "discovery_scope_mode must be explicit, local-interfaces, or merged."
   }
+}
+
+variable "enable_packet_observer" {
+  description = "When true, user_data downloads physarum-packet-observer and its eBPF bytecode from S3, attaches tc ingress on eth0, and starts the observer as a root systemd service. Gate L.3 validation flag. Requires enable_artifact_download = true."
+  type        = bool
+  default     = false
 }
