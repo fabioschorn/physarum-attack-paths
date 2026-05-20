@@ -26,12 +26,12 @@
 #     -var="enable_discovery=true" \
 #     -var="discovery_scope_mode=local-interfaces"
 #
-#   Update inventory.local.ini with public IPs for agent-b (= [server] + [node_a]),
-#   agent-c (= [node_b]), and agent-d (= [node_c]). coordinator_ip=10.50.20.10.
-#   Wait ~3 min for cloud-init to complete before running this playbook.
+#   Wait ~3 min for cloud-init to complete, then verify the dynamic inventory:
+#     ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph
+#   Expected groups: server (agent-b), node_a (agent-b), node_b (agent-c), node_c (agent-d).
 #
-#   ansible-playbook -i ansible/inventory.local.ini \
-#     ansible/validate-gate-l3-icmp-stimulus.yml
+#   ansible-playbook -i examples/aws-lab/ansible/aws_ec2.yml \
+#     examples/aws-lab/ansible/validate-gate-l3-icmp-stimulus.yml
 #
 # Evidence collected (maps to Issue #87 acceptance criteria):
 #   1. Packet observer active:  physarum-packet-observer systemd service running
