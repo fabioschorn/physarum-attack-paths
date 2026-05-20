@@ -241,10 +241,11 @@ resource "aws_security_group_rule" "agent_c_ssh" {
 # Mode 2: remove agent_d_from_b to block B->D probes
 resource "aws_security_group_rule" "agent_d_from_b" {
   # phase1: full-mesh probe; gate-l2: A (agent_b) probes discovered node C (agent_d:9003).
-  count = contains(["phase1", "gate-l2"], var.lab_phase) ? 1 : 0
+  # gate-l3: A (agent_b) probes ICMP-discovered node C (agent_d:9003) after ICMP seed loop triggers scan.
+  count = contains(["phase1", "gate-l2", "gate-l3"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe from agent-b (phase1: full-mesh; gate-l2: A probes discovered node C)"
+  description              = "Probe from agent-b (phase1: full-mesh; gate-l2/gate-l3: A probes discovered node C)"
   from_port                = 9003
   to_port                  = 9003
   protocol                 = "tcp"

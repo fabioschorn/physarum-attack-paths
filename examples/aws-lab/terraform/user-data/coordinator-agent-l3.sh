@@ -4,7 +4,7 @@ set -euxo pipefail
 # Gate L.3 bootstrap — combined coordinator + agent + packet observer on node A.
 # physarum-server starts first; physarum-agent connects to localhost:8080.
 # physarum-packet-observer runs as root when enable_packet_observer=true,
-# attaching tc ingress on eth0 to capture inbound ICMP echo requests.
+# attaching tc ingress on ens5 (AL2023 predictable interface name) to capture inbound ICMP echo requests.
 #
 # Terraform-injected variables (substituted by templatefile() at apply time):
 #   agent_id                 = ${agent_id}
@@ -56,7 +56,10 @@ fi
 
 # Gate L.3: ICMP packet sensing enabled, TCP socket-state sensing disabled.
 # Both can be enabled together; for the gate-l3 lab we isolate ICMP-only.
-SENSE_FLAGS="--sense-tcp-socket-state false --sense-icmp-packet true"
+# clap v4 bool flags with default_value_t use SetTrue action — no value accepted.
+# Use --sense-icmp-packet (toggle) and env var to disable TCP state sensing.
+SENSE_FLAGS="--sense-icmp-packet"
+export PHYSARUM_SENSE_TCP_SOCKET_STATE=false
 
 dnf update -y
 dnf install -y jq iproute-tc
@@ -244,7 +247,7 @@ ExecStart=/usr/local/bin/physarum-packet-observer \
   --agent-id $AGENT_ID \
   --coordinator-url http://127.0.0.1:8080 \
   --bpf-bytecode /usr/local/lib/physarum/physarum-packet-observer-ebpf \
-  --interface eth0 \
+  --interface ens5 \
   --log-level info
 Restart=on-failure
 RestartSec=10
@@ -256,7 +259,7 @@ UNIT
     systemctl daemon-reload
     systemctl enable physarum-packet-observer
     systemctl start physarum-packet-observer
-    echo "physarum bootstrap: physarum-packet-observer started (tc ingress on eth0)"
+    echo "physarum bootstrap: physarum-packet-observer started (tc ingress on ens5)"
   else
     echo "physarum bootstrap: enable_packet_observer=true but enable_artifact_download=false — packet observer not started"
   fi
