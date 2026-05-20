@@ -195,38 +195,103 @@ if [ "$SKIP_BUILD" = true ]; then
     fi
   done
 else
-  mkdir -p "$TARGET_DIR"
-  info "Iniciando build Docker (primeira execução pode demorar)"
-  info "Cache do target preservado em: $TARGET_DIR"
-
-  BUILD_CMD=(
-    docker run --rm
-    --platform linux/amd64
-    -v "${PROJECT_ROOT}:/workspace:ro"
-    -v "${TARGET_DIR}:/target"
-    -e "CARGO_TARGET_DIR=/target"
-    -w /workspace
-    "$DOCKER_IMAGE"
-    bash -c "
-      set -euxo pipefail
-      apt-get update -qq && apt-get install -y --no-install-recommends gcc libc6-dev 2>&1
-      cargo build --release -p physarum-agent -p physarum-server -p physarum-packet-observer 2>&1
-    "
-  )
-
-  echo ""
-  echo -e "  ${BOLD}Executando build Docker (builder: $BUILDER)...${NC}"
-  echo ""
+  mkdir -p "$TARGET_DIR/release"
 
   build_start=$(date +%s)
-  if [ "$DRY_RUN" = true ]; then
-    echo -e "  ${YELLOW}[DRY-RUN]${NC} ${BUILD_CMD[*]}"
-  else
-    if "${BUILD_CMD[@]}"; then
-      pass "Build Docker concluído em $(elapsed "$build_start")"
+  echo ""
+
+  if [ "$BUILDER" != "default" ]; then
+    # ── Docker Build Cloud path ────────────────────────────────────────────────
+    # docker buildx build --builder sends the build to the cloud builder.
+    # Binaries are extracted locally via --output type=local.
+    info "Usando Docker Build Cloud: $BUILDER"
+    info "Enviando contexto e compilando no cloud (primeira execução pode demorar)"
+
+    TMP_DOCKERFILE=$(mktemp "${TMPDIR:-/tmp}/Dockerfile.gate-l3.XXXXXX")
+    cat > "$TMP_DOCKERFILE" <<'DOCKERFILE_CONTENT'
+FROM rust:1-slim-bookworm AS builder
+RUN apt-get update -qq && apt-get install -y --no-install-recommends gcc libc6-dev
+WORKDIR /workspace
+COPY . .
+RUN cargo build --release \
+    -p physarum-agent \
+    -p physarum-server \
+    -p physarum-packet-observer
+
+FROM scratch AS export
+COPY --from=builder /workspace/target/release/physarum-agent .
+COPY --from=builder /workspace/target/release/physarum-server .
+COPY --from=builder /workspace/target/release/physarum-packet-observer .
+DOCKERFILE_CONTENT
+
+    # Create a temporary .dockerignore to avoid sending target/ to the cloud.
+    CREATED_DOCKERIGNORE=false
+    if [ ! -f "${PROJECT_ROOT}/.dockerignore" ]; then
+      cat > "${PROJECT_ROOT}/.dockerignore" <<'DOCKERIGNORE_CONTENT'
+target/
+.git/
+.claude/
+*.local.ini
+*.local.json
+.keys/
+DOCKERIGNORE_CONTENT
+      CREATED_DOCKERIGNORE=true
+    fi
+
+    CLOUD_BUILD_CMD=(
+      docker buildx build
+      --builder "$BUILDER"
+      --platform linux/amd64
+      --output "type=local,dest=${TARGET_DIR}/release"
+      --target export
+      -f "$TMP_DOCKERFILE"
+      "$PROJECT_ROOT"
+    )
+
+    if [ "$DRY_RUN" = true ]; then
+      echo -e "  ${YELLOW}[DRY-RUN]${NC} ${CLOUD_BUILD_CMD[*]}"
     else
-      fail "Build Docker falhou — verifique a saída acima"
-      exit 1
+      if "${CLOUD_BUILD_CMD[@]}" 2>&1 | sed 's/^/    /'; then
+        pass "Docker Build Cloud concluído em $(elapsed "$build_start")"
+      else
+        fail "Build Docker Build Cloud falhou — verifique a saída acima"
+        [ "$CREATED_DOCKERIGNORE" = true ] && rm -f "${PROJECT_ROOT}/.dockerignore"
+        rm -f "$TMP_DOCKERFILE"
+        exit 1
+      fi
+      [ "$CREATED_DOCKERIGNORE" = true ] && rm -f "${PROJECT_ROOT}/.dockerignore"
+    fi
+    rm -f "$TMP_DOCKERFILE"
+
+  else
+    # ── Local Docker fallback (docker run com volume mounts) ──────────────────
+    info "Usando builder local (docker run): $DOCKER_IMAGE"
+    info "Cache do target preservado em: $TARGET_DIR"
+
+    BUILD_CMD=(
+      docker run --rm
+      --platform linux/amd64
+      -v "${PROJECT_ROOT}:/workspace:ro"
+      -v "${TARGET_DIR}:/target"
+      -e "CARGO_TARGET_DIR=/target"
+      -w /workspace
+      "$DOCKER_IMAGE"
+      bash -c "
+        set -euxo pipefail
+        apt-get update -qq && apt-get install -y --no-install-recommends gcc libc6-dev 2>&1
+        cargo build --release -p physarum-agent -p physarum-server -p physarum-packet-observer 2>&1
+      "
+    )
+
+    if [ "$DRY_RUN" = true ]; then
+      echo -e "  ${YELLOW}[DRY-RUN]${NC} ${BUILD_CMD[*]}"
+    else
+      if "${BUILD_CMD[@]}"; then
+        pass "Build Docker local concluído em $(elapsed "$build_start")"
+      else
+        fail "Build Docker local falhou — verifique a saída acima"
+        exit 1
+      fi
     fi
   fi
 
@@ -264,30 +329,64 @@ if [ "$SKIP_BUILD" = true ]; then
     errors=$((errors + 1))
   fi
 else
-  info "Compilando $EBPF_BYTECODE com nightly + bpfel-unknown-none em container Linux"
+  # Use docker buildx build (cloud builder if available) to compile the eBPF bytecode.
+  # Use PROJECT_ROOT as context (same as section 5) with -f - (stdin heredoc) to avoid
+  # temp files in /private/tmp which cause xattr permission errors on macOS + Docker Desktop.
+  # The inline Dockerfile overrides rust-toolchain.toml to remove `targets = ["bpfel-unknown-none"]`
+  # because that target has no prebuilt rust-std; we compile std from source with -Z build-std=core.
+  info "Compilando $EBPF_BYTECODE via docker buildx (builder: $BUILDER)"
 
-  EBPF_BUILD_CMD=(
-    docker run --rm
-    --platform linux/amd64
-    -v "${PROJECT_ROOT}:/workspace:ro"
-    -v "${EBPF_DIR}/target:/ebpf-target"
-    -w /workspace/crates/physarum-packet-observer-ebpf
-    rustlang/rust:nightly-slim
-    bash -c "
-      set -euxo pipefail
-      rustup target add bpfel-unknown-none 2>&1
-      CARGO_TARGET_DIR=/ebpf-target cargo +nightly build --release \
-        --target bpfel-unknown-none \
-        -Z build-std=core 2>&1
-    "
-  )
+  mkdir -p "$EBPF_OUT_DIR"
+
+  CREATED_DOCKERIGNORE_EBPF=false
+  if [ ! -f "${PROJECT_ROOT}/.dockerignore" ]; then
+    cat > "${PROJECT_ROOT}/.dockerignore" <<'DOCKERIGNORE_CONTENT'
+target/
+.git/
+.claude/
+*.local.ini
+*.local.json
+.keys/
+DOCKERIGNORE_CONTENT
+    CREATED_DOCKERIGNORE_EBPF=true
+  fi
 
   ebpf_start=$(date +%s)
   if [ "$DRY_RUN" = true ]; then
-    echo -e "  ${YELLOW}[DRY-RUN]${NC} ${EBPF_BUILD_CMD[*]}"
+    echo -e "  ${YELLOW}[DRY-RUN]${NC} docker buildx build --builder $BUILDER --platform linux/amd64 --output type=local,dest=${EBPF_OUT_DIR} --target export -f - ${PROJECT_ROOT} <<HEREDOC"
   else
-    mkdir -p "$EBPF_DIR/target"
-    if "${EBPF_BUILD_CMD[@]}"; then
+    # Use exit-code capture outside the if condition to avoid bash heredoc-in-if parsing issues.
+    _ebpf_exit=0
+    docker buildx build \
+        --builder "$BUILDER" \
+        --platform linux/amd64 \
+        --output "type=local,dest=${EBPF_OUT_DIR}" \
+        --target export \
+        -f - \
+        "$PROJECT_ROOT" 2>&1 <<'EBPF_DOCKERFILE' | sed 's/^/    /' || _ebpf_exit=$?
+FROM debian:bookworm-slim AS ebpf-builder
+# LLVM 14 is in bookworm's default repos; bpf-linker 0.9.13 uses llvm-sys 140.x.
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+        curl ca-certificates gcc libc6-dev llvm-14 libclang-14-dev && \
+    rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- --default-toolchain nightly --component rust-src --no-modify-path -y
+ENV PATH="/root/.cargo/bin:${PATH}" \
+    RUSTUP_HOME="/root/.rustup" \
+    CARGO_HOME="/root/.cargo" \
+    LLVM_SYS_140_PREFIX="/usr/lib/llvm-14"
+RUN cargo install bpf-linker@0.9.13
+WORKDIR /build
+COPY crates/physarum-packet-observer-ebpf/Cargo.toml ./Cargo.toml
+COPY crates/physarum-packet-observer-ebpf/src ./src
+RUN RUSTUP_TOOLCHAIN=nightly cargo build --release --target bpfel-unknown-none -Z build-std=core
+
+FROM scratch AS export
+COPY --from=ebpf-builder /build/target/bpfel-unknown-none/release/physarum-packet-observer-ebpf .
+EBPF_DOCKERFILE
+
+    if [ "$_ebpf_exit" -eq 0 ]; then
       pass "eBPF bytecode compilado em $(elapsed "$ebpf_start")"
       if [ -f "$EBPF_BYTECODE_PATH" ]; then
         SIZE=$(du -sh "$EBPF_BYTECODE_PATH" | awk '{print $1}')
@@ -297,9 +396,11 @@ else
         errors=$((errors + 1))
       fi
     else
-      fail "Build eBPF falhou — verifique a saída acima"
+      fail "Build eBPF falhou (código $_ebpf_exit) — verifique a saída acima"
+      [ "$CREATED_DOCKERIGNORE_EBPF" = true ] && rm -f "${PROJECT_ROOT}/.dockerignore"
       exit 1
     fi
+    [ "$CREATED_DOCKERIGNORE_EBPF" = true ] && rm -f "${PROJECT_ROOT}/.dockerignore"
   fi
 fi
 
@@ -379,18 +480,16 @@ if [ "$errors" -eq 0 ]; then
   echo ""
   echo -e "${BOLD}Passo 2 — aguardar cloud-init (~3 min), depois validar com Ansible:${NC}"
   echo ""
-  echo "  # Obter IPs públicos:"
-  echo '  terraform output 2>&1 | grep public_ip'
+  echo "  # Verificar instâncias descobertas pelo inventário dinâmico:"
+  echo "  ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph"
   echo ""
-  echo "  # Atualizar examples/aws-lab/ansible/inventory.local.ini com os IPs acima"
-  echo ""
-  echo -e "${BOLD}Passo 3 — validação Gate L.3 (ansible):${NC}"
+  echo -e "${BOLD}Passo 3 — validação Gate L.3 (ansible, inventário dinâmico):${NC}"
   echo ""
   echo "  cd $PROJECT_ROOT"
-  echo "  ansible-playbook -i examples/aws-lab/ansible/inventory.local.ini \\"
+  echo "  ansible-playbook -i examples/aws-lab/ansible/aws_ec2.yml \\"
   echo "    examples/aws-lab/ansible/validate-gate-l3-icmp-stimulus.yml"
   echo ""
-  echo -e "${BOLD}Passo 4 — destruir lab ao terminar:${NC}"
+  echo -e "${BOLD}Passo 4 — destruir lab ao terminar (sempre):${NC}"
   echo ""
   echo "  cd $PROJECT_ROOT/examples/aws-lab/terraform"
   echo "  terraform destroy \\"
