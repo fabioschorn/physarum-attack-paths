@@ -99,6 +99,14 @@ struct Cli {
         env = "PHYSARUM_DISCOVERY_SCOPE_MODE"
     )]
     discovery_scope_mode: DiscoveryScopeMode,
+
+    /// Enable TCP socket-state sensing via eBPF flow-observations (Gate L.2). Default: true.
+    #[arg(long, default_value_t = true, env = "PHYSARUM_SENSE_TCP_SOCKET_STATE")]
+    sense_tcp_socket_state: bool,
+
+    /// Enable ICMP packet-level sensing via packet-observations (Gate L.3). Default: false.
+    #[arg(long, default_value_t = false, env = "PHYSARUM_SENSE_ICMP_PACKET")]
+    sense_icmp_packet: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -305,7 +313,11 @@ async fn probe_loop(
     // This proves the data path: discovery finds sockets → probe validates them →
     // only then do graph edges appear. Without this, empty probe_targets would fall
     // back to probe-all, mixing up discovery evidence with default behavior.
-    let use_discovery_filter = cli.discovery_enabled && target_filter.is_empty();
+    // Also filter when sense_icmp_packet is active without scheduled sweeps: the ICMP seed
+    // loop populates discovered_sockets, and the probe loop must wait for it to do so
+    // before promoting any peer — otherwise probes fire before ICMP-triggered discovery.
+    let use_discovery_filter =
+        (cli.discovery_enabled || cli.sense_icmp_packet) && target_filter.is_empty();
     let mut ever_promoted: HashSet<String> = HashSet::new();
 
     loop {
@@ -498,7 +510,60 @@ async fn main() {
                     discovered_sockets.clone(),
                 ));
 
-                tokio::spawn(discovery::ebpf_seed_loop(
+                if cli.sense_tcp_socket_state {
+                    tokio::spawn(discovery::ebpf_seed_loop(
+                        config.clone(),
+                        disc.clone(),
+                        cli.id.clone(),
+                        cli.coordinator.clone(),
+                        client.clone(),
+                        seed_queue.clone(),
+                        discovered_sockets.clone(),
+                        own_ip,
+                    ));
+                }
+
+                if cli.sense_icmp_packet {
+                    tokio::spawn(discovery::icmp_seed_loop(
+                        config,
+                        disc,
+                        cli.id.clone(),
+                        cli.coordinator.clone(),
+                        client.clone(),
+                        seed_queue,
+                        discovered_sockets.clone(),
+                        own_ip,
+                    ));
+                }
+            }
+        }
+    } else if cli.sense_icmp_packet {
+        // ICMP-only mode: no scheduled sweeps (discovery_enabled=false), but the ICMP seed
+        // loop still needs to run so inbound echo-requests drive exact-host /32 scans.
+        // Derive CIDRs from local interfaces to filter which source IPs are in scope.
+        let cidrs = discovery::derive_local_rfc1918_cidrs();
+        match discovery::validate_rfc1918(&cidrs) {
+            Err(e) => {
+                tracing::error!(error = %e, "ICMP-only: invalid local-interface scope; ICMP seed loop disabled")
+            }
+            Ok(()) => {
+                let config = Arc::new(DiscoveryConfig {
+                    cidrs,
+                    ports: parse_ports(&cli.discovery_ports),
+                    timeout_ms: cli.discovery_timeout_ms,
+                    max_candidates: cli.discovery_max_candidates,
+                    interval_secs: cli.discovery_interval_secs,
+                    seed_cooldown_secs: cli.discovery_seed_cooldown_secs,
+                });
+                let disc: Arc<dyn CandidateDiscovery> = Arc::new(RustScanDiscovery);
+                let own_ip: Option<std::net::IpAddr> = cli.advertise_address.parse().ok();
+                let seed_queue = Arc::new(DiscoverySeedQueue::new(Duration::from_secs(
+                    cli.discovery_seed_cooldown_secs,
+                )));
+                tracing::info!(
+                    "ICMP-only discovery: scheduled sweeps disabled; ICMP seed loop active"
+                );
+                tokio::spawn(discovery::icmp_seed_loop(
                     config,
                     disc,
                     cli.id.clone(),
@@ -537,6 +602,8 @@ mod tests {
             discovery_timeout_ms: 1500,
             discovery_seed_cooldown_secs: 300,
             discovery_scope_mode: DiscoveryScopeMode::Explicit,
+            sense_tcp_socket_state: true,
+            sense_icmp_packet: false,
         }
     }
 

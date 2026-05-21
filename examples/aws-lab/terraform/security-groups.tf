@@ -130,13 +130,13 @@ resource "aws_security_group_rule" "server_a_ssh" {
 
 # ── Agent B ingress rules ─────────────────────────────────────────────────────
 
-# gate-l2: agent-b hosts physarum-server; the outer /24 must reach port 8080.
+# gate-l2/gate-l3: agent-b hosts physarum-server; the outer /24 must reach port 8080.
 # agent-b itself (127.0.0.1) bypasses the SG; agent-c and agent-d are in 10.50.20.0/24.
 resource "aws_security_group_rule" "agent_b_coordinator_port" {
-  count = var.lab_phase == "gate-l2" ? 1 : 0
+  count = contains(["gate-l2", "gate-l3"], var.lab_phase) ? 1 : 0
 
   type              = "ingress"
-  description       = "Coordinator port gate-l2: A hosts physarum-server, outer subnet only"
+  description       = "Coordinator port gate-l2/gate-l3: A hosts physarum-server, outer subnet only"
   from_port         = 8080
   to_port           = 8080
   protocol          = "tcp"
@@ -156,14 +156,40 @@ resource "aws_security_group_rule" "agent_b_from_c" {
 }
 
 resource "aws_security_group_rule" "agent_b_from_d" {
-  # phase1: full-mesh probe; gate-l2: C (agent_d) sends inbound TCP stimulus to A (agent_b).
-  count = contains(["phase1", "gate-l2"], var.lab_phase) ? 1 : 0
+  # phase1: full-mesh probe; gate-l2/gate-l3: C (agent_d) sends stimulus to A (agent_b).
+  count = contains(["phase1", "gate-l2", "gate-l3"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe/stimulus from agent-d (phase1: full-mesh; gate-l2: inbound TCP stimulus from node C)"
+  description              = "Probe/stimulus from agent-d (phase1: full-mesh; gate-l2: TCP stimulus; gate-l3: ICMP stimulus)"
   from_port                = 9001
   to_port                  = 9001
   protocol                 = "tcp"
+  source_security_group_id = aws_security_group.agent_d.id
+  security_group_id        = aws_security_group.agent_b.id
+}
+
+# gate-l3: allow ICMP echo request from B and C (stimulus nodes) to A (observer).
+# tc ingress on A captures these packets via the eBPF classifier.
+resource "aws_security_group_rule" "agent_b_icmp_from_c" {
+  count = var.lab_phase == "gate-l3" ? 1 : 0
+
+  type                     = "ingress"
+  description              = "ICMP echo request from agent-c (Gate L.3 stimulus)"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
+  source_security_group_id = aws_security_group.agent_c.id
+  security_group_id        = aws_security_group.agent_b.id
+}
+
+resource "aws_security_group_rule" "agent_b_icmp_from_d" {
+  count = var.lab_phase == "gate-l3" ? 1 : 0
+
+  type                     = "ingress"
+  description              = "ICMP echo request from agent-d (Gate L.3 stimulus)"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = aws_security_group.agent_d.id
   security_group_id        = aws_security_group.agent_b.id
 }
@@ -215,10 +241,11 @@ resource "aws_security_group_rule" "agent_c_ssh" {
 # Mode 2: remove agent_d_from_b to block B->D probes
 resource "aws_security_group_rule" "agent_d_from_b" {
   # phase1: full-mesh probe; gate-l2: A (agent_b) probes discovered node C (agent_d:9003).
-  count = contains(["phase1", "gate-l2"], var.lab_phase) ? 1 : 0
+  # gate-l3: A (agent_b) probes ICMP-discovered node C (agent_d:9003) after ICMP seed loop triggers scan.
+  count = contains(["phase1", "gate-l2", "gate-l3"], var.lab_phase) ? 1 : 0
 
   type                     = "ingress"
-  description              = "Probe from agent-b (phase1: full-mesh; gate-l2: A probes discovered node C)"
+  description              = "Probe from agent-b (phase1: full-mesh; gate-l2/gate-l3: A probes discovered node C)"
   from_port                = 9003
   to_port                  = 9003
   protocol                 = "tcp"

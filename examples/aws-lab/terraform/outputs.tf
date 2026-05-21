@@ -10,12 +10,12 @@ output "lab_mode" {
 
 output "server_public_ip" {
   description = "Public IP of physarum coordinator — server-a for most phases; agent-b for gate-l2"
-  value       = var.lab_phase == "gate-l2" ? aws_instance.agent_b.public_ip : aws_instance.server_a[0].public_ip
+  value       = contains(["gate-l2", "gate-l3"], var.lab_phase) ? aws_instance.agent_b.public_ip : aws_instance.server_a[0].public_ip
 }
 
 output "server_private_ip" {
   description = "Private IP of physarum coordinator"
-  value       = var.lab_phase == "gate-l2" ? aws_instance.agent_b.private_ip : aws_instance.server_a[0].private_ip
+  value       = contains(["gate-l2", "gate-l3"], var.lab_phase) ? aws_instance.agent_b.private_ip : aws_instance.server_a[0].private_ip
 }
 
 output "agent_b_public_ip" {
@@ -60,20 +60,29 @@ output "agent_e_private_ip" {
 
 output "ssh_coordinator" {
   description = "SSH command to connect to the coordinator (server-a for most phases; agent-b for gate-l2)"
-  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@${var.lab_phase == "gate-l2" ? aws_instance.agent_b.public_ip : aws_instance.server_a[0].public_ip}"
+  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@${contains(["gate-l2", "gate-l3"], var.lab_phase) ? aws_instance.agent_b.public_ip : aws_instance.server_a[0].public_ip}"
 }
 
 output "ssh_tunnel_8080" {
   description = "SSH tunnel command — forwards coordinator:8080 to localhost:18080 for manual curl"
-  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead -L 18080:127.0.0.1:8080 ec2-user@${var.lab_phase == "gate-l2" ? aws_instance.agent_b.public_ip : aws_instance.server_a[0].public_ip}"
+  value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead -L 18080:127.0.0.1:8080 ec2-user@${contains(["gate-l2", "gate-l3"], var.lab_phase) ? aws_instance.agent_b.public_ip : aws_instance.server_a[0].public_ip}"
 }
 
 output "ansible_run" {
-  description = "Ansible validation command after generating inventory from terraform output"
-  value       = "ansible-playbook -i examples/aws-lab/ansible/inventory.local.ini examples/aws-lab/ansible/validate-runtime.yml"
+  description = "Ansible validation command — uses dynamic inventory for gate-l2/gate-l3, static otherwise"
+  value = contains(["gate-l2", "gate-l3"], var.lab_phase) ? (
+    "ansible-playbook -i examples/aws-lab/ansible/aws_ec2.yml examples/aws-lab/ansible/validate-gate-l3-icmp-stimulus.yml"
+  ) : (
+    "ansible-playbook -i examples/aws-lab/ansible/inventory.local.ini examples/aws-lab/ansible/validate-runtime.yml"
+  )
 }
 
 output "ansible_weighted_paths" {
   description = "Ansible weighted-paths validation command (weighted-paths phase only)"
   value       = "ansible-playbook -i examples/aws-lab/ansible/inventory.local.ini examples/aws-lab/ansible/validate-weighted-paths-aws.yml"
+}
+
+output "ansible_dynamic_inventory_check" {
+  description = "Check dynamic inventory groups after terraform apply (gate-l2/gate-l3 only)"
+  value       = contains(["gate-l2", "gate-l3"], var.lab_phase) ? "ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph" : null
 }

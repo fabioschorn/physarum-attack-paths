@@ -77,13 +77,13 @@ fn handle(ctx: &TcContext) -> Result<(), i64> {
     // `ctx.load::<u16>` reads two bytes in network byte order (big-endian).
     // On the little-endian bpfel target we must call `u16::from_be` to
     // compare against the host-order constant ETH_P_IP.
-    let ethertype: u16 = unsafe { ctx.load(OFF_ETHERTYPE)? };
+    let ethertype: u16 = ctx.load(OFF_ETHERTYPE)?;
     if u16::from_be(ethertype) != ETH_P_IP {
         return Ok(());
     }
 
     // ── 2. Check IP protocol == ICMP ─────────────────────────────────────────
-    let proto: u8 = unsafe { ctx.load(ETH_HLEN + IP_OFF_PROTO)? };
+    let proto: u8 = ctx.load(ETH_HLEN + IP_OFF_PROTO)?;
     if proto != IPPROTO_ICMP {
         return Ok(());
     }
@@ -91,17 +91,17 @@ fn handle(ctx: &TcContext) -> Result<(), i64> {
     // ── 3. Read source and destination IPv4 ──────────────────────────────────
     //
     // Stored in network byte order (big-endian) — correct for Ipv4Addr::from().
-    let src_addr: [u8; 4] = unsafe { ctx.load(ETH_HLEN + IP_OFF_SADDR)? };
-    let dst_addr: [u8; 4] = unsafe { ctx.load(ETH_HLEN + IP_OFF_DADDR)? };
+    let src_addr: [u8; 4] = ctx.load(ETH_HLEN + IP_OFF_SADDR)?;
+    let dst_addr: [u8; 4] = ctx.load(ETH_HLEN + IP_OFF_DADDR)?;
 
     // ── 4. Check ICMP type == echo_request (8) ────────────────────────────────
     let icmp_base = ETH_HLEN + IP_HLEN;
-    let icmp_type: u8 = unsafe { ctx.load(icmp_base + ICMP_OFF_TYPE)? };
+    let icmp_type: u8 = ctx.load(icmp_base + ICMP_OFF_TYPE)?;
     if icmp_type != ICMP_ECHO_REQUEST {
         return Ok(());
     }
 
-    let icmp_code: u8 = unsafe { ctx.load(icmp_base + ICMP_OFF_CODE)? };
+    let icmp_code: u8 = ctx.load(icmp_base + ICMP_OFF_CODE)?;
 
     // ── 5. Emit event to ring buffer ──────────────────────────────────────────
     let event = IcmpEvent {
