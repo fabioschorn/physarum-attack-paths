@@ -195,15 +195,15 @@
       ansible.builtin.assert:
         that: >
           before_path_a_b.status == 404 or
-          'agent-c' not in before_path_a_b.content
-        fail_msg: "Expected no A→B path before ICMP stimulus. Got status={{ before_path_a_b.status }} body={{ before_path_a_b.content }}"
+          (before_path_a_b.content | from_json).paths | length == 0
+        fail_msg: "Expected no A→B path before ICMP stimulus (paths must be empty). Got status={{ before_path_a_b.status }} body={{ before_path_a_b.content }}"
 
     - name: Assert path A→C absent before stimulus
       ansible.builtin.assert:
         that: >
           before_path_a_c.status == 404 or
-          'agent-d' not in before_path_a_c.content
-        fail_msg: "Expected no A→C path before ICMP stimulus. Got status={{ before_path_a_c.status }} body={{ before_path_a_c.content }}"
+          (before_path_a_c.content | from_json).paths | length == 0
+        fail_msg: "Expected no A→C path before ICMP stimulus (paths must be empty). Got status={{ before_path_a_c.status }} body={{ before_path_a_c.content }}"
 
 # ── Evidence 3: ICMP stimulus — B and C ping A ───────────────────────────────
 
