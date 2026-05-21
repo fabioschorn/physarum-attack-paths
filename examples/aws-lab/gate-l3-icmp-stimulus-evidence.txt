@@ -4,176 +4,186 @@ Gate L.3 — ICMP Packet-Level Sensing Evidence
 Lab phase   : gate-l3
 Issue       : #87
 PR          : feat/gate-l3-pr2-agent-icmp-seed-lab
-Date        : 2026-05-20
+Date        : (to be filled after AWS lab run)
 AWS account : 168740128169 (authorized lab account only)
 Topology    :
-  agent-b   : 10.50.20.10  (node A — coordinator + packet observer)
+  agent-b   : 10.50.20.10  (node A — coordinator + packet observer, ICMP-only discovery)
   agent-c   : 10.50.20.20  (node B — ICMP stimulus host)
   agent-d   : 10.50.20.30  (node C — ICMP stimulus host)
 
-Build info
-----------
-  Binaries built  : physarum-agent, physarum-server, physarum-packet-observer
-  eBPF bytecode   : physarum-packet-observer-ebpf (tc ingress, bpfel-unknown-none)
-  S3 prefix       : gate-l3/8cd82b99f6ed5f5e08d0cbb2d500503f6c91eb27
-  cargo xtask     : build-ebpf-packet --release
-  eBPF bytecode path: crates/physarum-packet-observer-ebpf/target/bpfel-unknown-none/release/physarum-packet-observer-ebpf
+Key lab parameters (ICMP-only mode):
+  enable_discovery=false  — no scheduled sweeps; ICMP seed loop is the sole discovery path
+  sense_icmp_packet=true  — ICMP seed loop active; inbound echo-request → /32 exact-host scan
+  use_discovery_filter    — probe loop restricted to ICMP-discovered sockets only
 
-Command run
------------
-  ansible-playbook -i examples/aws-lab/ansible/aws_ec2.yml \
-    examples/aws-lab/ansible/validate-gate-l3-icmp-stimulus.yml
+─────────────────────────────────────────────────────────────────────────────────
 
-PLAY RECAP (all hosts, all tasks passed):
-  3.86.184.153  : ok=3   changed=1  unreachable=0  failed=0  skipped=0  rescued=0  ignored=0
-  52.90.177.194 : ok=54  changed=3  unreachable=0  failed=0  skipped=0  rescued=0  ignored=0
-  52.91.89.41   : ok=3   changed=1  unreachable=0  failed=0  skipped=0  rescued=0  ignored=0
+Section 1 — Build and deploy (./Utilities/deploy-gate-l3.sh)
+-------------------------------------------------------------
+Builder used      : (to be filled — cloud-fs09-physarum-attack-paths or local docker)
+Binaries built    :
+  physarum-agent
+  physarum-server
+  physarum-packet-observer
+eBPF bytecode     : physarum-packet-observer-ebpf (bpfel-unknown-none)
+S3 upload prefix  : (to be filled — s3://physarum-artifacts-168740128169/gate-l3/<commit>/)
+
+Raw deploy output:
+  (to be filled with ./Utilities/deploy-gate-l3.sh stdout)
+
+─────────────────────────────────────────────────────────────────────────────────
+
+Section 2 — terraform apply (lab_phase=gate-l3, enable_discovery=false)
+------------------------------------------------------------------------
+Command:
+  terraform apply \
+    -var="lab_phase=gate-l3" \
+    -var="operator_cidr=$(curl -s -4 ifconfig.me)/32" \
+    -var="ami_id_override=<ami-id>" \
+    -var="enable_artifact_download=true" \
+    -var="artifact_bucket=physarum-artifacts-168740128169" \
+    -var="artifact_prefix=gate-l3/<commit>" \
+    -var="enable_packet_observer=true" \
+    -var="enable_discovery=false" \
+    -var="discovery_scope_mode=local-interfaces" \
+    -auto-approve
+
+Expected topology confirmation:
+  server_a          : not created (gate-l3 phase)
+  agent_b_public_ip : (to be filled)   private: 10.50.20.10
+  agent_c_public_ip : (to be filled)   private: 10.50.20.20
+  agent_d_public_ip : (to be filled)   private: 10.50.20.30
+
+Raw terraform apply output (tail):
+  (to be filled — "Apply complete! Resources: N added, 0 changed, 0 destroyed.")
+
+─────────────────────────────────────────────────────────────────────────────────
+
+Section 3 — Dynamic inventory (ansible-inventory --graph)
+---------------------------------------------------------
+Command:
+  ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph
+
+Expected groups:
+  @server:    → agent-b (node A)
+  @node_a:    → agent-b (node A)
+  @node_b:    → agent-c (node B)
+  @node_c:    → agent-d (node C)
+  @role_stimulus: → agent-c, agent-d
+
+Raw inventory graph output:
+  (to be filled — paste ansible-inventory --graph output here)
 
 ─────────────────────────────────────────────────────────────────────────────────
 
 Evidence 1 — Agents registered and packet observer active on node A
 --------------------------------------------------------------------
-
-Registered agents (GET /agents):
-  [
-    { "agent_id": "agent-c", "address": "10.50.20.20", "probe_port": 9002, "last_seen": "2026-05-20T01:29:54.081456605Z" },
-    { "agent_id": "agent-b", "address": "10.50.20.10", "probe_port": 9001, "last_seen": "2026-05-20T01:29:54.060945135Z" },
-    { "agent_id": "agent-d", "address": "10.50.20.30", "probe_port": 9003, "last_seen": "2026-05-20T01:29:54.061929451Z" }
-  ]
-
-Assertions: agent-b registered ✔  agent-c registered ✔  agent-d registered ✔
-
-physarum-packet-observer journal (last successful startup lines):
-  2026-05-20T01:29:54.080667Z  INFO physarum_packet_observer: physarum-packet-observer starting agent_id=agent-b coordinator=http://127.0.0.1:8080 interface=ens5 dry_run=false
-  2026-05-20T01:29:54.117882Z  WARN physarum_packet_observer::observer: clsact qdisc may already exist (safe to ignore on restart): File exists (os error 17) interface=ens5
-  2026-05-20T01:29:54.141720Z  INFO physarum_packet_observer::observer: packet observer attached to tc ingress agent_id=agent-b interface=ens5 dry_run=false
-
-Assert "packet observer attached to tc ingress" in journal ✔
+  (to be filled with Ansible output after lab run)
+  Expected: agent-b, agent-c, agent-d registered in GET /agents
+  Expected: physarum-packet-observer systemd service active on node A
+  Expected: "packet observer attached to tc ingress" on interface=ens5 in journal
 
 ─────────────────────────────────────────────────────────────────────────────────
 
-Evidence 2 — BEFORE snapshot (no ICMP observations after baseline timestamp)
------------------------------------------------------------------------------
+Evidence 2 — BEFORE snapshot (no observations, no candidates, no graph edges, no paths)
+---------------------------------------------------------------------------------------
+  baseline_time : (to be filled)
 
-Baseline timestamp: 2026-05-20T01:31:44Z
+  Expected: GET /packet-observations?agent_id=agent-b&protocol=icmp&since=<baseline> → []
+  Expected: GET /candidate-discoveries?agent_id=agent-b → no ebpf_icmp_echo_request entries
+  Expected: GET /graph → edges from agent-b: [] (no scheduled sweeps ran)
+  Expected: GET /paths?source=agent-b&target=agent-c → 404 (no path before ICMP)
+  Expected: GET /paths?source=agent-b&target=agent-d → 404 (no path before ICMP)
 
-GET /packet-observations?agent_id=agent-b&protocol=icmp&since=2026-05-20T01%3A31%3A44Z → []
-
-Assert no ICMP observations before stimulus ✔
-Assert no ebpf_icmp_echo_request candidates before stimulus ✔
-
-─────────────────────────────────────────────────────────────────────────────────
-
-Evidence 3 — ICMP stimulus: B and C ping node A
-------------------------------------------------
-
-From agent-c (52.91.89.41 / 10.50.20.20):
-  PING 10.50.20.10 (10.50.20.10) 56(84) bytes of data.
-  64 bytes from 10.50.20.10: icmp_seq=1 ttl=127 time=0.227 ms
-  64 bytes from 10.50.20.10: icmp_seq=2 ttl=127 time=0.258 ms
-  64 bytes from 10.50.20.10: icmp_seq=3 ttl=127 time=0.279 ms
-  --- 10.50.20.10 ping statistics ---
-  3 packets transmitted, 3 received, 0% packet loss, time 2109ms
-
-From agent-d (3.86.184.153 / 10.50.20.30):
-  PING 10.50.20.10 (10.50.20.10) 56(84) bytes of data.
-  64 bytes from 10.50.20.10: icmp_seq=1 ttl=127 time=0.257 ms
-  64 bytes from 10.50.20.10: icmp_seq=2 ttl=127 time=0.293 ms
-  64 bytes from 10.50.20.10: icmp_seq=3 ttl=127 time=0.291 ms
-  --- 10.50.20.10 ping statistics ---
-  3 packets transmitted, 3 received, 0% packet loss, time 2119ms
-
-Assert ping completed (ICMP packets sent) ✔ (both hosts)
+  (to be filled with Ansible task output)
 
 ─────────────────────────────────────────────────────────────────────────────────
 
-Evidence 4 — AFTER snapshot (packet observations appear; candidates with ebpf_icmp_echo_request trigger)
----------------------------------------------------------------------------------------------------------
+Evidence 3 — ICMP stimulus (B and C ping A)
+-------------------------------------------
+  Commands: ping -c 3 10.50.20.10 (from agent-c and agent-d simultaneously)
+  Expected: 3 packets transmitted, 3 received, 0% packet loss from each host
 
-GET /packet-observations?agent_id=agent-b&protocol=icmp&since=2026-05-20T01%3A31%3A44Z:
-  [
-    { "agent_id": "agent-b", "source_ip": "10.50.20.20", "destination_ip": "10.50.20.10", "direction": "inbound",
-      "icmp_type": "echo_request", "icmp_code": 0, "interface_name": "ens5", "observed_at": "2026-05-20T01:32:01.615901700Z", "protocol": "icmp" },
-    { "agent_id": "agent-b", "source_ip": "10.50.20.30", "destination_ip": "10.50.20.10", "direction": "inbound",
-      "icmp_type": "echo_request", "icmp_code": 0, "interface_name": "ens5", "observed_at": "2026-05-20T01:32:01.415848592Z", "protocol": "icmp" },
-    { "agent_id": "agent-b", "source_ip": "10.50.20.20", "destination_ip": "10.50.20.10", "direction": "inbound",
-      "icmp_type": "echo_request", "icmp_code": 0, "interface_name": "ens5", "observed_at": "2026-05-20T01:32:00.575775962Z", "protocol": "icmp" },
-    { "agent_id": "agent-b", "source_ip": "10.50.20.30", "destination_ip": "10.50.20.10", "direction": "inbound",
-      "icmp_type": "echo_request", "icmp_code": 0, "interface_name": "ens5", "observed_at": "2026-05-20T01:32:00.375750640Z", "protocol": "icmp" },
-    { "agent_id": "agent-b", "source_ip": "10.50.20.20", "destination_ip": "10.50.20.10", "direction": "inbound",
-      "icmp_type": "echo_request", "icmp_code": 0, "interface_name": "ens5", "observed_at": "2026-05-20T01:31:59.506693417Z", "protocol": "icmp" },
-    { "agent_id": "agent-b", "source_ip": "10.50.20.30", "destination_ip": "10.50.20.10", "direction": "inbound",
-      "icmp_type": "echo_request", "icmp_code": 0, "interface_name": "ens5", "observed_at": "2026-05-20T01:31:59.297027996Z", "protocol": "icmp" }
-  ]
-
-Assert ICMP echo_request observation from node B (10.50.20.20) ✔
-Assert ICMP echo_request observation from node C (10.50.20.30) ✔
-
-GET /candidate-discoveries?agent_id=agent-b (after 120s icmp_seed_loop poll + discovery):
-  [
-    { "ip": "10.50.20.20", "port": 9002, "protocol": "tcp", "status": "discovered",
-      "trigger": "ebpf_icmp_echo_request", "discovered_by": "agent-b", "discovered_at": "2026-05-20T01:32:05.595512783Z" },
-    { "ip": "10.50.20.10", "port": 9001, "protocol": "tcp", "status": "discovered",
-      "trigger": "scheduled",            "discovered_by": "agent-b", "discovered_at": "2026-05-20T01:29:58.577931471Z" },
-    { "ip": "10.50.20.30", "port": 9003, "protocol": "tcp", "status": "discovered",
-      "trigger": "ebpf_icmp_echo_request", "discovered_by": "agent-b", "discovered_at": "2026-05-20T01:32:05.595988287Z" }
-  ]
-
-Assert node B (10.50.20.20) present in candidates ✔
-Assert node C (10.50.20.30) present in candidates ✔
-Assert node B candidate has trigger=ebpf_icmp_echo_request ✔
-Assert node C candidate has trigger=ebpf_icmp_echo_request ✔
+  (to be filled with ping output from Ansible)
 
 ─────────────────────────────────────────────────────────────────────────────────
 
-Evidence 5 — Probe validation, graph safety, and before/after delta
---------------------------------------------------------------------
+Evidence 4 — AFTER snapshot (packet observations and candidates)
+----------------------------------------------------------------
+  Expected packet observations (GET /packet-observations since baseline):
+    { source_ip: "10.50.20.20", destination_ip: "10.50.20.10", icmp_type: "echo_request", direction: "inbound", interface_name: "ens5" }
+    { source_ip: "10.50.20.30", destination_ip: "10.50.20.10", icmp_type: "echo_request", direction: "inbound", interface_name: "ens5" }
 
-Graph (GET /graph) after probe validation:
-  nodes: ["agent-b", "agent-c", "agent-d"]
-  edges:
-    agent-b → agent-c  success_rate=1.0  sample_count=17  last_seen=2026-05-20T01:34:54.150376189Z
-    agent-b → agent-d  success_rate=1.0  sample_count=20  last_seen=2026-05-20T01:34:54.151214616Z
-    agent-c → agent-b  success_rate=1.0  sample_count=20  last_seen=2026-05-20T01:34:54.241106884Z
-    agent-c → agent-d  success_rate=1.0  sample_count=20  last_seen=2026-05-20T01:34:54.241868450Z
-    agent-d → agent-b  success_rate=1.0  sample_count=20  last_seen=2026-05-20T01:34:54.170128821Z
-    agent-d → agent-c  success_rate=1.0  sample_count=20  last_seen=2026-05-20T01:34:54.169197664Z
+  Expected candidates (GET /candidate-discoveries?agent_id=agent-b):
+    { ip: "10.50.20.20", port: 9002, trigger: "ebpf_icmp_echo_request", status: "discovered" }
+    { ip: "10.50.20.30", port: 9003, trigger: "ebpf_icmp_echo_request", status: "discovered" }
 
-Assert node B (agent-c) present in graph ✔
-Assert node C (agent-d) present in graph ✔
-Assert A→B path exists after probe validation ✔
-Assert A→C path exists after probe validation ✔
+  (to be filled with Ansible task output)
 
-Node A agent journal (ICMP seed loop entries):
-  2026-05-20T01:32:04  physarum_agent::discovery: ICMP echo-request cue: enqueued seed ip=10.50.20.20 trigger=EbpfIcmpEchoRequest
-  2026-05-20T01:32:04  physarum_agent::discovery: ICMP seed scan: starting exact-host scan ip=10.50.20.20 seed_cidr=10.50.20.20/32
-  2026-05-20T01:32:05  physarum_agent::discovery: ICMP seed scan: discovered sockets updated — probe loop will use these targets total_known=3 new=1
-  2026-05-20T01:32:05  physarum_agent::discovery: ICMP seed discovery report posted ip=10.50.20.20
-  2026-05-20T01:32:05  physarum_agent::discovery: ICMP cue: known host — asserting EbpfIcmpEchoRequest provenance ip=10.50.20.30
-  2026-05-20T01:32:05  physarum_agent::discovery: ICMP trigger provenance report posted ip=10.50.20.30
-  2026-05-20T01:32:14  physarum_agent: candidate promoted to probe target agent_id=agent-c address=10.50.20.20 port=9002
-  2026-05-20T01:30:04  physarum_agent: candidate promoted to probe target agent_id=agent-d address=10.50.20.30 port=9003
+─────────────────────────────────────────────────────────────────────────────────
 
-Assert ICMP echo-request cue logged for node B (10.50.20.20) ✔
-Assert ICMP echo-request cue logged for node C (10.50.20.30) ✔
-Assert candidate promoted to probe target for node B (agent-c) ✔
-Assert candidate promoted to probe target for node C (agent-d) ✔
-Assert probe success for node B (agent-c) ✔
-Assert probe success for node C (agent-d) ✔
+Evidence 5 — Probe validation, journal, and before/after delta
+--------------------------------------------------------------
+
+  Expected node A agent journal lines (full ICMP seed path for BOTH B and C):
+    ICMP echo-request cue: enqueued seed ip=10.50.20.20 trigger=EbpfIcmpEchoRequest
+    ICMP seed scan: starting exact-host scan ip=10.50.20.20 seed_cidr=10.50.20.20/32
+    ICMP seed discovery report posted ip=10.50.20.20
+    ICMP echo-request cue: enqueued seed ip=10.50.20.30 trigger=EbpfIcmpEchoRequest
+    ICMP seed scan: starting exact-host scan ip=10.50.20.30 seed_cidr=10.50.20.30/32
+    ICMP seed discovery report posted ip=10.50.20.30
+    candidate promoted to probe target agent_id=agent-c address=10.50.20.20 port=9002
+    candidate promoted to probe target agent_id=agent-d address=10.50.20.30 port=9003
+
+  NOTE: "ICMP cue: known host" must NOT appear for B or C — both must go through the
+        full /32 seed scan, proving ICMP was the sole trigger (not pre-existing knowledge).
+
+  Expected graph (GET /graph):
+    nodes: ["agent-b", "agent-c", "agent-d"]
+    edges: agent-b→agent-c, agent-b→agent-d (and reverse) with probe_success=true
+
+  Expected paths:
+    GET /paths?source=agent-b&target=agent-c → 200, direct 1-hop path
+    GET /paths?source=agent-b&target=agent-d → 200, direct 1-hop path
+
+  (to be filled with Ansible task output)
 
 Before/after delta table:
 ═══════════════════════════════════════════════════════════════════════
 Gate L.3 — Before/After Delta Table
-Baseline timestamp: 2026-05-20T01:31:44Z
+Baseline timestamp: (to be filled)
 ═══════════════════════════════════════════════════════════════════════
 Signal                                    Before ping   After ping
 ───────────────────────────────────────── ─────────────────────────
-PacketObservation B→A ICMP echo_request   absent        present ✔
-PacketObservation C→A ICMP echo_request   absent        present ✔
-Candidate B  trigger=ebpf_icmp_echo_req   absent        present ✔
-Candidate C  trigger=ebpf_icmp_echo_req   absent        present ✔
-Graph edge A→B (after probe validation)   absent        present ✔
-Graph edge A→C (after probe validation)   absent        present ✔
+PacketObservation B→A ICMP echo_request   absent        (to be filled)
+PacketObservation C→A ICMP echo_request   absent        (to be filled)
+Candidate B  trigger=ebpf_icmp_echo_req   absent        (to be filled)
+Candidate C  trigger=ebpf_icmp_echo_req   absent        (to be filled)
+ICMP seed B: enqueued seed → /32 scan     n/a           (to be filled)
+ICMP seed C: enqueued seed → /32 scan     n/a           (to be filled)
+Graph edges from A (no scheduled sweeps)  absent        (to be filled)
+Path A→B (404 before, valid after ICMP)   absent        (to be filled)
+Path A→C (404 before, valid after ICMP)   absent        (to be filled)
 ═══════════════════════════════════════════════════════════════════════
-Gate L.3 ICMP stimulus evidence PASSED
+Gate L.3 ICMP stimulus evidence: (to be filled — PASSED / FAILED)
 ═══════════════════════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────────────────────────────────
+
+Section 9 — terraform destroy
+------------------------------
+Command:
+  terraform destroy \
+    -var="lab_phase=gate-l3" \
+    -var="operator_cidr=<cidr>" \
+    -var="ami_id_override=<ami-id>" \
+    -var="enable_artifact_download=true" \
+    -var="artifact_bucket=physarum-artifacts-168740128169" \
+    -var="artifact_prefix=gate-l3/<commit>" \
+    -var="enable_packet_observer=true" \
+    -var="enable_discovery=false" \
+    -var="discovery_scope_mode=local-interfaces" \
+    -auto-approve
+
+Raw destroy output (tail):
+  (to be filled — "Destroy complete! Resources: N destroyed.")

@@ -42,6 +42,13 @@ if [ -n "$PROBE_TARGETS" ]; then
   PROBE_TARGETS_FLAG="--probe-targets $PROBE_TARGETS"
 fi
 
+# Gate L.3 ICMP-only mode: enable_discovery must be FALSE so that no scheduled sweeps
+# pre-populate discovered_sockets before the ICMP stimulus window.
+# The ICMP seed loop (--sense-icmp-packet) runs independently of --discovery-enabled
+# and is the sole source of candidate discovery in this lab.
+#
+# When enable_discovery=true (legacy/debug): scheduled sweeps run and find all peers
+# within seconds of startup — defeating the ICMP-only before/after evidence.
 DISCOVERY_FLAGS=""
 if [ "$ENABLE_DISCOVERY" = "true" ]; then
   BASE_FLAGS="--discovery-enabled --discovery-ports 9001,9002,9003,9004 --discovery-interval-secs 300 --discovery-timeout-ms 1500 --discovery-max-candidates 50 --discovery-seed-cooldown-secs 30"
@@ -54,10 +61,15 @@ if [ "$ENABLE_DISCOVERY" = "true" ]; then
   fi
 fi
 
-# Gate L.3: ICMP packet sensing enabled, TCP socket-state sensing disabled.
-# Both can be enabled together; for the gate-l3 lab we isolate ICMP-only.
-# clap v4 bool flags with default_value_t use SetTrue action — no value accepted.
-# Use --sense-icmp-packet (toggle) and env var to disable TCP state sensing.
+# ICMP-only sense flags: toggle --sense-icmp-packet (no value, clap v4 SetTrue action).
+# TCP socket-state sensing disabled via env var so the eBPF seed loop does not run.
+# The ICMP seed loop needs port/timeout/cooldown flags even without --discovery-enabled.
+# Only supply them here when discovery is disabled; when enabled, $DISCOVERY_FLAGS
+# already carries those flags and duplicates would cause a clap parse error.
+ICMP_DISCOVERY_SUPPORT_FLAGS=""
+if [ "$ENABLE_DISCOVERY" != "true" ]; then
+  ICMP_DISCOVERY_SUPPORT_FLAGS="--discovery-ports 9001,9002,9003,9004 --discovery-timeout-ms 1500 --discovery-max-candidates 50 --discovery-seed-cooldown-secs 30"
+fi
 SENSE_FLAGS="--sense-icmp-packet"
 export PHYSARUM_SENSE_TCP_SOCKET_STATE=false
 
@@ -123,6 +135,7 @@ ExecStart=/usr/local/bin/physarum-agent \
   --probe-interval-seconds 10 \
   $PROBE_TARGETS_FLAG \
   $DISCOVERY_FLAGS \
+  $ICMP_DISCOVERY_SUPPORT_FLAGS \
   $SENSE_FLAGS
 Restart=on-failure
 RestartSec=10

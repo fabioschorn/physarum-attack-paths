@@ -23,8 +23,13 @@
 #     -var="enable_artifact_download=true" \
 #     -var="artifact_bucket=physarum-artifacts-168740128169" \
 #     -var="enable_packet_observer=true" \
-#     -var="enable_discovery=true" \
+#     -var="enable_discovery=false" \
 #     -var="discovery_scope_mode=local-interfaces"
+#
+#   NOTE: enable_discovery=false is intentional for Gate L.3.
+#   Scheduled sweeps are disabled so that ONLY ICMP-triggered discovery creates candidates.
+#   The ICMP seed loop runs independently (sense_icmp_packet=true) and populates
+#   discovered_sockets; the probe loop waits for it before promoting any peer.
 #
 #   Wait ~3 min for cloud-init to complete, then verify the dynamic inventory:
 #     ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph
@@ -144,6 +149,61 @@
       ansible.builtin.assert:
         that: "'ebpf_icmp_echo_request' not in before_candidates.content"
         fail_msg: "Expected no ebpf_icmp_echo_request candidates before ICMP stimulus"
+
+    - name: Get graph state before stimulus
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/graph"
+        method: GET
+        return_content: true
+      register: before_graph
+
+    - name: Show BEFORE graph state
+      ansible.builtin.debug:
+        msg: "BEFORE graph (edges from agent-b): {{ before_graph.content }}"
+
+    - name: Assert no graph edges from node A (agent-b) before stimulus
+      ansible.builtin.assert:
+        that: >
+          (before_graph.content | from_json).edges
+          | selectattr('source', 'equalto', 'agent-b')
+          | list | length == 0
+        fail_msg: "Expected no graph edges from agent-b before ICMP stimulus. Got: {{ before_graph.content }}"
+
+    - name: Get path A→B before stimulus
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/paths?source=agent-b&target=agent-c"
+        method: GET
+        return_content: true
+        status_code: [200, 404]
+      register: before_path_a_b
+
+    - name: Get path A→C before stimulus
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/paths?source=agent-b&target=agent-d"
+        method: GET
+        return_content: true
+        status_code: [200, 404]
+      register: before_path_a_c
+
+    - name: Show BEFORE paths
+      ansible.builtin.debug:
+        msg:
+          - "BEFORE path A→B status={{ before_path_a_b.status }} body={{ before_path_a_b.content }}"
+          - "BEFORE path A→C status={{ before_path_a_c.status }} body={{ before_path_a_c.content }}"
+
+    - name: Assert path A→B absent before stimulus
+      ansible.builtin.assert:
+        that: >
+          before_path_a_b.status == 404 or
+          'agent-c' not in before_path_a_b.content
+        fail_msg: "Expected no A→B path before ICMP stimulus. Got status={{ before_path_a_b.status }} body={{ before_path_a_b.content }}"
+
+    - name: Assert path A→C absent before stimulus
+      ansible.builtin.assert:
+        that: >
+          before_path_a_c.status == 404 or
+          'agent-d' not in before_path_a_c.content
+        fail_msg: "Expected no A→C path before ICMP stimulus. Got status={{ before_path_a_c.status }} body={{ before_path_a_c.content }}"
 
 # ── Evidence 3: ICMP stimulus — B and C ping A ───────────────────────────────
 
@@ -368,8 +428,11 @@
           - "PacketObservation C→A ICMP echo_request   absent        present ✔"
           - "Candidate B  trigger=ebpf_icmp_echo_req   absent        present ✔"
           - "Candidate C  trigger=ebpf_icmp_echo_req   absent        present ✔"
-          - "Graph edge A→B (after probe validation)   absent        present ✔"
-          - "Graph edge A→C (after probe validation)   absent        present ✔"
+          - "ICMP seed B: enqueued seed → /32 scan     n/a           present ✔"
+          - "ICMP seed C: enqueued seed → /32 scan     n/a           present ✔"
+          - "Graph edges from A (no scheduled sweeps)  absent        present ✔"
+          - "Path A→B (404 before ICMP, valid after)   absent        present ✔"
+          - "Path A→C (404 before ICMP, valid after)   absent        present ✔"
           - "═══════════════════════════════════════════════════════════════════════"
           - "Gate L.3 ICMP stimulus evidence PASSED"
           - "═══════════════════════════════════════════════════════════════════════"
@@ -388,23 +451,29 @@
       ansible.builtin.debug:
         msg: "{{ node_a_journal.stdout_lines | select('search', 'ICMP|icmp|echo.request|seed|10.50.20.20|10.50.20.30|promoted') | list }}"
 
-    - name: Assert ICMP echo-request cue logged for node B (10.50.20.20)
+    - name: Assert ICMP echo-request cue enqueued seed for node B (10.50.20.20)
       ansible.builtin.assert:
         that: >
           node_a_journal.stdout_lines
-          | select('search', 'ICMP echo-request cue|ICMP cue: known host')
+          | select('search', 'ICMP echo-request cue: enqueued seed')
           | select('search', '10\\.50\\.20\\.20')
           | list | length > 0
-        fail_msg: "Expected 'ICMP echo-request cue' for 10.50.20.20 (node B) in node A journal"
+        fail_msg: >
+          Expected 'ICMP echo-request cue: enqueued seed' for 10.50.20.20 (node B) in node A journal.
+          Node B must go through the full ICMP→/32 scan path, not the 'known host' shortcut.
+          Ensure enable_discovery=false so scheduled sweeps don't pre-populate discovered_sockets.
 
-    - name: Assert ICMP echo-request cue logged for node C (10.50.20.30)
+    - name: Assert ICMP echo-request cue enqueued seed for node C (10.50.20.30)
       ansible.builtin.assert:
         that: >
           node_a_journal.stdout_lines
-          | select('search', 'ICMP echo-request cue|ICMP cue: known host')
+          | select('search', 'ICMP echo-request cue: enqueued seed')
           | select('search', '10\\.50\\.20\\.30')
           | list | length > 0
-        fail_msg: "Expected 'ICMP echo-request cue' for 10.50.20.30 (node C) in node A journal"
+        fail_msg: >
+          Expected 'ICMP echo-request cue: enqueued seed' for 10.50.20.30 (node C) in node A journal.
+          Node C must go through the full ICMP→/32 scan path, not the 'known host' shortcut.
+          Ensure enable_discovery=false so scheduled sweeps don't pre-populate discovered_sockets.
 
     - name: Assert candidate promoted to probe target for node B (agent-c)
       ansible.builtin.assert:
