@@ -316,7 +316,8 @@ async fn probe_loop(
     // Also filter when sense_icmp_packet is active without scheduled sweeps: the ICMP seed
     // loop populates discovered_sockets, and the probe loop must wait for it to do so
     // before promoting any peer — otherwise probes fire before ICMP-triggered discovery.
-    let use_discovery_filter = (cli.discovery_enabled || cli.sense_icmp_packet) && target_filter.is_empty();
+    let use_discovery_filter =
+        (cli.discovery_enabled || cli.sense_icmp_packet) && target_filter.is_empty();
     let mut ever_promoted: HashSet<String> = HashSet::new();
 
     loop {
@@ -542,7 +543,9 @@ async fn main() {
         // Derive CIDRs from local interfaces to filter which source IPs are in scope.
         let cidrs = discovery::derive_local_rfc1918_cidrs();
         match discovery::validate_rfc1918(&cidrs) {
-            Err(e) => tracing::error!(error = %e, "ICMP-only: invalid local-interface scope; ICMP seed loop disabled"),
+            Err(e) => {
+                tracing::error!(error = %e, "ICMP-only: invalid local-interface scope; ICMP seed loop disabled")
+            }
             Ok(()) => {
                 let config = Arc::new(DiscoveryConfig {
                     cidrs,
@@ -557,7 +560,9 @@ async fn main() {
                 let seed_queue = Arc::new(DiscoverySeedQueue::new(Duration::from_secs(
                     cli.discovery_seed_cooldown_secs,
                 )));
-                tracing::info!("ICMP-only discovery: scheduled sweeps disabled; ICMP seed loop active");
+                tracing::info!(
+                    "ICMP-only discovery: scheduled sweeps disabled; ICMP seed loop active"
+                );
                 tokio::spawn(discovery::icmp_seed_loop(
                     config,
                     disc,
