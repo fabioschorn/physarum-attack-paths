@@ -48,26 +48,15 @@ output "ssh_host_a" {
   value       = "ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@${aws_instance.host_a.public_ip}"
 }
 
-output "propagation_public_key" {
-  description = "Propagation public key — pre-authorized on all maze hosts (B through G)"
-  value       = tls_private_key.propagation.public_key_openssh
-}
-
-output "propagation_private_key" {
-  description = "Propagation private key — written to Host A at /home/ec2-user/.ssh/physarum-propagation. Sensitive."
-  value       = tls_private_key.propagation.private_key_openssh
-  sensitive   = true
-}
-
-output "maze_ssh_allow_rules" {
-  description = "SSH allow rules configured on each host (sshd AllowUsers)"
+output "maze_propagation_topology" {
+  description = "IP-based propagation topology — source IP is the credential, no SSH key used"
   value = {
-    host_b = "ec2-user@${local.host_a_ip} ec2-user@${local.operator_ip}"
-    host_c = "ec2-user@${local.host_a_ip} ec2-user@${local.operator_ip}"
-    host_d = "ec2-user@${local.operator_ip} (dead end — B/C rejected)"
-    host_e = "ec2-user@${local.host_c_ip} ec2-user@${local.operator_ip} (loop risk)"
-    host_f = "ec2-user@${local.host_c_ip} ec2-user@${local.operator_ip} (valid corridor)"
-    host_g = "ec2-user@${local.host_f_ip} ec2-user@${local.operator_ip} (milestone — F only)"
+    host_b = "allowed_source: ${local.host_a_ip} (A can propagate via empty-password SSH)"
+    host_c = "allowed_source: ${local.host_a_ip} (A can propagate via empty-password SSH)"
+    host_d = "allowed_source: none (dead end — sshd rejects all organism IPs)"
+    host_e = "allowed_source: ${local.host_c_ip} (C can propagate; loop risk for organism)"
+    host_f = "allowed_source: ${local.host_c_ip} (C can propagate; valid corridor to G)"
+    host_g = "allowed_source: ${local.host_f_ip} (F only; D and E rejected at sshd)"
   }
 }
 

@@ -25,7 +25,7 @@ locals {
 
 # ── Host A — seed (front subnet) ──────────────────────────────────────────────
 # Only host that receives the physarum-node binary at PF-1 start.
-# Holds the propagation private key for organism SCP expansion.
+# Propagation uses IP-based trust only — no SSH key is held or distributed.
 
 resource "aws_instance" "host_a" {
   ami                    = local.ami_id
@@ -37,11 +37,9 @@ resource "aws_instance" "host_a" {
 
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/host-a.sh.tpl", {
-    hostname             = "host-a"
-    operator_ip          = local.operator_ip
-    maze_hosts_entries   = local.maze_hosts_entries
-    propagation_priv_key = tls_private_key.propagation.private_key_openssh
-    propagation_pub_key  = tls_private_key.propagation.public_key_openssh
+    hostname           = "host-a"
+    operator_ip        = local.operator_ip
+    maze_hosts_entries = local.maze_hosts_entries
   })
 
   tags = {
@@ -53,7 +51,7 @@ resource "aws_instance" "host_a" {
 }
 
 # ── Host B — layer-1 ──────────────────────────────────────────────────────────
-# Reachable from A. sshd allows SSH from A (10.60.10.10) + operator.
+# Reachable from A. sshd accepts empty-password SSH from A's IP (10.60.10.10).
 
 resource "aws_instance" "host_b" {
   ami                    = local.ami_id
@@ -65,13 +63,15 @@ resource "aws_instance" "host_b" {
 
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/maze-node.sh.tpl", {
-    hostname            = "host-b"
-    maze_hosts_entries  = local.maze_hosts_entries
-    propagation_pub_key = tls_private_key.propagation.public_key_openssh
-    # AllowUsers: A can propagate to B, operator can SSH for validation
-    allowed_ssh_users   = "ec2-user@${local.host_a_ip} ec2-user@${local.operator_ip}"
-    maze_role           = "layer-1"
-    maze_note           = "A can validate corridors toward B"
+    hostname             = "host-b"
+    maze_hosts_entries   = local.maze_hosts_entries
+    operator_ip          = local.operator_ip
+    # Source IP that may propagate to B (A's private IP)
+    allowed_source_ips   = local.host_a_ip
+    # AllowUsers entries appended after operator for Match Address block
+    allow_users_entries  = "ec2-user@${local.host_a_ip}"
+    maze_role            = "layer-1"
+    maze_note            = "A can propagate to B via empty-password SSH"
   })
 
   tags = {
@@ -84,7 +84,6 @@ resource "aws_instance" "host_b" {
 
 # ── Host C — layer-1 ──────────────────────────────────────────────────────────
 # Reachable from A. Key bifurcation point — C can reach D, E, F.
-# sshd allows SSH from A + operator.
 
 resource "aws_instance" "host_c" {
   ami                    = local.ami_id
@@ -96,12 +95,13 @@ resource "aws_instance" "host_c" {
 
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/maze-node.sh.tpl", {
-    hostname            = "host-c"
-    maze_hosts_entries  = local.maze_hosts_entries
-    propagation_pub_key = tls_private_key.propagation.public_key_openssh
-    allowed_ssh_users   = "ec2-user@${local.host_a_ip} ec2-user@${local.operator_ip}"
-    maze_role           = "layer-1-bifurcation"
-    maze_note           = "A can reach C; C can validate corridors toward D, E, F"
+    hostname             = "host-c"
+    maze_hosts_entries   = local.maze_hosts_entries
+    operator_ip          = local.operator_ip
+    allowed_source_ips   = local.host_a_ip
+    allow_users_entries  = "ec2-user@${local.host_a_ip}"
+    maze_role            = "layer-1-bifurcation"
+    maze_note            = "A can reach C; C sees D/E/F as candidates"
   })
 
   tags = {
@@ -113,8 +113,8 @@ resource "aws_instance" "host_c" {
 }
 
 # ── Host D — layer-2 dead end ─────────────────────────────────────────────────
-# Visible by ICMP from layer-1. Port 22 open at SG level (RustScan sees it).
-# sshd AllowUsers permits only the operator — propagation from B/C is rejected.
+# Port 22 open at SG level (RustScan sees it from layer-1).
+# No organism IP in AllowUsers — propagation from B/C fails at sshd.
 
 resource "aws_instance" "host_d" {
   ami                    = local.ami_id
@@ -126,13 +126,14 @@ resource "aws_instance" "host_d" {
 
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/maze-node.sh.tpl", {
-    hostname            = "host-d"
-    maze_hosts_entries  = local.maze_hosts_entries
-    propagation_pub_key = tls_private_key.propagation.public_key_openssh
-    # Operator only — B/C see port 22 open but sshd rejects them (dead end)
-    allowed_ssh_users   = "ec2-user@${local.operator_ip}"
-    maze_role           = "layer-2-dead-end"
-    maze_note           = "ICMP visible from layer-1; not a valid propagation corridor"
+    hostname             = "host-d"
+    maze_hosts_entries   = local.maze_hosts_entries
+    operator_ip          = local.operator_ip
+    # Dead end: no propagation source allowed
+    allowed_source_ips   = ""
+    allow_users_entries  = ""
+    maze_role            = "layer-2-dead-end"
+    maze_note            = "ICMP visible from layer-1; not a valid propagation corridor"
   })
 
   tags = {
@@ -144,9 +145,8 @@ resource "aws_instance" "host_d" {
 }
 
 # ── Host E — layer-2 loop risk ────────────────────────────────────────────────
-# Reachable from C via SSH. sshd permits C + operator.
-# E's unrestricted outbound allows it to reach back toward layer-1 (loop risk).
-# Organism must detect and penalize the backward signal.
+# Reachable from C (empty-password SSH). sshd accepts C's IP.
+# Organism must detect already-visited layer-1 via lineage and penalize.
 
 resource "aws_instance" "host_e" {
   ami                    = local.ami_id
@@ -158,13 +158,13 @@ resource "aws_instance" "host_e" {
 
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/maze-node.sh.tpl", {
-    hostname            = "host-e"
-    maze_hosts_entries  = local.maze_hosts_entries
-    propagation_pub_key = tls_private_key.propagation.public_key_openssh
-    # C can propagate to E, but E sees layer-1 again — backtracking risk
-    allowed_ssh_users   = "ec2-user@${local.host_c_ip} ec2-user@${local.operator_ip}"
-    maze_role           = "layer-2-loop-risk"
-    maze_note           = "C can reach E; E sees layer-1 again — organism must penalize backward movement"
+    hostname             = "host-e"
+    maze_hosts_entries   = local.maze_hosts_entries
+    operator_ip          = local.operator_ip
+    allowed_source_ips   = local.host_c_ip
+    allow_users_entries  = "ec2-user@${local.host_c_ip}"
+    maze_role            = "layer-2-loop-risk"
+    maze_note            = "C can reach E; organism must penalize backward paths via lineage"
   })
 
   tags = {
@@ -176,7 +176,7 @@ resource "aws_instance" "host_e" {
 }
 
 # ── Host F — layer-2 valid corridor ───────────────────────────────────────────
-# Reachable from C. sshd permits C + operator. F can reach G (layer-3).
+# Reachable from C. F can propagate to G (layer-3).
 
 resource "aws_instance" "host_f" {
   ami                    = local.ami_id
@@ -188,12 +188,13 @@ resource "aws_instance" "host_f" {
 
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/maze-node.sh.tpl", {
-    hostname            = "host-f"
-    maze_hosts_entries  = local.maze_hosts_entries
-    propagation_pub_key = tls_private_key.propagation.public_key_openssh
-    allowed_ssh_users   = "ec2-user@${local.host_c_ip} ec2-user@${local.operator_ip}"
-    maze_role           = "layer-2-valid-corridor"
-    maze_note           = "C → F valid corridor; F → G valid corridor"
+    hostname             = "host-f"
+    maze_hosts_entries   = local.maze_hosts_entries
+    operator_ip          = local.operator_ip
+    allowed_source_ips   = local.host_c_ip
+    allow_users_entries  = "ec2-user@${local.host_c_ip}"
+    maze_role            = "layer-2-valid-corridor"
+    maze_note            = "C to F valid corridor; F to G valid corridor"
   })
 
   tags = {
@@ -205,10 +206,8 @@ resource "aws_instance" "host_f" {
 }
 
 # ── Host G — layer-3 expansion milestone ──────────────────────────────────────
-# Visible from layer-2 via ICMP and port 22 (SG allows layer-2 subnet).
-# sshd AllowUsers permits only F + operator.
-# D and E see port 22 open but sshd rejects them — G is not a dead end,
-# just not reachable from D or E.
+# Port 22 open from layer-2 (D/E/F see it via RustScan).
+# sshd only accepts F's IP — D and E are rejected at OS level.
 
 resource "aws_instance" "host_g" {
   ami                    = local.ami_id
@@ -220,13 +219,14 @@ resource "aws_instance" "host_g" {
 
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/maze-node.sh.tpl", {
-    hostname            = "host-g"
-    maze_hosts_entries  = local.maze_hosts_entries
-    propagation_pub_key = tls_private_key.propagation.public_key_openssh
-    # Only F can propagate to G — D/E get rejected by sshd
-    allowed_ssh_users   = "ec2-user@${local.host_f_ip} ec2-user@${local.operator_ip}"
-    maze_role           = "layer-3-milestone"
-    maze_note           = "G accepts from F only; not a configured destination — discovered by organism"
+    hostname             = "host-g"
+    maze_hosts_entries   = local.maze_hosts_entries
+    operator_ip          = local.operator_ip
+    # Only F can propagate to G
+    allowed_source_ips   = local.host_f_ip
+    allow_users_entries  = "ec2-user@${local.host_f_ip}"
+    maze_role            = "layer-3-milestone"
+    maze_note            = "G accepts propagation from F only; discovered autonomously by organism"
   })
 
   tags = {
