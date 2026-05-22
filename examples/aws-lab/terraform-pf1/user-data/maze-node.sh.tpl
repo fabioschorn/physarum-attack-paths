@@ -17,27 +17,17 @@ HOSTS
 dnf install -y traceroute iputils jq curl 2>/dev/null || true
 
 # ── ec2-user — empty password for IP-based SSH propagation ───────────────────
-# The physarum organism propagates without any SSH key. The source IP is the
-# credential. ec2-user needs an empty (not locked) password so that sshd with
-# PermitEmptyPasswords accepts the connection from authorized IPs.
+# The physarum organism propagates without any SSH key. Source IP is the
+# credential. Empty password lets sshd (PermitEmptyPasswords) accept it.
 passwd -d ec2-user
 
 # ── SSH hardening — AllowUsers + IP-based PermitEmptyPasswords ───────────────
 #
-# Two-layer access control:
-#   SG (network level):  controls which subnets can reach port 22
-#   sshd (OS level):     AllowUsers controls which source IPs can authenticate
-#
-# Global: only operator (key-based) and allowed propagation IPs are accepted.
-# Match Address block: enables empty-password auth for the allowed source IPs.
-#   Without this block, AllowUsers alone is not enough — password auth would
-#   still require a non-empty password.
+# Global: only operator (key) + authorized propagation IPs accepted.
+# Match Address: enables empty-password auth for those source IPs only.
 #
 # Allowed propagation sources: ${allowed_source_ips}
-# (empty = dead end — no organism can propagate to this host)
-
-cat > /etc/ssh/sshd_config.d/99-maze.conf <<'SSHDCONF'
-# Global defaults
+cat > /etc/ssh/sshd_config.d/99-maze.conf <<SSHDCONF
 PubkeyAuthentication yes
 PasswordAuthentication no
 PermitEmptyPasswords no
@@ -45,8 +35,7 @@ AllowUsers ec2-user@${operator_ip}%{ if allowed_source_ips != "" } ${allow_users
 SSHDCONF
 
 %{ if allowed_source_ips != "" }
-# Match block: allow empty-password SSH from authorized propagation source IPs
-cat >> /etc/ssh/sshd_config.d/99-maze.conf <<'MATCHBLOCK'
+cat >> /etc/ssh/sshd_config.d/99-maze.conf <<MATCHBLOCK
 
 Match Address ${allowed_source_ips}
     PasswordAuthentication yes
@@ -58,7 +47,6 @@ MATCHBLOCK
 systemctl restart sshd
 
 # ── SSH client config — keyless forward propagation ───────────────────────────
-# When the organism propagates here and needs to SCP further, no key is used.
 install -d -m 700 -o ec2-user -g ec2-user /home/ec2-user/.ssh
 cat > /home/ec2-user/.ssh/config <<'SSHCFG'
 Host 10.60.*
@@ -72,6 +60,44 @@ SSHCFG
 chmod 600 /home/ec2-user/.ssh/config
 chown ec2-user:ec2-user /home/ec2-user/.ssh/config
 
+# ── ICMP stimulus — pings next-layer hosts so eBPF captures the flow ──────────
+# Each host pings the hosts visible to it via SG rules.
+# The timer fires every 30s — echo replies are the eBPF discovery stimulus.
+# ping_targets is empty for host-g (layer-3 milestone, no next layer).
+%{ if ping_targets != "" }
+cat > /usr/local/bin/physarum-icmp-stimulus.sh <<'SCRIPT'
+#!/bin/bash
+for target in ${ping_targets}; do
+    ping -c1 -W2 "$target" >/dev/null 2>&1 || true
+done
+SCRIPT
+chmod +x /usr/local/bin/physarum-icmp-stimulus.sh
+
+cat > /etc/systemd/system/physarum-icmp-stimulus.service <<'SVC'
+[Unit]
+Description=Physarum ICMP stimulus — pings next-layer hosts for eBPF discovery
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/physarum-icmp-stimulus.sh
+SVC
+
+cat > /etc/systemd/system/physarum-icmp-stimulus.timer <<'TMR'
+[Unit]
+Description=Physarum ICMP stimulus timer (30s interval)
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=30s
+
+[Install]
+WantedBy=timers.target
+TMR
+
+systemctl daemon-reload
+systemctl enable --now physarum-icmp-stimulus.timer
+%{ endif }
+
 # ── Maze marker ───────────────────────────────────────────────────────────────
 cat > /etc/physarum-maze.json <<EOF
 {
@@ -79,6 +105,7 @@ cat > /etc/physarum-maze.json <<EOF
   "host": "${hostname}",
   "propagation": "ip-based — no SSH key",
   "allowed_source_ips": "${allowed_source_ips}",
+  "icmp_stimulus_targets": "${ping_targets}",
   "note": "${maze_note}"
 }
 EOF

@@ -16,16 +16,9 @@ HOSTS
 dnf install -y traceroute iputils jq curl 2>/dev/null || true
 
 # ── ec2-user — empty password for IP-based SSH propagation ───────────────────
-# The organism propagates by SSH from A to B/C using only the source IP as
-# identity. No private key is involved. ec2-user must have an empty password
-# so that sshd (with PermitEmptyPasswords yes on the target) accepts the
-# connection when the source IP is in AllowUsers.
 passwd -d ec2-user
 
-# ── SSH hardening — operator (key) + restrict password auth ──────────────────
-# Operator reaches A with their key from the public internet.
-# Password auth is off globally — A does not accept inbound empty passwords
-# since nothing propagates back to A.
+# ── SSH hardening — operator (key) only, password auth off ───────────────────
 cat > /etc/ssh/sshd_config.d/99-maze.conf <<EOF
 AllowUsers ec2-user@${operator_ip}
 PasswordAuthentication no
@@ -34,8 +27,6 @@ EOF
 systemctl restart sshd
 
 # ── SSH client config — keyless propagation to internal hosts ─────────────────
-# When the organism (running as ec2-user on A) SSHes/SCPs to B or C, it uses
-# empty-password auth. The source IP 10.60.10.10 is in their AllowUsers.
 install -d -m 700 -o ec2-user -g ec2-user /home/ec2-user/.ssh
 cat > /home/ec2-user/.ssh/config <<'SSHCFG'
 Host 10.60.*
@@ -49,6 +40,42 @@ SSHCFG
 chmod 600 /home/ec2-user/.ssh/config
 chown ec2-user:ec2-user /home/ec2-user/.ssh/config
 
+# ── ICMP stimulus — pings next-layer hosts so eBPF captures the flow ──────────
+# Host A can reach layer-1 (B, C) via ICMP per SG rules.
+# A timer fires every 30s — each ping generates an echo reply that the
+# physarum organism's eBPF sensor captures as a discovery stimulus.
+cat > /usr/local/bin/physarum-icmp-stimulus.sh <<'SCRIPT'
+#!/bin/bash
+for target in host-b host-c; do
+    ping -c1 -W2 "$target" >/dev/null 2>&1 || true
+done
+SCRIPT
+chmod +x /usr/local/bin/physarum-icmp-stimulus.sh
+
+cat > /etc/systemd/system/physarum-icmp-stimulus.service <<'SVC'
+[Unit]
+Description=Physarum ICMP stimulus — pings layer-1 hosts for eBPF discovery
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/physarum-icmp-stimulus.sh
+SVC
+
+cat > /etc/systemd/system/physarum-icmp-stimulus.timer <<'TMR'
+[Unit]
+Description=Physarum ICMP stimulus timer (30s interval)
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=30s
+
+[Install]
+WantedBy=timers.target
+TMR
+
+systemctl daemon-reload
+systemctl enable --now physarum-icmp-stimulus.timer
+
 # ── Maze marker ───────────────────────────────────────────────────────────────
 cat > /etc/physarum-maze.json <<EOF
 {
@@ -56,6 +83,7 @@ cat > /etc/physarum-maze.json <<EOF
   "maze_layer": "front",
   "host": "${hostname}",
   "propagation": "ip-based — no SSH key, source IP 10.60.10.10 is the credential",
+  "icmp_stimulus_targets": ["host-b", "host-c"],
   "note": "PF-1 organism entry point. Only this host receives physarum-node at lab start."
 }
 EOF

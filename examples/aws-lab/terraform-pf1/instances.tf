@@ -66,10 +66,9 @@ resource "aws_instance" "host_b" {
     hostname             = "host-b"
     maze_hosts_entries   = local.maze_hosts_entries
     operator_ip          = local.operator_ip
-    # Source IP that may propagate to B (A's private IP)
     allowed_source_ips   = local.host_a_ip
-    # AllowUsers entries appended after operator for Match Address block
     allow_users_entries  = "ec2-user@${local.host_a_ip}"
+    ping_targets         = "host-d host-e host-f"
     maze_role            = "layer-1"
     maze_note            = "A can propagate to B via empty-password SSH"
   })
@@ -100,6 +99,7 @@ resource "aws_instance" "host_c" {
     operator_ip          = local.operator_ip
     allowed_source_ips   = local.host_a_ip
     allow_users_entries  = "ec2-user@${local.host_a_ip}"
+    ping_targets         = "host-d host-e host-f"
     maze_role            = "layer-1-bifurcation"
     maze_note            = "A can reach C; C sees D/E/F as candidates"
   })
@@ -129,9 +129,9 @@ resource "aws_instance" "host_d" {
     hostname             = "host-d"
     maze_hosts_entries   = local.maze_hosts_entries
     operator_ip          = local.operator_ip
-    # Dead end: no propagation source allowed
     allowed_source_ips   = ""
     allow_users_entries  = ""
+    ping_targets         = "host-g"
     maze_role            = "layer-2-dead-end"
     maze_note            = "ICMP visible from layer-1; not a valid propagation corridor"
   })
@@ -163,6 +163,7 @@ resource "aws_instance" "host_e" {
     operator_ip          = local.operator_ip
     allowed_source_ips   = local.host_c_ip
     allow_users_entries  = "ec2-user@${local.host_c_ip}"
+    ping_targets         = "host-g"
     maze_role            = "layer-2-loop-risk"
     maze_note            = "C can reach E; organism must penalize backward paths via lineage"
   })
@@ -193,6 +194,7 @@ resource "aws_instance" "host_f" {
     operator_ip          = local.operator_ip
     allowed_source_ips   = local.host_c_ip
     allow_users_entries  = "ec2-user@${local.host_c_ip}"
+    ping_targets         = "host-g"
     maze_role            = "layer-2-valid-corridor"
     maze_note            = "C to F valid corridor; F to G valid corridor"
   })
@@ -222,9 +224,9 @@ resource "aws_instance" "host_g" {
     hostname             = "host-g"
     maze_hosts_entries   = local.maze_hosts_entries
     operator_ip          = local.operator_ip
-    # Only F can propagate to G
     allowed_source_ips   = local.host_f_ip
     allow_users_entries  = "ec2-user@${local.host_f_ip}"
+    ping_targets         = ""
     maze_role            = "layer-3-milestone"
     maze_note            = "G accepts propagation from F only; discovered autonomously by organism"
   })
