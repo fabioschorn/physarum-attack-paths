@@ -1,0 +1,460 @@
+
+# ── Artifact / Build evidence (Gap 1) ─────────────────────────────────────────
+#
+# Build command (Docker Build Cloud — builder cloud-fs09-physarum-attack-paths):
+#
+#   docker buildx build \
+#     --builder cloud-fs09-physarum-attack-paths \
+#     --platform linux/amd64 \
+#     --load \
+#     -t physarum-attack-paths:gate-m \
+#     .
+#
+# Build output (key lines):
+#
+#   #0 building with "cloud-fs09-physarum-attack-paths" instance using cloud driver
+#   #14 [builder 5/5] RUN cargo build --release \
+#         -p physarum-server \
+#         -p physarum-agent \
+#         -p physarum-node \
+#         -p physarum-ebpf-observer \
+#         -p physarum-packet-observer
+#   #14    Compiling physarum-node v0.0.1 (/app/crates/physarum-node)
+#   #14    Compiling physarum-ebpf-observer v0.0.1 (/app/crates/physarum-ebpf-observer)
+#   #14    Finished `release` profile [optimized] target(s) in 1m 01s
+#   #15 [stage-1 5/7] COPY --from=builder /app/target/release/physarum-node /usr/local/bin/
+#   #16 [stage-1 6/7] COPY --from=builder /app/target/release/physarum-ebpf-observer /usr/local/bin/
+#   #21 exporting manifest sha256:6f4d319c005fbe9a68516957491f08876ce6e85affb1830f8887b91f6b79c7a9
+#   View build details: docker-desktop://dashboard/build/cloud-fs09-physarum-attack-paths/linux-amd64/4zk6g6ijm0ybusnrrazlnaxx7
+#
+# Binary verification (extracted from image for linux/amd64):
+#
+#   $ docker create --platform linux/amd64 physarum-attack-paths:gate-m
+#   $ docker cp <id>:/usr/local/bin/physarum-node /tmp/physarum-node-gate-m
+#   $ docker cp <id>:/usr/local/bin/physarum-ebpf-observer /tmp/physarum-ebpf-observer-gate-m
+#   $ file /tmp/physarum-node-gate-m
+#   /tmp/physarum-node-gate-m: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV),
+#     dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, stripped
+#   $ file /tmp/physarum-ebpf-observer-gate-m
+#   /tmp/physarum-ebpf-observer-gate-m: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV),
+#     dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, stripped
+#   $ ls -lh /tmp/physarum-node-gate-m /tmp/physarum-ebpf-observer-gate-m
+#   -rwxr-xr-x  1 ...  5.0M  physarum-ebpf-observer-gate-m
+#   -rwxr-xr-x  1 ...  2.0M  physarum-node-gate-m
+#
+# S3 upload (physarum-node — linux-x86_64):
+#
+#   $ aws s3 cp /tmp/physarum-node-gate-m \
+#       s3://physarum-artifacts-168740128169/physarum-attack-paths/dev/linux-x86_64/physarum-node \
+#       --region us-east-1
+#   upload: ../../../../../tmp/physarum-node-gate-m to
+#     s3://physarum-artifacts-168740128169/physarum-attack-paths/dev/linux-x86_64/physarum-node
+#
+# S3 artifact listing (all artifacts — including eBPF bytecode):
+#
+#   $ aws s3 ls s3://physarum-artifacts-168740128169/physarum-attack-paths/dev/linux-x86_64/ --region us-east-1
+#   2026-05-20 22:17:23    5131424 physarum-agent
+#   2026-05-16 17:39:37    5015856 physarum-ebpf-observer
+#   2026-05-17 00:14:49       2672 physarum-ebpf-observer-ebpf     ← eBPF bytecode (tracefs tracepoint)
+#   2026-05-22 11:14:48    2062496 physarum-node                   ← uploaded from gate-m build
+#   2026-05-20 22:17:29    5008240 physarum-packet-observer
+#   2026-05-20 22:17:32       1952 physarum-packet-observer-ebpf
+#   2026-05-20 22:17:26    2689296 physarum-server
+
+# ── Terraform apply (Gap 2) ───────────────────────────────────────────────────
+#
+# Command:
+#   terraform apply \
+#     -var="lab_phase=gate-m" \
+#     -var="operator_cidr=187.101.126.140/32" \
+#     -var="enable_artifact_download=true" \
+#     -var="artifact_bucket=physarum-artifacts-168740128169" \
+#     -var="ami_id_override=ami-0c0717dff8dafd4ca" \
+#     -auto-approve
+#
+# Key creation events:
+#   aws_instance.agent_b: Creation complete [id=i-09eeac9103f5c3483]
+#   aws_instance.agent_c: Creation complete [id=i-0c893f29f0859be34]
+#   aws_instance.agent_d: Creation complete [id=i-0262b10caf1f0dd45]
+#   (no aws_instance.server_a — count=0 for gate-m; coordinator co-located on agent-b)
+#
+#   Apply complete! Resources: 42 added, 0 changed, 0 destroyed.
+#
+# Outputs:
+#   agent_b_private_ip = "10.50.20.10"
+#   agent_b_public_ip  = "44.201.110.106"
+#   agent_c_private_ip = "10.50.20.20"
+#   agent_c_public_ip  = "3.84.58.10"
+#   agent_d_private_ip = "10.50.20.30"
+#   agent_d_public_ip  = "34.203.189.187"
+#   lab_mode           = "node-capability-runtime-supervisor"
+#   lab_phase          = "gate-m"
+#   server_private_ip  = "10.50.20.10"    ← same as agent-b (co-located coordinator)
+#   server_public_ip   = "44.201.110.106" ← same as agent-b (no separate server_a)
+#   ansible_run        = "ansible-playbook -i examples/aws-lab/ansible/aws_ec2.yml \
+#                          examples/aws-lab/ansible/validate-gate-m-node-runtime.yml"
+
+# ── ansible-inventory --graph (Gap 2 — dynamic EC2 inventory) ────────────────
+#
+# Command:
+#   ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph
+#
+# Output:
+#   @all:
+#     |--@ungrouped:
+#     |--@aws_ec2:
+#     |  |--34.203.189.187
+#     |  |--44.201.110.106
+#     |  |--3.84.58.10
+#     |--@node_c:
+#     |  |--34.203.189.187       ← agent-d (node C / 10.50.20.30)
+#     |--@role_stimulus:
+#     |  |--34.203.189.187
+#     |  |--3.84.58.10
+#     |--@phase_gate_m:
+#     |  |--34.203.189.187
+#     |  |--44.201.110.106
+#     |  |--3.84.58.10
+#     |--@server:
+#     |  |--44.201.110.106       ← agent-b (coordinator + physarum-node supervisor)
+#     |--@node_a:
+#     |  |--44.201.110.106       ← agent-b (node A / 10.50.20.10)
+#     |--@role_coordinator_agent:
+#     |  |--44.201.110.106
+#     |--@node_b:
+#     |  |--3.84.58.10           ← agent-c (node B / 10.50.20.20)
+
+# ── Ansible validation playbook (35 tasks — all passed) ───────────────────────
+
+PLAY [Evidence 1 — physarum-node active and agents registered] *****************
+
+TASK [Check physarum-node.service status] **************************************
+changed: [44.201.110.106]
+
+TASK [Assert physarum-node is active] ******************************************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Confirm no separate physarum-agent.service (capability is supervised, not standalone)] ***
+changed: [44.201.110.106]
+
+TASK [Assert physarum-agent.service does not exist as a standalone unit] *******
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Check physarum-server.service status] ************************************
+changed: [44.201.110.106]
+
+TASK [Assert physarum-server is active (coordinator)] **************************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+PLAY [Evidence 1 (cont.) — all agents registered with coordinator] *************
+
+TASK [List registered agents] **************************************************
+ok: [44.201.110.106]
+
+TASK [Show registered agents] **************************************************
+ok: [44.201.110.106] => {
+    "agents_response.content": [
+        {
+            "address": "10.50.20.30",
+            "agent_id": "agent-d",
+            "last_seen": "2026-05-22T14:16:21.738760392Z",
+            "probe_port": 9003
+        },
+        {
+            "address": "10.50.20.10",
+            "agent_id": "agent-b",
+            "last_seen": "2026-05-22T14:16:14.136886705Z",
+            "probe_port": 9001
+        },
+        {
+            "address": "10.50.20.20",
+            "agent_id": "agent-c",
+            "last_seen": "2026-05-22T14:16:21.917772801Z",
+            "probe_port": 9002
+        }
+    ]
+}
+
+TASK [Assert agent-b (node A) is registered] ***********************************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert agent-c (node B) is registered] ***********************************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert agent-d (node C) is registered] ***********************************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+PLAY [Evidence 2 — physarum-agent and physarum-ebpf-observer are children of physarum-node PID] ***
+
+TASK [Get physarum-node MainPID from systemd] **********************************
+changed: [44.201.110.106]
+
+TASK [Parse physarum-node PID] *************************************************
+ok: [44.201.110.106]
+
+TASK [Show physarum-node PID] **************************************************
+ok: [44.201.110.106] => {
+    "msg": "physarum-node PID: 2030"
+}
+
+TASK [Assert physarum-node PID is non-zero (process is running)] ***************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [List children of physarum-node PID] **************************************
+changed: [44.201.110.106]
+
+TASK [Show child processes of physarum-node] ***********************************
+ok: [44.201.110.106] => {
+    "msg": [
+        "=== Children of physarum-node (PID 2030) ===",
+        [
+            "   2033 /usr/local/bin/physarum-agent --id agent-b --coordinator http://127.0.0.1:8080 --listen 0.0.0.0:9001 --advertise-address 10.50.20.10 --probe-interval-seconds 10",
+            "   2034 /usr/local/bin/physarum-ebpf-observer --agent-id agent-b --coordinator-url http://127.0.0.1:8080 --bpf-bytecode /usr/local/lib/physarum/physarum-ebpf-observer-ebpf"
+        ]
+    ]
+}
+
+TASK [Assert physarum-agent is a child of physarum-node] ***********************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert physarum-ebpf-observer is a child of physarum-node] ***************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+PLAY [Evidence 3 — physarum-node journal shows capability subprocess spawning] ***
+
+TASK [Collect physarum-node journal (last 500 lines)] **************************
+changed: [44.201.110.106]
+
+TASK [Show capability-related journal lines] ***********************************
+ok: [44.201.110.106] => {
+    "msg": [
+        "May 22 14:16:14 ip-10-50-20-10.ec2.internal systemd[1]: Started physarum-node.service - physarum-node (agent-b) — capability supervisor (probe,observe-flow) — Gate M.3.",
+        "May 22 14:16:14 ip-10-50-20-10.ec2.internal physarum-node[2030]: 2026-05-22T14:16:14.133674Z  INFO physarum_node::dispatch: physarum-node starting capabilities=CapabilitySet({Probe, ObserveEbpf}) id=agent-b coordinator=http://127.0.0.1:8080",
+        "May 22 14:16:14 ip-10-50-20-10.ec2.internal physarum-node[2030]: 2026-05-22T14:16:14.133794Z  INFO physarum_node::dispatch: spawning capability subprocess binary=\"physarum-agent\"",
+        "May 22 14:16:14 ip-10-50-20-10.ec2.internal physarum-node[2030]: 2026-05-22T14:16:14.133898Z  INFO physarum_node::dispatch: spawning capability subprocess binary=\"physarum-ebpf-observer\"",
+        "May 22 14:16:14 ip-10-50-20-10.ec2.internal physarum-node[2034]: 2026-05-22T14:16:14.135818Z  INFO physarum_ebpf_observer: physarum-ebpf-observer starting agent_id=agent-b coordinator=http://127.0.0.1:8080 dry_run=false filter_port=0"
+    ]
+}
+
+TASK [Assert physarum-node logged spawning physarum-agent] *********************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert physarum-node logged spawning physarum-ebpf-observer] *************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Show full capability spawn evidence from journal] ************************
+ok: [44.201.110.106] => {
+    "msg": [
+        "May 22 14:16:14 ip-10-50-20-10.ec2.internal physarum-node[2030]: 2026-05-22T14:16:14.133794Z  INFO physarum_node::dispatch: spawning capability subprocess binary=\"physarum-agent\"",
+        "May 22 14:16:14 ip-10-50-20-10.ec2.internal physarum-node[2030]: 2026-05-22T14:16:14.133898Z  INFO physarum_node::dispatch: spawning capability subprocess binary=\"physarum-ebpf-observer\""
+    ]
+}
+
+PLAY [Evidence 4 — Probe end-to-end: graph edges appear after probe rounds] ****
+
+TASK [Wait for probe rounds to complete (30 seconds)] **************************
+Pausing for 30 seconds
+ok: [44.201.110.106]
+
+TASK [Get graph state] *********************************************************
+ok: [44.201.110.106]
+
+TASK [Show graph] **************************************************************
+ok: [44.201.110.106] => {
+    "graph.content": {
+        "edges": [
+            {
+                "avg_rtt_ms": 0.3,
+                "d_ij": 0.8332103217380881,
+                "jitter_ms": 0.5400000000000001,
+                "last_seen": "2026-05-22T14:24:01.950140411Z",
+                "probe_success": true,
+                "q_ema": 0.9991054245312012,
+                "sample_count": 20,
+                "source": "agent-d",
+                "success_rate": 1.0,
+                "target": "agent-c"
+            },
+            {
+                "avg_rtt_ms": 0.15,
+                "d_ij": 0.8332631690329695,
+                "jitter_ms": 0.2700000000000001,
+                "last_seen": "2026-05-22T14:24:01.945585920Z",
+                "probe_success": true,
+                "q_ema": 0.9995098338573546,
+                "sample_count": 20,
+                "source": "agent-d",
+                "success_rate": 1.0,
+                "target": "agent-b"
+            },
+            {
+                "avg_rtt_ms": 0.0,
+                "d_ij": 0.8333333187684991,
+                "jitter_ms": 0.0,
+                "last_seen": "2026-05-22T14:23:54.287549582Z",
+                "probe_success": true,
+                "q_ema": 0.9999999250951668,
+                "sample_count": 20,
+                "source": "agent-b",
+                "success_rate": 1.0,
+                "target": "agent-c"
+            },
+            {
+                "avg_rtt_ms": 0.2,
+                "d_ij": 0.833284549776731,
+                "jitter_ms": 0.3400000000000001,
+                "last_seen": "2026-05-22T14:24:02.109989932Z",
+                "probe_success": true,
+                "q_ema": 0.9996123165673427,
+                "sample_count": 20,
+                "source": "agent-c",
+                "success_rate": 1.0,
+                "target": "agent-b"
+            },
+            {
+                "avg_rtt_ms": 0.05,
+                "d_ij": 0.8333125149489987,
+                "jitter_ms": 0.09500000000000004,
+                "last_seen": "2026-05-22T14:23:54.286733595Z",
+                "probe_success": true,
+                "q_ema": 0.9998501196862706,
+                "sample_count": 20,
+                "source": "agent-b",
+                "success_rate": 1.0,
+                "target": "agent-d"
+            },
+            {
+                "avg_rtt_ms": 0.0,
+                "d_ij": 0.8333310213589661,
+                "jitter_ms": 0.0,
+                "last_seen": "2026-05-22T14:24:02.106649330Z",
+                "probe_success": true,
+                "q_ema": 0.99998810331136,
+                "sample_count": 20,
+                "source": "agent-c",
+                "success_rate": 1.0,
+                "target": "agent-d"
+            }
+        ],
+        "nodes": [
+            "agent-d",
+            "agent-b",
+            "agent-c"
+        ]
+    }
+}
+
+TASK [Assert agent-b appears in graph (probe registered its own node)] *********
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert agent-c (node B) appears in graph] ********************************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert agent-d (node C) appears in graph] ********************************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Get path agent-b → agent-c] **********************************************
+ok: [44.201.110.106]
+
+TASK [Get path agent-b → agent-d] **********************************************
+ok: [44.201.110.106]
+
+TASK [Assert path agent-b → agent-c exists] ************************************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert path agent-b → agent-d exists] ************************************
+ok: [44.201.110.106] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Gate M.3 — Evidence summary] *********************************************
+ok: [44.201.110.106] => {
+    "msg": [
+        "═══════════════════════════════════════════════════════════════════════",
+        "Gate M.3 — physarum-node capability runtime supervisor validation",
+        "═══════════════════════════════════════════════════════════════════════",
+        "Evidence 1: physarum-node.service active                          ✔",
+        "Evidence 1: physarum-server.service active (coordinator)          ✔",
+        "Evidence 1: No standalone physarum-agent.service                  ✔",
+        "Evidence 1: agent-b / agent-c / agent-d registered               ✔",
+        "Evidence 2: physarum-agent is child of physarum-node PID          ✔",
+        "Evidence 2: physarum-ebpf-observer is child of physarum-node PID  ✔",
+        "Evidence 3: Journal shows 'spawning capability subprocess' (agent)    ✔",
+        "Evidence 3: Journal shows 'spawning capability subprocess' (observer) ✔",
+        "Evidence 4: Graph edge agent-b → agent-c present                 ✔",
+        "Evidence 4: Graph edge agent-b → agent-d present                 ✔",
+        "Evidence 4: Path agent-b→agent-c resolved                        ✔",
+        "Evidence 4: Path agent-b→agent-d resolved                        ✔",
+        "═══════════════════════════════════════════════════════════════════════",
+        "Gate M.3 PASSED — physarum-node capability supervisor validated on AWS",
+        "═══════════════════════════════════════════════════════════════════════"
+    ]
+}
+
+PLAY RECAP *********************************************************************
+44.201.110.106             : ok=35   changed=6    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+# ── terraform destroy (Gap 3) ─────────────────────────────────────────────────
+#
+# Command:
+#   terraform destroy \
+#     -var="lab_phase=gate-m" \
+#     -var="operator_cidr=187.101.126.140/32" \
+#     -var="enable_artifact_download=true" \
+#     -var="artifact_bucket=physarum-artifacts-168740128169" \
+#     -var="ami_id_override=ami-0c0717dff8dafd4ca" \
+#     -auto-approve
+#
+# Key teardown events:
+#   aws_instance.agent_b: Destroying... [id=i-09eeac9103f5c3483]
+#   aws_instance.agent_c: Destroying... [id=i-0c893f29f0859be34]
+#   aws_instance.agent_d: Destroying... [id=i-0262b10caf1f0dd45]
+#   aws_vpc.lab: Destruction complete after 1s [id=vpc-0c28ce99a45f7a02c]
+#
+#   Destroy complete! Resources: 42 destroyed.
