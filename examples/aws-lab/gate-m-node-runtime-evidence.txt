@@ -1,0 +1,315 @@
+
+PLAY [Evidence 1 — physarum-node active and agents registered] *****************
+
+TASK [Check physarum-node.service status] **************************************
+changed: [44.203.76.122]
+
+TASK [Assert physarum-node is active] ******************************************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Confirm no separate physarum-agent.service (capability is supervised, not standalone)] ***
+changed: [44.203.76.122]
+
+TASK [Assert physarum-agent.service does not exist as a standalone unit] *******
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Check physarum-server.service status] ************************************
+changed: [44.203.76.122]
+
+TASK [Assert physarum-server is active (coordinator)] **************************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+PLAY [Evidence 1 (cont.) — all agents registered with coordinator] *************
+
+TASK [List registered agents] **************************************************
+ok: [44.203.76.122]
+
+TASK [Show registered agents] **************************************************
+ok: [44.203.76.122] => {
+    "agents_response.content": [
+        {
+            "address": "10.50.20.30",
+            "agent_id": "agent-d",
+            "last_seen": "2026-05-22T13:16:42.084682568Z",
+            "probe_port": 9003
+        },
+        {
+            "address": "10.50.20.20",
+            "agent_id": "agent-c",
+            "last_seen": "2026-05-22T13:16:52.261383846Z",
+            "probe_port": 9002
+        },
+        {
+            "address": "10.50.20.10",
+            "agent_id": "agent-b",
+            "last_seen": "2026-05-22T12:57:53.284563583Z",
+            "probe_port": 9001
+        }
+    ]
+}
+
+TASK [Assert agent-b (node A) is registered] ***********************************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert agent-c (node B) is registered] ***********************************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert agent-d (node C) is registered] ***********************************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+PLAY [Evidence 2 — physarum-agent and physarum-ebpf-observer are children of physarum-node PID] ***
+
+TASK [Get physarum-node MainPID from systemd] **********************************
+changed: [44.203.76.122]
+
+TASK [Parse physarum-node PID] *************************************************
+ok: [44.203.76.122]
+
+TASK [Show physarum-node PID] **************************************************
+ok: [44.203.76.122] => {
+    "msg": "physarum-node PID: 2028"
+}
+
+TASK [Assert physarum-node PID is non-zero (process is running)] ***************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [List children of physarum-node PID] **************************************
+changed: [44.203.76.122]
+
+TASK [Show child processes of physarum-node] ***********************************
+ok: [44.203.76.122] => {
+    "msg": [
+        "=== Children of physarum-node (PID 2028) ===",
+        [
+            "   2031 /usr/local/bin/physarum-agent --id agent-b --coordinator http://127.0.0.1:8080 --listen 0.0.0.0:9001 --advertise-address 10.50.20.10 --probe-interval-seconds 10",
+            "   2032 /usr/local/bin/physarum-ebpf-observer --agent-id agent-b --coordinator-url http://127.0.0.1:8080 --bpf-bytecode /usr/local/lib/physarum/physarum-ebpf-observer-ebpf"
+        ]
+    ]
+}
+
+TASK [Assert physarum-agent is a child of physarum-node] ***********************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert physarum-ebpf-observer is a child of physarum-node] ***************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+PLAY [Evidence 3 — physarum-node journal shows capability subprocess spawning] ***
+
+TASK [Collect physarum-node journal (last 500 lines)] **************************
+changed: [44.203.76.122]
+
+TASK [Show capability-related journal lines] ***********************************
+ok: [44.203.76.122] => {
+    "msg": [
+        "May 22 12:57:53 ip-10-50-20-10.ec2.internal systemd[1]: Started physarum-node.service - physarum-node (agent-b) — capability supervisor (probe,observe-flow) — Gate M.3.",
+        "May 22 12:57:53 ip-10-50-20-10.ec2.internal physarum-node[2028]: 2026-05-22T12:57:53.278692Z  INFO physarum_node::dispatch: physarum-node starting capabilities=CapabilitySet({Probe, ObserveEbpf}) id=agent-b coordinator=http://127.0.0.1:8080",
+        "May 22 12:57:53 ip-10-50-20-10.ec2.internal physarum-node[2028]: 2026-05-22T12:57:53.279077Z  INFO physarum_node::dispatch: spawning capability subprocess binary=\"physarum-agent\"",
+        "May 22 12:57:53 ip-10-50-20-10.ec2.internal physarum-node[2028]: 2026-05-22T12:57:53.279211Z  INFO physarum_node::dispatch: spawning capability subprocess binary=\"physarum-ebpf-observer\"",
+        "May 22 12:57:53 ip-10-50-20-10.ec2.internal physarum-node[2032]: 2026-05-22T12:57:53.281029Z  INFO physarum_ebpf_observer: physarum-ebpf-observer starting agent_id=agent-b coordinator=http://127.0.0.1:8080 dry_run=false filter_port=0"
+    ]
+}
+
+TASK [Assert physarum-node logged spawning physarum-agent] *********************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert physarum-node logged spawning physarum-ebpf-observer] *************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Show full capability spawn evidence from journal] ************************
+ok: [44.203.76.122] => {
+    "msg": [
+        "May 22 12:57:53 ip-10-50-20-10.ec2.internal physarum-node[2028]: 2026-05-22T12:57:53.279077Z  INFO physarum_node::dispatch: spawning capability subprocess binary=\"physarum-agent\"",
+        "May 22 12:57:53 ip-10-50-20-10.ec2.internal physarum-node[2028]: 2026-05-22T12:57:53.279211Z  INFO physarum_node::dispatch: spawning capability subprocess binary=\"physarum-ebpf-observer\""
+    ]
+}
+
+PLAY [Evidence 4 — Probe end-to-end: graph edges appear after probe rounds] ****
+
+TASK [Wait for probe rounds to complete (30 seconds)] **************************
+Pausing for 30 seconds
+ok: [44.203.76.122]
+
+TASK [Get graph state] *********************************************************
+ok: [44.203.76.122]
+
+TASK [Show graph] **************************************************************
+ok: [44.203.76.122] => {
+    "graph.content": {
+        "edges": [
+            {
+                "avg_rtt_ms": 0.0,
+                "d_ij": 0.8333036517316181,
+                "jitter_ms": 0.0,
+                "last_seen": "2026-05-22T13:44:53.129008096Z",
+                "probe_success": true,
+                "q_ema": 0.9998430242532417,
+                "sample_count": 20,
+                "source": "agent-d",
+                "success_rate": 1.0,
+                "target": "agent-c"
+            },
+            {
+                "avg_rtt_ms": 0.2,
+                "d_ij": 0.8332341621313825,
+                "jitter_ms": 0.3400000000000001,
+                "last_seen": "2026-05-22T13:44:52.971708076Z",
+                "probe_success": true,
+                "q_ema": 0.9993101442602723,
+                "sample_count": 20,
+                "source": "agent-c",
+                "success_rate": 1.0,
+                "target": "agent-d"
+            },
+            {
+                "avg_rtt_ms": 0.3,
+                "d_ij": 0.8332097184545428,
+                "jitter_ms": 0.5400000000000003,
+                "last_seen": "2026-05-22T13:44:52.972613527Z",
+                "probe_success": true,
+                "q_ema": 0.9991086462114835,
+                "sample_count": 20,
+                "source": "agent-c",
+                "success_rate": 1.0,
+                "target": "agent-b"
+            },
+            {
+                "avg_rtt_ms": 0.1,
+                "d_ij": 0.8332872875190166,
+                "jitter_ms": 0.19000000000000003,
+                "last_seen": "2026-05-22T13:44:53.130098920Z",
+                "probe_success": true,
+                "q_ema": 0.9996776503136584,
+                "sample_count": 20,
+                "source": "agent-d",
+                "success_rate": 1.0,
+                "target": "agent-b"
+            },
+            {
+                "avg_rtt_ms": 0.0,
+                "d_ij": 0.8333300361441197,
+                "jitter_ms": 0.0,
+                "last_seen": "2026-05-22T13:44:54.014765499Z",
+                "probe_success": true,
+                "q_ema": 0.9999830263582805,
+                "sample_count": 20,
+                "source": "agent-b",
+                "success_rate": 1.0,
+                "target": "agent-d"
+            },
+            {
+                "avg_rtt_ms": 0.0,
+                "d_ij": 0.8333333333333333,
+                "jitter_ms": 0.0,
+                "last_seen": "2026-05-22T13:44:54.015863191Z",
+                "probe_success": true,
+                "q_ema": 0.9999999999999996,
+                "sample_count": 20,
+                "source": "agent-b",
+                "success_rate": 1.0,
+                "target": "agent-c"
+            }
+        ],
+        "nodes": [
+            "agent-d",
+            "agent-c",
+            "agent-b"
+        ]
+    }
+}
+
+TASK [Assert agent-b appears in graph (probe registered its own node)] *********
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert agent-c (node B) appears in graph] ********************************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert agent-d (node C) appears in graph] ********************************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Get path agent-b → agent-c] **********************************************
+ok: [44.203.76.122]
+
+TASK [Get path agent-b → agent-d] **********************************************
+ok: [44.203.76.122]
+
+TASK [Assert path agent-b → agent-c exists] ************************************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Assert path agent-b → agent-d exists] ************************************
+ok: [44.203.76.122] => {
+    "changed": false,
+    "msg": "All assertions passed"
+}
+
+TASK [Gate M.3 — Evidence summary] *********************************************
+ok: [44.203.76.122] => {
+    "msg": [
+        "═══════════════════════════════════════════════════════════════════════",
+        "Gate M.3 — physarum-node capability runtime supervisor validation",
+        "═══════════════════════════════════════════════════════════════════════",
+        "Evidence 1: physarum-node.service active                          ✔",
+        "Evidence 1: physarum-server.service active (coordinator)          ✔",
+        "Evidence 1: No standalone physarum-agent.service                  ✔",
+        "Evidence 1: agent-b / agent-c / agent-d registered               ✔",
+        "Evidence 2: physarum-agent is child of physarum-node PID          ✔",
+        "Evidence 2: physarum-ebpf-observer is child of physarum-node PID  ✔",
+        "Evidence 3: Journal shows 'spawning capability subprocess' (agent)    ✔",
+        "Evidence 3: Journal shows 'spawning capability subprocess' (observer) ✔",
+        "Evidence 4: Graph edge agent-b → agent-c present                 ✔",
+        "Evidence 4: Graph edge agent-b → agent-d present                 ✔",
+        "Evidence 4: Path agent-b→agent-c resolved                        ✔",
+        "Evidence 4: Path agent-b→agent-d resolved                        ✔",
+        "═══════════════════════════════════════════════════════════════════════",
+        "Gate M.3 PASSED — physarum-node capability supervisor validated on AWS",
+        "═══════════════════════════════════════════════════════════════════════"
+    ]
+}
+
+PLAY RECAP *********************************************************************
+44.203.76.122              : ok=35   changed=6    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+

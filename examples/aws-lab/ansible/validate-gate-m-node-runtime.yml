@@ -135,7 +135,7 @@
 
     - name: List children of physarum-node PID
       ansible.builtin.command:
-        cmd: "ps --ppid {{ physarum_node_pid }} -o pid=,comm="
+        cmd: "ps --ppid {{ physarum_node_pid }} -o pid=,cmd="
       register: child_procs
       become: true
       failed_when: false
