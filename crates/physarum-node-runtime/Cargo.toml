@@ -1,0 +1,17 @@
+[package]
+name        = "physarum-node-runtime"
+description = "Shared capability model and runtime types for physarum nodes"
+version.workspace     = true
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+authors.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+readme.workspace      = true
+keywords.workspace    = true
+categories.workspace  = true
+
+[dependencies]
+serde      = { workspace = true }
+thiserror  = { workspace = true }

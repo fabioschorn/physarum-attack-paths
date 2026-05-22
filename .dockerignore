@@ -1,0 +1,32 @@
+# Build artifacts
+target/
+**/target/
+
+# External clones — never committed, not needed for Docker build
+RustScan/
+
+# VCS
+.git/
+
+# CI / tooling
+.github/
+.claude/
+
+# Local environment
+.env
+*.env
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Terraform state and secrets — never include in images
+examples/aws-lab/.keys/
+examples/aws-lab/terraform/.terraform/
+examples/aws-lab/terraform/terraform.tfstate
+examples/aws-lab/terraform/terraform.tfstate.backup
+examples/aws-lab/terraform/*.tfplan
