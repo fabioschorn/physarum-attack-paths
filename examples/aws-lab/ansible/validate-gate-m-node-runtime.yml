@@ -1,0 +1,295 @@
+---
+# physarum AWS lab — Gate M.3 physarum-node capability runtime supervisor validation.
+#
+# Validates that:
+#   1. physarum-node.service is active on node A; physarum-server is running.
+#      Agents register with coordinator. No separate physarum-agent.service exists.
+#   2. physarum-agent and physarum-ebpf-observer are children of the physarum-node PID.
+#      Subprocess hierarchy proves capability supervision is working.
+#   3. physarum-node journal shows "spawning capability subprocess" for both capabilities.
+#      Logs identify each child by binary name.
+#   4. Probe behavior works end-to-end: graph edges from agent-b to agent-c/agent-d appear
+#      after probe rounds, proving the probe capability (physarum-agent child) is functional.
+#
+# Topology (gate-m lab_phase — three nodes, all in the outer /24):
+#   agent-b  : 10.50.20.10   (node A — coordinator + physarum-node supervisor)
+#   agent-c  : 10.50.20.20   (node B — plain physarum-agent, stimulus peer)
+#   agent-d  : 10.50.20.30   (node C — plain physarum-agent, stimulus peer)
+#
+# Prerequisites:
+#   terraform apply \
+#     -var="lab_phase=gate-m" \
+#     -var="operator_cidr=$(curl -s -4 ifconfig.me)/32" \
+#     -var="enable_artifact_download=true" \
+#     -var="artifact_bucket=physarum-artifacts-168740128169"
+#
+#   Wait ~3 min for cloud-init to complete, then verify the dynamic inventory:
+#     ansible-inventory -i examples/aws-lab/ansible/aws_ec2.yml --graph
+#   Expected groups: server (agent-b), node_a (agent-b), node_b (agent-c), node_c (agent-d).
+#
+#   ansible-playbook -i examples/aws-lab/ansible/aws_ec2.yml \
+#     examples/aws-lab/ansible/validate-gate-m-node-runtime.yml
+#
+# Evidence collected (maps to Issue #94 Gate M.3 acceptance criteria):
+#   1. Service active:       physarum-node.service running; no physarum-agent.service
+#   2. Child hierarchy:      physarum-agent + physarum-ebpf-observer are children of physarum-node PID
+#   3. Spawn log lines:      "spawning capability subprocess" for both binaries in journal
+#   4. Probe end-to-end:     graph edges agent-b→agent-c and agent-b→agent-d present after probes
+
+# ── Evidence 1: physarum-node.service active; agents registered ───────────────
+
+- name: "Evidence 1 — physarum-node active and agents registered"
+  hosts: node_a
+  gather_facts: false
+  tasks:
+    - name: Check physarum-node.service status
+      ansible.builtin.command:
+        cmd: systemctl is-active physarum-node
+      register: node_status
+      become: true
+
+    - name: Assert physarum-node is active
+      ansible.builtin.assert:
+        that: "node_status.stdout == 'active'"
+        fail_msg: "physarum-node.service is not active — check cloud-init on node A"
+
+    - name: Confirm no separate physarum-agent.service (capability is supervised, not standalone)
+      ansible.builtin.command:
+        cmd: systemctl is-active physarum-agent
+      register: agent_service_status
+      become: true
+      failed_when: false
+
+    - name: Assert physarum-agent.service does not exist as a standalone unit
+      ansible.builtin.assert:
+        that: "agent_service_status.stdout != 'active'"
+        fail_msg: >
+          physarum-agent.service is active as a standalone service.
+          Gate M.3 requires physarum-agent to be a child of physarum-node, not a direct systemd unit.
+
+    - name: Check physarum-server.service status
+      ansible.builtin.command:
+        cmd: systemctl is-active physarum-server
+      register: server_status
+      become: true
+
+    - name: Assert physarum-server is active (coordinator)
+      ansible.builtin.assert:
+        that: "server_status.stdout == 'active'"
+        fail_msg: "physarum-server.service is not active — coordinator must be running"
+
+- name: "Evidence 1 (cont.) — all agents registered with coordinator"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: List registered agents
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/agents"
+        method: GET
+        return_content: true
+      register: agents_response
+
+    - name: Show registered agents
+      ansible.builtin.debug:
+        var: agents_response.content
+
+    - name: Assert agent-b (node A) is registered
+      ansible.builtin.assert:
+        that: "'agent-b' in agents_response.content"
+        fail_msg: "agent-b not registered — physarum-agent subprocess may not be running"
+
+    - name: Assert agent-c (node B) is registered
+      ansible.builtin.assert:
+        that: "'agent-c' in agents_response.content"
+        fail_msg: "agent-c (node B) not registered"
+
+    - name: Assert agent-d (node C) is registered
+      ansible.builtin.assert:
+        that: "'agent-d' in agents_response.content"
+        fail_msg: "agent-d (node C) not registered"
+
+# ── Evidence 2: subprocess hierarchy — agent and observer are children of physarum-node ──
+
+- name: "Evidence 2 — physarum-agent and physarum-ebpf-observer are children of physarum-node PID"
+  hosts: node_a
+  gather_facts: false
+  tasks:
+    - name: Get physarum-node MainPID from systemd
+      ansible.builtin.command:
+        cmd: systemctl show physarum-node -p MainPID --value
+      register: node_pid_raw
+      become: true
+
+    - name: Parse physarum-node PID
+      ansible.builtin.set_fact:
+        physarum_node_pid: "{{ node_pid_raw.stdout | trim }}"
+
+    - name: Show physarum-node PID
+      ansible.builtin.debug:
+        msg: "physarum-node PID: {{ physarum_node_pid }}"
+
+    - name: Assert physarum-node PID is non-zero (process is running)
+      ansible.builtin.assert:
+        that: "physarum_node_pid | int > 0"
+        fail_msg: "physarum-node MainPID is 0 — service may have crashed or not started"
+
+    - name: List children of physarum-node PID
+      ansible.builtin.command:
+        cmd: "ps --ppid {{ physarum_node_pid }} -o pid=,comm="
+      register: child_procs
+      become: true
+      failed_when: false
+
+    - name: Show child processes of physarum-node
+      ansible.builtin.debug:
+        msg:
+          - "=== Children of physarum-node (PID {{ physarum_node_pid }}) ==="
+          - "{{ child_procs.stdout_lines }}"
+
+    - name: Assert physarum-agent is a child of physarum-node
+      ansible.builtin.assert:
+        that: "'physarum-agent' in child_procs.stdout"
+        fail_msg: >
+          physarum-agent is not a child of physarum-node (PID {{ physarum_node_pid }}).
+          Expected probe capability to spawn physarum-agent as a subprocess.
+          Children found: {{ child_procs.stdout }}
+
+    - name: Assert physarum-ebpf-observer is a child of physarum-node
+      ansible.builtin.assert:
+        that: "'physarum-ebpf-observer' in child_procs.stdout"
+        fail_msg: >
+          physarum-ebpf-observer is not a child of physarum-node (PID {{ physarum_node_pid }}).
+          Expected observe-flow capability to spawn physarum-ebpf-observer as a subprocess.
+          Children found: {{ child_procs.stdout }}
+
+# ── Evidence 3: physarum-node journal shows capability spawn log lines ─────────
+
+- name: "Evidence 3 — physarum-node journal shows capability subprocess spawning"
+  hosts: node_a
+  gather_facts: false
+  tasks:
+    - name: Collect physarum-node journal (last 500 lines)
+      ansible.builtin.command:
+        cmd: journalctl -u physarum-node --no-pager -n 500
+      register: node_journal
+      become: true
+
+    - name: Show capability-related journal lines
+      ansible.builtin.debug:
+        msg: "{{ node_journal.stdout_lines | select('search', 'spawn|capability|physarum-agent|physarum-ebpf|starting|starting') | list }}"
+
+    - name: Assert physarum-node logged spawning physarum-agent
+      ansible.builtin.assert:
+        that: >
+          node_journal.stdout_lines
+          | select('search', 'spawning capability subprocess')
+          | select('search', 'physarum-agent')
+          | list | length > 0
+        fail_msg: >
+          Expected 'spawning capability subprocess' for binary=physarum-agent in physarum-node journal.
+          This proves the probe capability dispatch is working.
+
+    - name: Assert physarum-node logged spawning physarum-ebpf-observer
+      ansible.builtin.assert:
+        that: >
+          node_journal.stdout_lines
+          | select('search', 'spawning capability subprocess')
+          | select('search', 'physarum-ebpf-observer')
+          | list | length > 0
+        fail_msg: >
+          Expected 'spawning capability subprocess' for binary=physarum-ebpf-observer in physarum-node journal.
+          This proves the observe-flow capability dispatch is working.
+
+    - name: Show full capability spawn evidence from journal
+      ansible.builtin.debug:
+        msg: "{{ node_journal.stdout_lines | select('search', 'spawning capability subprocess') | list }}"
+
+# ── Evidence 4: probe behavior works end-to-end ───────────────────────────────
+
+- name: "Evidence 4 — Probe end-to-end: graph edges appear after probe rounds"
+  hosts: server
+  gather_facts: false
+  tasks:
+    - name: Wait for probe rounds to complete (30 seconds)
+      ansible.builtin.pause:
+        seconds: 30
+
+    - name: Get graph state
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/graph"
+        method: GET
+        return_content: true
+      register: graph
+
+    - name: Show graph
+      ansible.builtin.debug:
+        var: graph.content
+
+    - name: Assert agent-b appears in graph (probe registered its own node)
+      ansible.builtin.assert:
+        that: "'agent-b' in graph.content"
+        fail_msg: "agent-b not in graph — physarum-agent (child of physarum-node) may not be registering probes"
+
+    - name: Assert agent-c (node B) appears in graph
+      ansible.builtin.assert:
+        that: "'agent-c' in graph.content"
+        fail_msg: "agent-c not in graph — probe from physarum-node → physarum-agent may not be reaching node B"
+
+    - name: Assert agent-d (node C) appears in graph
+      ansible.builtin.assert:
+        that: "'agent-d' in graph.content"
+        fail_msg: "agent-d not in graph"
+
+    - name: Get path agent-b → agent-c
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/paths?source=agent-b&target=agent-c"
+        method: GET
+        return_content: true
+        status_code: [200, 404]
+      register: path_b_c
+
+    - name: Get path agent-b → agent-d
+      ansible.builtin.uri:
+        url: "http://{{ coordinator_ip }}:8080/paths?source=agent-b&target=agent-d"
+        method: GET
+        return_content: true
+        status_code: [200, 404]
+      register: path_b_d
+
+    - name: Assert path agent-b → agent-c exists
+      ansible.builtin.assert:
+        that: >
+          path_b_c.status == 200 and
+          'agent-b' in path_b_c.content and
+          'agent-c' in path_b_c.content
+        fail_msg: "Expected path agent-b→agent-c in /paths. Status={{ path_b_c.status }} body={{ path_b_c.content }}"
+
+    - name: Assert path agent-b → agent-d exists
+      ansible.builtin.assert:
+        that: >
+          path_b_d.status == 200 and
+          'agent-b' in path_b_d.content and
+          'agent-d' in path_b_d.content
+        fail_msg: "Expected path agent-b→agent-d in /paths. Status={{ path_b_d.status }} body={{ path_b_d.content }}"
+
+    - name: "Gate M.3 — Evidence summary"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════════════════════════════════════"
+          - "Gate M.3 — physarum-node capability runtime supervisor validation"
+          - "═══════════════════════════════════════════════════════════════════════"
+          - "Evidence 1: physarum-node.service active                          ✔"
+          - "Evidence 1: physarum-server.service active (coordinator)          ✔"
+          - "Evidence 1: No standalone physarum-agent.service                  ✔"
+          - "Evidence 1: agent-b / agent-c / agent-d registered               ✔"
+          - "Evidence 2: physarum-agent is child of physarum-node PID          ✔"
+          - "Evidence 2: physarum-ebpf-observer is child of physarum-node PID  ✔"
+          - "Evidence 3: Journal shows 'spawning capability subprocess' (agent)    ✔"
+          - "Evidence 3: Journal shows 'spawning capability subprocess' (observer) ✔"
+          - "Evidence 4: Graph edge agent-b → agent-c present                 ✔"
+          - "Evidence 4: Graph edge agent-b → agent-d present                 ✔"
+          - "Evidence 4: Path agent-b→agent-c resolved                        ✔"
+          - "Evidence 4: Path agent-b→agent-d resolved                        ✔"
+          - "═══════════════════════════════════════════════════════════════════════"
+          - "Gate M.3 PASSED — physarum-node capability supervisor validated on AWS"
+          - "═══════════════════════════════════════════════════════════════════════"
