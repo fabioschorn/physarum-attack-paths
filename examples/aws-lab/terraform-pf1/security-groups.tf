@@ -1,16 +1,26 @@
 # PF-1 maze security groups — one per host.
 #
+# Design decisions (Issue #100):
+#
+#   ICMP stimulus — Option A (systemd timer, reversed direction):
+#     Each host in a higher layer pings hosts in the lower layer every 30s.
+#     The organism's eBPF sensor captures INCOMING echo requests and uses
+#     the source IP as the discovery stimulus for the next propagation cycle.
+#
+#     Quem pinga    Quem recebe   eBPF captura em
+#     ──────────────────────────────────────────────
+#     B, C  → A     host-a        "B existe, C existe"
+#     D,E,F → B, C  host-b/c      "D existe, E existe, F existe"
+#     G     → D,E,F host-d/e/f    "G existe"
+#     A     → (nenhum, so recebe — e o seed, organismo parte daqui)
+#
+#   Verification — Option B (lineage on disk + Ansible):
+#     Each propagated organism instance writes /tmp/physarum-lineage.json.
+#     Ansible reads all hosts after expansion and prints the full path graph.
+#
 # Two-layer access control:
 #   SG (network level)  — controls which subnets can reach each host
 #   sshd AllowUsers     — controls which source IPs can authenticate (OS level)
-#
-# ICMP direction (reversed stimulus model):
-#   Higher layers ping lower layers so the organism's eBPF sensor
-#   captures the INCOMING echo request and discovers the source host.
-#
-#   host-b, host-c → ping host-a       eBPF on A learns B and C exist
-#   host-d/e/f     → ping host-b, host-c  eBPF on B/C learns D, E, F exist
-#   host-g         → ping host-d/e/f   eBPF on D/E/F learns G exists
 #
 # SSH direction (unchanged — SG allows inbound TCP 22 from previous layer):
 #   host-a SSH → host-b, host-c        (front → layer-1)
