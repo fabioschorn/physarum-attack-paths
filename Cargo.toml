@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/physarum-protocol",
     "crates/physarum-node-runtime",     # Gate M  — shared capability model and runtime types
+    "crates/physarum-node",             # Gate M.2 — role-fluid node binary (capability dispatcher)
     "crates/physarum-server",
     "crates/physarum-agent",
     "crates/physarum-scanner",          # Gate L  — async TCP-connect port scanner (internal, inspired by RustScan)
