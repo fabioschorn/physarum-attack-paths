@@ -11,7 +11,7 @@ COPY . .
 RUN cargo build --release -p physarum-server -p physarum-agent
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM debian:13.5-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
