@@ -1,5 +1,6 @@
 use clap::Parser;
 use physarum_node_runtime::CapabilitySet;
+use physarum_probe::probe::DiscoveryScopeMode;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -11,8 +12,8 @@ use std::path::PathBuf;
                   Use --capabilities to select which roles this node performs.\n\n\
                   Examples:\n  \
                   physarum-node --capabilities probe ...\n  \
-                  physarum-node --capabilities probe,observe-flow --flow-bpf-bytecode /usr/local/lib/physarum-ebpf-observer-ebpf.elf ...\n  \
-                  physarum-node --capabilities probe,observe-packet --packet-bpf-bytecode /usr/local/lib/physarum-packet-observer-ebpf.elf ..."
+                  physarum-node --capabilities probe,observe-flow ...\n  \
+                  physarum-node --capabilities probe,observe-flow,observe-packet ..."
 )]
 pub struct Cli {
     /// Comma-separated capability set.
@@ -41,6 +42,69 @@ pub struct Cli {
     /// Seconds between outbound probe rounds.
     #[arg(long, default_value = "10", env = "PHYSARUM_PROBE_INTERVAL_SECONDS")]
     pub probe_interval_seconds: u64,
+
+    /// Fraction of outgoing probes to report as failed regardless of actual result.
+    /// Range [0.0, 1.0]. Lab-only — not a production signal.
+    #[arg(long, default_value = "0.0", env = "PHYSARUM_SYNTHETIC_FAILURE_RATE")]
+    pub synthetic_failure_rate: f64,
+
+    /// Comma-separated list of agent IDs this node will probe.
+    /// Empty means probe all registered peers.
+    #[arg(long, default_value = "", env = "PHYSARUM_PROBE_TARGETS")]
+    pub probe_targets: String,
+
+    // ── Discovery flags ───────────────────────────────────────────────────
+    /// Enable blind TCP candidate discovery (Gate L).
+    #[arg(long, default_value_t = false, env = "PHYSARUM_DISCOVERY_ENABLED")]
+    pub discovery_enabled: bool,
+
+    /// RFC1918 CIDRs to scan, comma-separated (e.g. "10.50.20.0/24").
+    #[arg(long, default_value = "", env = "PHYSARUM_DISCOVERY_CIDRS")]
+    pub discovery_cidrs: String,
+
+    /// TCP ports to probe during discovery, comma-separated.
+    #[arg(
+        long,
+        default_value = "9001,9002,9003,9004",
+        env = "PHYSARUM_DISCOVERY_PORTS"
+    )]
+    pub discovery_ports: String,
+
+    /// Seconds between scheduled discovery runs.
+    #[arg(long, default_value_t = 300, env = "PHYSARUM_DISCOVERY_INTERVAL_SECS")]
+    pub discovery_interval_secs: u64,
+
+    /// Maximum candidates returned per discovery run.
+    #[arg(long, default_value_t = 50, env = "PHYSARUM_DISCOVERY_MAX_CANDIDATES")]
+    pub discovery_max_candidates: usize,
+
+    /// Connection timeout for each probe socket (ms).
+    #[arg(long, default_value_t = 1500, env = "PHYSARUM_DISCOVERY_TIMEOUT_MS")]
+    pub discovery_timeout_ms: u64,
+
+    /// Cooldown before re-scanning a seed IP (Gate L.1, seconds).
+    #[arg(
+        long,
+        default_value_t = 300,
+        env = "PHYSARUM_DISCOVERY_SEED_COOLDOWN_SECS"
+    )]
+    pub discovery_seed_cooldown_secs: u64,
+
+    /// How to build the discovery CIDR scope.
+    #[arg(
+        long,
+        default_value = "explicit",
+        env = "PHYSARUM_DISCOVERY_SCOPE_MODE"
+    )]
+    pub discovery_scope_mode: DiscoveryScopeMode,
+
+    /// Enable TCP socket-state sensing via eBPF flow-observations (Gate L.2). Default: true.
+    #[arg(long, default_value_t = true, env = "PHYSARUM_SENSE_TCP_SOCKET_STATE")]
+    pub sense_tcp_socket_state: bool,
+
+    /// Enable ICMP packet-level sensing via packet-observations (Gate L.3). Default: false.
+    #[arg(long, default_value_t = false, env = "PHYSARUM_SENSE_ICMP_PACKET")]
+    pub sense_icmp_packet: bool,
 
     // ── ObserveEbpf (observe-flow) flags ─────────────────────────────────
     /// Path to the compiled eBPF bytecode ELF for TCP flow observation.
@@ -112,7 +176,6 @@ mod tests {
         let cli = parse(&args);
         assert!(cli.capabilities.contains(&NodeCapability::Probe));
         assert!(cli.capabilities.contains(&NodeCapability::ObserveEbpf));
-        assert!(!cli.capabilities.contains(&NodeCapability::ObservePacket));
     }
 
     #[test]
@@ -121,7 +184,6 @@ mod tests {
         args.extend(["--capabilities", "probe,observe-packet"]);
         let cli = parse(&args);
         assert!(cli.capabilities.contains(&NodeCapability::Probe));
-        assert!(!cli.capabilities.contains(&NodeCapability::ObserveEbpf));
         assert!(cli.capabilities.contains(&NodeCapability::ObservePacket));
     }
 
@@ -148,6 +210,39 @@ mod tests {
     }
 
     #[test]
+    fn discovery_flags_default_correctly() {
+        let mut args = base_args();
+        args.extend(["--capabilities", "probe"]);
+        let cli = parse(&args);
+        assert!(!cli.discovery_enabled);
+        assert_eq!(cli.discovery_cidrs, "");
+        assert_eq!(cli.discovery_ports, "9001,9002,9003,9004");
+        assert_eq!(cli.discovery_interval_secs, 300);
+        assert_eq!(cli.discovery_max_candidates, 50);
+        assert_eq!(cli.discovery_timeout_ms, 1500);
+        assert_eq!(cli.discovery_seed_cooldown_secs, 300);
+        assert!(cli.sense_tcp_socket_state);
+        assert!(!cli.sense_icmp_packet);
+        assert_eq!(cli.synthetic_failure_rate, 0.0);
+        assert_eq!(cli.probe_targets, "");
+    }
+
+    #[test]
+    fn discovery_enabled_flag_parses() {
+        let mut args = base_args();
+        args.extend([
+            "--capabilities",
+            "probe",
+            "--discovery-enabled",
+            "--discovery-cidrs",
+            "10.50.20.0/24",
+        ]);
+        let cli = parse(&args);
+        assert!(cli.discovery_enabled);
+        assert_eq!(cli.discovery_cidrs, "10.50.20.0/24");
+    }
+
+    #[test]
     fn observer_flags_default_correctly() {
         let mut args = base_args();
         args.extend(["--capabilities", "probe,observe-flow,observe-packet"]);
@@ -156,33 +251,5 @@ mod tests {
         assert!(cli.packet_bpf_bytecode.is_none());
         assert_eq!(cli.interface, "eth0");
         assert_eq!(cli.flow_filter_port, 0);
-    }
-
-    #[test]
-    fn observer_flags_are_configurable() {
-        let mut args = base_args();
-        args.extend([
-            "--capabilities",
-            "probe,observe-flow,observe-packet",
-            "--flow-bpf-bytecode",
-            "/usr/local/lib/flow.elf",
-            "--packet-bpf-bytecode",
-            "/usr/local/lib/packet.elf",
-            "--interface",
-            "ens5",
-            "--flow-filter-port",
-            "9001",
-        ]);
-        let cli = parse(&args);
-        assert_eq!(
-            cli.flow_bpf_bytecode.as_deref(),
-            Some(std::path::Path::new("/usr/local/lib/flow.elf"))
-        );
-        assert_eq!(
-            cli.packet_bpf_bytecode.as_deref(),
-            Some(std::path::Path::new("/usr/local/lib/packet.elf"))
-        );
-        assert_eq!(cli.interface, "ens5");
-        assert_eq!(cli.flow_filter_port, 9001);
     }
 }

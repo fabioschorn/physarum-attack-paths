@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 physarum-node-runtime = { path = "../physarum-node-runtime" }
+physarum-probe        = { path = "../physarum-probe" }
 anyhow     = { workspace = true }
 clap       = { workspace = true }
 tokio      = { workspace = true }

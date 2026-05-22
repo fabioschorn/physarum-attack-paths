@@ -1002,16 +1002,8 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "physarum-agent"
 version = "0.0.1"
 dependencies = [
- "axum",
- "chrono",
  "clap",
- "if-addrs",
- "physarum-protocol",
- "physarum-scanner",
- "rand 0.8.6",
- "reqwest",
- "serde",
- "serde_json",
+ "physarum-probe",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1042,6 +1034,7 @@ dependencies = [
  "anyhow",
  "clap",
  "physarum-node-runtime",
+ "physarum-probe",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1071,6 +1064,24 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "physarum-probe"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "clap",
+ "if-addrs",
+ "physarum-protocol",
+ "physarum-scanner",
+ "rand 0.8.6",
+ "reqwest",
+ "serde",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
