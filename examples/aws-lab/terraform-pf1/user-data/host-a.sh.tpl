@@ -40,50 +40,17 @@ SSHCFG
 chmod 600 /home/ec2-user/.ssh/config
 chown ec2-user:ec2-user /home/ec2-user/.ssh/config
 
-# ── ICMP stimulus — pings next-layer hosts so eBPF captures the flow ──────────
-# Host A can reach layer-1 (B, C) via ICMP per SG rules.
-# A timer fires every 30s — each ping generates an echo reply that the
-# physarum organism's eBPF sensor captures as a discovery stimulus.
-cat > /usr/local/bin/physarum-icmp-stimulus.sh <<'SCRIPT'
-#!/bin/bash
-for target in host-b host-c; do
-    ping -c1 -W2 "$target" >/dev/null 2>&1 || true
-done
-SCRIPT
-chmod +x /usr/local/bin/physarum-icmp-stimulus.sh
-
-cat > /etc/systemd/system/physarum-icmp-stimulus.service <<'SVC'
-[Unit]
-Description=Physarum ICMP stimulus — pings layer-1 hosts for eBPF discovery
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/physarum-icmp-stimulus.sh
-SVC
-
-cat > /etc/systemd/system/physarum-icmp-stimulus.timer <<'TMR'
-[Unit]
-Description=Physarum ICMP stimulus timer (30s interval)
-
-[Timer]
-OnBootSec=15s
-OnUnitActiveSec=30s
-
-[Install]
-WantedBy=timers.target
-TMR
-
-systemctl daemon-reload
-systemctl enable --now physarum-icmp-stimulus.timer
-
 # ── Maze marker ───────────────────────────────────────────────────────────────
+# Host A only RECEIVES ICMP (from B and C pinging inbound).
+# No outbound ping timer here — A's eBPF captures incoming echo requests
+# and uses the source IP as the discovery stimulus.
 cat > /etc/physarum-maze.json <<EOF
 {
   "maze_role": "seed",
   "maze_layer": "front",
   "host": "${hostname}",
   "propagation": "ip-based — no SSH key, source IP 10.60.10.10 is the credential",
-  "icmp_stimulus_targets": ["host-b", "host-c"],
+  "icmp_stimulus": "inbound — B and C ping A; eBPF captures source IPs",
   "note": "PF-1 organism entry point. Only this host receives physarum-node at lab start."
 }
 EOF

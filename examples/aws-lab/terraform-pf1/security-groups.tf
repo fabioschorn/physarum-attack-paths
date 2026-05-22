@@ -1,38 +1,58 @@
 # PF-1 maze security groups — one per host.
 #
-# Layer visibility rules enforced by SGs:
+# Two-layer access control:
+#   SG (network level)  — controls which subnets can reach each host
+#   sshd AllowUsers     — controls which source IPs can authenticate (OS level)
+#
+# ICMP direction (reversed stimulus model):
+#   Higher layers ping lower layers so the organism's eBPF sensor
+#   captures the INCOMING echo request and discovers the source host.
+#
+#   host-b, host-c → ping host-a       eBPF on A learns B and C exist
+#   host-d/e/f     → ping host-b, host-c  eBPF on B/C learns D, E, F exist
+#   host-g         → ping host-d/e/f   eBPF on D/E/F learns G exists
+#
+# SSH direction (unchanged — SG allows inbound TCP 22 from previous layer):
+#   host-a SSH → host-b, host-c        (front → layer-1)
+#   host-b/c SSH → host-d, host-e, host-f  (layer-1 → layer-2)
+#   host-d/e/f SSH → host-g            (layer-2 → layer-3)
+#
+# Layer visibility summary:
 #
 #   Host A (front)
-#     inbound:  SSH from operator only
-#     outbound: all (reaches layer-1 for propagation + IGW for S3/SSM)
+#     inbound:  SSH from operator
+#               ICMP from layer-1 (B and C ping A — eBPF stimulus)
+#     outbound: all
 #
 #   Host B (layer-1)
-#     inbound:  SSH from operator + SSH/ICMP from front (A can reach B)
+#     inbound:  SSH from operator + SSH from front (A propagates to B)
+#               ICMP from layer-2 (D/E/F ping B — eBPF stimulus)
 #     outbound: all
 #
 #   Host C (layer-1)
-#     inbound:  SSH from operator + SSH/ICMP from front (A can reach C)
+#     inbound:  SSH from operator + SSH from front (A propagates to C)
+#               ICMP from layer-2 (D/E/F ping C — eBPF stimulus)
 #     outbound: all
 #
-#   Host D (layer-2 — dead end)
-#     inbound:  SSH from operator + SSH/ICMP from layer-1 (RustScan sees port 22 open)
+#   Host D (layer-2 - dead end)
+#     inbound:  SSH from operator + SSH from layer-1 (port 22 open; sshd rejects)
+#               ICMP from layer-3 (G pings D — eBPF stimulus)
 #     outbound: all
-#     sshd AllowUsers: operator only → SSH propagation from B/C fails at OS level
 #
-#   Host E (layer-2 — loop risk)
-#     inbound:  SSH from operator + SSH/ICMP from layer-1
-#     outbound: all (including layer-1 — creates feedback/loop signal)
-#     sshd AllowUsers: C + operator → propagation from C works, but E sees layer-1 again
-#
-#   Host F (layer-2 — valid corridor)
-#     inbound:  SSH from operator + SSH/ICMP from layer-1
+#   Host E (layer-2 - loop risk)
+#     inbound:  SSH from operator + SSH from layer-1 (C's IP accepted by sshd)
+#               ICMP from layer-3 (G pings E — eBPF stimulus)
 #     outbound: all
-#     sshd AllowUsers: C + operator → valid propagation corridor to G
 #
-#   Host G (layer-3 — expansion milestone)
-#     inbound:  SSH from operator + SSH/ICMP from layer-2 (D/E/F can see it)
+#   Host F (layer-2 - valid corridor)
+#     inbound:  SSH from operator + SSH from layer-1 (C's IP accepted by sshd)
+#               ICMP from layer-3 (G pings F — eBPF stimulus)
 #     outbound: all
-#     sshd AllowUsers: F + operator → only F can propagate to G
+#
+#   Host G (layer-3 - expansion milestone)
+#     inbound:  SSH from operator + SSH from layer-2 (F's IP accepted by sshd)
+#               no ICMP ingress (nothing above G pings it)
+#     outbound: all (pings D/E/F continuously as stimulus)
 
 # ── Security group shells (no inline rules — avoids circular deps) ────────────
 
@@ -160,6 +180,16 @@ resource "aws_security_group_rule" "host_a_ssh_operator" {
   security_group_id = aws_security_group.host_a.id
 }
 
+resource "aws_security_group_rule" "host_a_icmp_from_layer1" {
+  type              = "ingress"
+  description       = "ICMP from layer-1 (B and C ping A - eBPF discovery stimulus)"
+  from_port         = -1
+  to_port           = -1
+  protocol          = "icmp"
+  cidr_blocks       = [local.subnets.layer1.cidr]
+  security_group_id = aws_security_group.host_a.id
+}
+
 # ── Host B ingress rules ───────────────────────────────────────────────────────
 
 resource "aws_security_group_rule" "host_b_ssh_operator" {
@@ -182,13 +212,13 @@ resource "aws_security_group_rule" "host_b_ssh_from_front" {
   security_group_id = aws_security_group.host_b.id
 }
 
-resource "aws_security_group_rule" "host_b_icmp_from_front" {
+resource "aws_security_group_rule" "host_b_icmp_from_layer2" {
   type              = "ingress"
-  description       = "ICMP from front subnet (A can sense B)"
+  description       = "ICMP from layer-2 (D/E/F ping B - eBPF discovery stimulus)"
   from_port         = -1
   to_port           = -1
   protocol          = "icmp"
-  cidr_blocks       = [local.subnets.front.cidr]
+  cidr_blocks       = [local.subnets.layer2.cidr]
   security_group_id = aws_security_group.host_b.id
 }
 
@@ -214,19 +244,19 @@ resource "aws_security_group_rule" "host_c_ssh_from_front" {
   security_group_id = aws_security_group.host_c.id
 }
 
-resource "aws_security_group_rule" "host_c_icmp_from_front" {
+resource "aws_security_group_rule" "host_c_icmp_from_layer2" {
   type              = "ingress"
-  description       = "ICMP from front subnet (A can sense C)"
+  description       = "ICMP from layer-2 (D/E/F ping C - eBPF discovery stimulus)"
   from_port         = -1
   to_port           = -1
   protocol          = "icmp"
-  cidr_blocks       = [local.subnets.front.cidr]
+  cidr_blocks       = [local.subnets.layer2.cidr]
   security_group_id = aws_security_group.host_c.id
 }
 
 # ── Host D ingress rules (dead end) ───────────────────────────────────────────
-# Port 22 is open at SG level so RustScan from layer-1 sees it.
-# sshd AllowUsers on D permits only the operator — propagation from B/C fails at OS level.
+# Port 22 open at SG level so organism from layer-1 can attempt SSH.
+# sshd AllowUsers on D permits only the operator — propagation fails at OS level.
 
 resource "aws_security_group_rule" "host_d_ssh_operator" {
   type              = "ingress"
@@ -240,7 +270,7 @@ resource "aws_security_group_rule" "host_d_ssh_operator" {
 
 resource "aws_security_group_rule" "host_d_ssh_from_layer1" {
   type              = "ingress"
-  description       = "SSH from layer-1 (RustScan sees port 22 open; sshd rejects propagation)"
+  description       = "SSH from layer-1 (port 22 open; sshd rejects propagation - dead end)"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
@@ -248,19 +278,17 @@ resource "aws_security_group_rule" "host_d_ssh_from_layer1" {
   security_group_id = aws_security_group.host_d.id
 }
 
-resource "aws_security_group_rule" "host_d_icmp_from_layer1" {
+resource "aws_security_group_rule" "host_d_icmp_from_layer3" {
   type              = "ingress"
-  description       = "ICMP from layer-1 (D visible by ICMP; not a valid propagation corridor)"
+  description       = "ICMP from layer-3 (G pings D - eBPF discovery stimulus)"
   from_port         = -1
   to_port           = -1
   protocol          = "icmp"
-  cidr_blocks       = [local.subnets.layer1.cidr]
+  cidr_blocks       = [local.subnets.layer3.cidr]
   security_group_id = aws_security_group.host_d.id
 }
 
 # ── Host E ingress rules (loop risk) ──────────────────────────────────────────
-# E accepts SSH from layer-1 at SG level and sshd AllowUsers permits C.
-# E's outbound is unrestricted — it can reach back to layer-1 (loop risk).
 
 resource "aws_security_group_rule" "host_e_ssh_operator" {
   type              = "ingress"
@@ -274,7 +302,7 @@ resource "aws_security_group_rule" "host_e_ssh_operator" {
 
 resource "aws_security_group_rule" "host_e_ssh_from_layer1" {
   type              = "ingress"
-  description       = "SSH from layer-1 (C can propagate to E; E sees layer-1 again - loop risk)"
+  description       = "SSH from layer-1 (C propagates to E - loop risk)"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
@@ -282,13 +310,13 @@ resource "aws_security_group_rule" "host_e_ssh_from_layer1" {
   security_group_id = aws_security_group.host_e.id
 }
 
-resource "aws_security_group_rule" "host_e_icmp_from_layer1" {
+resource "aws_security_group_rule" "host_e_icmp_from_layer3" {
   type              = "ingress"
-  description       = "ICMP from layer-1 (E visible as candidate from B/C)"
+  description       = "ICMP from layer-3 (G pings E - eBPF discovery stimulus)"
   from_port         = -1
   to_port           = -1
   protocol          = "icmp"
-  cidr_blocks       = [local.subnets.layer1.cidr]
+  cidr_blocks       = [local.subnets.layer3.cidr]
   security_group_id = aws_security_group.host_e.id
 }
 
@@ -306,7 +334,7 @@ resource "aws_security_group_rule" "host_f_ssh_operator" {
 
 resource "aws_security_group_rule" "host_f_ssh_from_layer1" {
   type              = "ingress"
-  description       = "SSH from layer-1 (C to F valid propagation corridor)"
+  description       = "SSH from layer-1 (C propagates to F - valid corridor)"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
@@ -314,19 +342,20 @@ resource "aws_security_group_rule" "host_f_ssh_from_layer1" {
   security_group_id = aws_security_group.host_f.id
 }
 
-resource "aws_security_group_rule" "host_f_icmp_from_layer1" {
+resource "aws_security_group_rule" "host_f_icmp_from_layer3" {
   type              = "ingress"
-  description       = "ICMP from layer-1 (F visible as candidate from B/C)"
+  description       = "ICMP from layer-3 (G pings F - eBPF discovery stimulus)"
   from_port         = -1
   to_port           = -1
   protocol          = "icmp"
-  cidr_blocks       = [local.subnets.layer1.cidr]
+  cidr_blocks       = [local.subnets.layer3.cidr]
   security_group_id = aws_security_group.host_f.id
 }
 
 # ── Host G ingress rules (expansion milestone) ────────────────────────────────
-# Port 22 open from layer-2 so D/E/F all see it via RustScan.
+# Port 22 open from layer-2 so D/E/F can attempt SSH after eBPF discovery.
 # sshd AllowUsers on G permits only F — D and E are rejected at OS level.
+# No ICMP ingress — nothing above G pings it.
 
 resource "aws_security_group_rule" "host_g_ssh_operator" {
   type              = "ingress"
@@ -340,20 +369,10 @@ resource "aws_security_group_rule" "host_g_ssh_operator" {
 
 resource "aws_security_group_rule" "host_g_ssh_from_layer2" {
   type              = "ingress"
-  description       = "SSH from layer-2 (D/E/F see port 22 open; only F accepted by sshd)"
+  description       = "SSH from layer-2 (F propagates to G; D/E rejected by sshd)"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
-  cidr_blocks       = [local.subnets.layer2.cidr]
-  security_group_id = aws_security_group.host_g.id
-}
-
-resource "aws_security_group_rule" "host_g_icmp_from_layer2" {
-  type              = "ingress"
-  description       = "ICMP from layer-2 (G visible as candidate from D/E/F)"
-  from_port         = -1
-  to_port           = -1
-  protocol          = "icmp"
   cidr_blocks       = [local.subnets.layer2.cidr]
   security_group_id = aws_security_group.host_g.id
 }
