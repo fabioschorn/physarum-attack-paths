@@ -9,7 +9,10 @@ use thiserror::Error;
 #[serde(rename_all = "snake_case")]
 pub enum NodeCapability {
     Probe,
+    /// TCP flow observer via eBPF tracepoint (physarum-ebpf-observer).
     ObserveEbpf,
+    /// ICMP packet observer via eBPF tc ingress (physarum-packet-observer).
+    ObservePacket,
     DiscoverRustScan,
     ServeLocal,
     Coordinate,
@@ -19,7 +22,8 @@ impl fmt::Display for NodeCapability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Probe => write!(f, "probe"),
-            Self::ObserveEbpf => write!(f, "observe-ebpf"),
+            Self::ObserveEbpf => write!(f, "observe-flow"),
+            Self::ObservePacket => write!(f, "observe-packet"),
             Self::DiscoverRustScan => write!(f, "discover-rustscan"),
             Self::ServeLocal => write!(f, "serve-local"),
             Self::Coordinate => write!(f, "coordinate"),
@@ -37,7 +41,8 @@ impl FromStr for NodeCapability {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "probe" => Ok(Self::Probe),
-            "observe-ebpf" => Ok(Self::ObserveEbpf),
+            "observe-flow" => Ok(Self::ObserveEbpf),
+            "observe-packet" => Ok(Self::ObservePacket),
             "discover-rustscan" => Ok(Self::DiscoverRustScan),
             "serve-local" => Ok(Self::ServeLocal),
             "coordinate" => Ok(Self::Coordinate),
@@ -63,7 +68,7 @@ impl CapabilitySet {
     }
 }
 
-/// Parse a comma-separated capability list (e.g. "probe,observe-ebpf").
+/// Parse a comma-separated capability list (e.g. "probe,observe-flow").
 impl FromStr for CapabilitySet {
     type Err = ParseCapabilityError;
 
@@ -89,8 +94,12 @@ mod tests {
             NodeCapability::Probe
         );
         assert_eq!(
-            "observe-ebpf".parse::<NodeCapability>().unwrap(),
+            "observe-flow".parse::<NodeCapability>().unwrap(),
             NodeCapability::ObserveEbpf
+        );
+        assert_eq!(
+            "observe-packet".parse::<NodeCapability>().unwrap(),
+            NodeCapability::ObservePacket
         );
         assert_eq!(
             "discover-rustscan".parse::<NodeCapability>().unwrap(),
@@ -105,7 +114,7 @@ mod tests {
 
     #[test]
     fn parse_capability_set_csv() {
-        let set: CapabilitySet = "probe,observe-ebpf".parse().unwrap();
+        let set: CapabilitySet = "probe,observe-flow".parse().unwrap();
         assert!(set.contains(&NodeCapability::Probe));
         assert!(set.contains(&NodeCapability::ObserveEbpf));
         assert!(!set.contains(&NodeCapability::DiscoverRustScan));
@@ -113,7 +122,7 @@ mod tests {
 
     #[test]
     fn requires_ebpf_privilege() {
-        let with_ebpf: CapabilitySet = "probe,observe-ebpf".parse().unwrap();
+        let with_ebpf: CapabilitySet = "probe,observe-flow".parse().unwrap();
         let without_ebpf: CapabilitySet = "probe,discover-rustscan".parse().unwrap();
         assert!(with_ebpf.requires_ebpf_privilege());
         assert!(!without_ebpf.requires_ebpf_privilege());
@@ -124,6 +133,7 @@ mod tests {
         for cap in [
             NodeCapability::Probe,
             NodeCapability::ObserveEbpf,
+            NodeCapability::ObservePacket,
             NodeCapability::DiscoverRustScan,
             NodeCapability::ServeLocal,
             NodeCapability::Coordinate,

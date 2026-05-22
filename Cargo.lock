@@ -1036,6 +1036,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "physarum-node"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "physarum-node-runtime",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "physarum-node-runtime"
 version = "0.0.1"
 dependencies = [

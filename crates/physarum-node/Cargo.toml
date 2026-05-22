@@ -1,0 +1,25 @@
+[package]
+name        = "physarum-node"
+description = "Role-fluid physarum node — composes capabilities via a single binary"
+version.workspace     = true
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+authors.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+readme.workspace      = true
+keywords.workspace    = true
+categories.workspace  = true
+
+[[bin]]
+name = "physarum-node"
+path = "src/main.rs"
+
+[dependencies]
+physarum-node-runtime = { path = "../physarum-node-runtime" }
+anyhow     = { workspace = true }
+clap       = { workspace = true }
+tokio      = { workspace = true }
+tracing    = { workspace = true }
+tracing-subscriber = { workspace = true }
