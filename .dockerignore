@@ -1,0 +1,39 @@
+# Build artifacts
+target/
+xtask/target/
+
+# eBPF crate build artifacts
+crates/physarum-ebpf-observer-ebpf/target/
+crates/physarum-packet-observer-ebpf/target/
+
+# Lock files from sub-workspaces (not needed in build context)
+crates/physarum-ebpf-observer-ebpf/Cargo.lock
+crates/physarum-packet-observer-ebpf/Cargo.lock
+xtask/Cargo.lock
+
+# External clones — never committed, not needed for Docker build
+RustScan/
+
+# VCS
+.git/
+.gitignore
+
+# CI / tooling
+.github/
+.claude/
+
+# Local environment
+.env
+*.env
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Terraform and lab state — not needed in container
+examples/
+Utilities/
