@@ -1,22 +1,12 @@
 # Build artifacts
 target/
-xtask/target/
-
-# eBPF crate build artifacts
-crates/physarum-ebpf-observer-ebpf/target/
-crates/physarum-packet-observer-ebpf/target/
-
-# Lock files from sub-workspaces (not needed in build context)
-crates/physarum-ebpf-observer-ebpf/Cargo.lock
-crates/physarum-packet-observer-ebpf/Cargo.lock
-xtask/Cargo.lock
+**/target/
 
 # External clones — never committed, not needed for Docker build
 RustScan/
 
 # VCS
 .git/
-.gitignore
 
 # CI / tooling
 .github/
@@ -34,6 +24,9 @@ RustScan/
 .DS_Store
 Thumbs.db
 
-# Terraform and lab state — not needed in container
-examples/
-Utilities/
+# Terraform state and secrets — never include in images
+examples/aws-lab/.keys/
+examples/aws-lab/terraform/.terraform/
+examples/aws-lab/terraform/terraform.tfstate
+examples/aws-lab/terraform/terraform.tfstate.backup
+examples/aws-lab/terraform/*.tfplan
