@@ -23,6 +23,8 @@ pub struct Lineage {
     pub dead_ends: HashSet<String>,
     /// D_ij edge weights keyed as "src_ip->dst_ip"
     pub scores: HashMap<String, f64>,
+    /// UTC timestamp of each successful hop, keyed as "src_ip->dst_ip"
+    pub transitions: HashMap<String, String>,
     /// Total hops from origin
     pub hops: usize,
     pub started_at: String,
@@ -41,6 +43,7 @@ impl Lineage {
             visited,
             dead_ends: HashSet::new(),
             scores: HashMap::new(),
+            transitions: HashMap::new(),
             hops: 0,
             started_at: now.clone(),
             updated_at: now,
@@ -51,12 +54,14 @@ impl Lineage {
     pub fn extend(&self, next_ip: &str) -> Self {
         let mut next = self.clone();
         let edge = self.edge_key(next_ip);
+        let now = Utc::now().to_rfc3339();
         // Reinforce the successful edge (D_ij adaptation: multiply by 1.5)
-        *next.scores.entry(edge).or_insert(1.0) *= 1.5;
+        *next.scores.entry(edge.clone()).or_insert(1.0) *= 1.5;
+        next.transitions.insert(edge, now.clone());
         next.path.push(next_ip.to_string());
         next.visited.insert(next_ip.to_string());
         next.hops += 1;
-        next.updated_at = Utc::now().to_rfc3339();
+        next.updated_at = now;
         next
     }
 

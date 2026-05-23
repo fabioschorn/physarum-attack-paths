@@ -359,8 +359,10 @@ if [ "$errors" -eq 0 ]; then
   echo -e "${BOLD}Passo 2 — lançar o organismo no Host A:${NC}"
   echo ""
   echo '  HOST_A_IP=<public IP do host-a>'
+  echo '  IFACE=$(ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@$HOST_A_IP \'
+  echo '    "ip -o link show | awk -F'\'': '\'' '\''{print \$2}'\'' | grep -v lo | head -1")'
   echo '  ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@$HOST_A_IP \'
-  echo '    "sudo nohup /usr/local/bin/physarum-maze --mode seed --interface eth0 >/tmp/physarum-maze.log 2>&1 &"'
+  echo '    "sudo nohup /usr/local/bin/physarum-maze --mode seed --interface \$IFACE >/tmp/physarum-maze.log 2>&1 &"'
   echo ""
   echo -e "${BOLD}Passo 3 — verificar expansão (Ansible):${NC}"
   echo ""

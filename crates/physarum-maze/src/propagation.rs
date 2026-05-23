@@ -62,12 +62,12 @@ pub async fn propagate(target: Ipv4Addr, local_bin: &Path, lineage_b64: &str) ->
     tracing::info!(%target, "SSH launch");
 
     // Run as root so the binary can open a raw ICMP socket.
-    // ec2-user has passwordless sudo on Amazon Linux 2023.
+    // systemd-run --no-block creates a transient unit completely detached from the
+    // SSH session — no parent wait, no fd inheritance, returns immediately.
     let remote_cmd = format!(
-        "chmod +x {bin} && sudo nohup {bin} --mode propagated --lineage-b64 {b64} >{log} 2>&1 &",
+        "chmod +x {bin} && sudo systemd-run --no-block --collect --unit=physarum-maze {bin} --mode propagated --lineage-b64 {b64}",
         bin = REMOTE_BIN,
         b64 = lineage_b64,
-        log = REMOTE_LOG,
     );
 
     let ssh_ok = Command::new("sshpass")
@@ -81,6 +81,10 @@ pub async fn propagate(target: Ipv4Addr, local_bin: &Path, lineage_b64: &str) ->
             "UserKnownHostsFile=/dev/null",
             "-o",
             "ConnectTimeout=10",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=3",
             "-o",
             "BatchMode=no",
             &format!("ec2-user@{}", target_s),

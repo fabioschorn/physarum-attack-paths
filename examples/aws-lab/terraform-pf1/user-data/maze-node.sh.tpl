@@ -14,7 +14,9 @@ ${maze_hosts_entries}
 HOSTS
 
 # ── System tools ──────────────────────────────────────────────────────────────
-dnf install -y traceroute iputils jq curl sshpass 2>/dev/null || true
+dnf install -y traceroute iputils jq curl 2>&1 || true
+# sshpass is critical for the organism propagation — install explicitly
+dnf install -y sshpass 2>&1 || { echo "WARNING: sshpass install failed — propagation will not work" >&2; }
 
 # ── ec2-user — empty password for IP-based SSH propagation ───────────────────
 # The physarum organism propagates without any SSH key. Source IP is the

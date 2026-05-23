@@ -13,7 +13,8 @@ ${maze_hosts_entries}
 HOSTS
 
 # ── System tools ──────────────────────────────────────────────────────────────
-dnf install -y traceroute iputils jq curl sshpass 2>/dev/null || true
+dnf install -y traceroute iputils jq curl 2>&1 || true
+dnf install -y sshpass 2>&1 || { echo "WARNING: sshpass install failed — propagation will not work" >&2; }
 
 # ── physarum-maze binary — download from S3 via IAM Instance Profile ──────────
 ARTIFACT_BUCKET="${artifact_bucket}"
