@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use physarum_node_runtime::NodeCapability;
+use physarum_probe::probe::ProbeConfig;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
@@ -13,8 +14,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         );
     }
 
-    let bin_dir = sibling_bin_dir()?;
-
     tracing::info!(
         capabilities = ?cli.capabilities,
         id = %cli.id,
@@ -24,23 +23,26 @@ pub async fn run(cli: Cli) -> Result<()> {
 
     let mut set = tokio::task::JoinSet::new();
 
-    // Probe capability — delegate to physarum-agent.
-    let agent_cmd = build_agent_cmd(&cli, &bin_dir)?;
-    set.spawn(supervise("physarum-agent", agent_cmd));
+    // Probe capability — run inline (Gate M.4: no subprocess).
+    let probe_cfg = build_probe_config(&cli);
+    tracing::info!(capability = "probe", "running probe capability inline");
+    set.spawn(async move { physarum_probe::probe::run(probe_cfg).await });
 
-    // ObserveEbpf (observe-flow) capability — delegate to physarum-ebpf-observer.
+    // ObserveEbpf (observe-flow) — delegate to physarum-ebpf-observer subprocess.
     if cli.capabilities.contains(&NodeCapability::ObserveEbpf) {
+        let bin_dir = sibling_bin_dir()?;
         let obs_cmd = build_flow_observer_cmd(&cli, &bin_dir)?;
         set.spawn(supervise("physarum-ebpf-observer", obs_cmd));
     }
 
-    // ObservePacket (observe-packet) capability — delegate to physarum-packet-observer.
+    // ObservePacket (observe-packet) — delegate to physarum-packet-observer subprocess.
     if cli.capabilities.contains(&NodeCapability::ObservePacket) {
+        let bin_dir = sibling_bin_dir()?;
         let pkt_cmd = build_packet_observer_cmd(&cli, &bin_dir)?;
         set.spawn(supervise("physarum-packet-observer", pkt_cmd));
     }
 
-    // A node exits only when a supervised capability exits unexpectedly.
+    // A node exits only when a capability task exits unexpectedly.
     while let Some(res) = set.join_next().await {
         match res {
             Ok(Ok(())) => {}
@@ -52,8 +54,29 @@ pub async fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
+fn build_probe_config(cli: &Cli) -> ProbeConfig {
+    ProbeConfig {
+        id: cli.id.clone(),
+        coordinator: cli.coordinator.clone(),
+        listen: cli.listen,
+        advertise_address: cli.advertise_address.clone(),
+        probe_interval_seconds: cli.probe_interval_seconds,
+        synthetic_failure_rate: cli.synthetic_failure_rate,
+        probe_targets: cli.probe_targets.clone(),
+        discovery_enabled: cli.discovery_enabled,
+        discovery_cidrs: cli.discovery_cidrs.clone(),
+        discovery_ports: cli.discovery_ports.clone(),
+        discovery_interval_secs: cli.discovery_interval_secs,
+        discovery_max_candidates: cli.discovery_max_candidates,
+        discovery_timeout_ms: cli.discovery_timeout_ms,
+        discovery_seed_cooldown_secs: cli.discovery_seed_cooldown_secs,
+        discovery_scope_mode: cli.discovery_scope_mode.clone(),
+        sense_tcp_socket_state: cli.sense_tcp_socket_state,
+        sense_icmp_packet: cli.sense_icmp_packet,
+    }
+}
+
 /// Locate sibling executables — same directory as the running physarum-node binary.
-/// In production: /usr/local/bin/. In dev: target/debug/ or target/release/.
 fn sibling_bin_dir() -> Result<PathBuf> {
     let exe = std::env::current_exe().context("cannot determine physarum-node executable path")?;
     exe.parent()
@@ -63,21 +86,6 @@ fn sibling_bin_dir() -> Result<PathBuf> {
 
 fn sibling(bin_dir: &Path, name: &str) -> PathBuf {
     bin_dir.join(name)
-}
-
-fn build_agent_cmd(cli: &Cli, bin_dir: &Path) -> Result<Command> {
-    let mut cmd = Command::new(sibling(bin_dir, "physarum-agent"));
-    cmd.arg("--id")
-        .arg(&cli.id)
-        .arg("--coordinator")
-        .arg(&cli.coordinator)
-        .arg("--listen")
-        .arg(cli.listen.to_string())
-        .arg("--advertise-address")
-        .arg(&cli.advertise_address)
-        .arg("--probe-interval-seconds")
-        .arg(cli.probe_interval_seconds.to_string());
-    Ok(cmd)
 }
 
 fn build_flow_observer_cmd(cli: &Cli, bin_dir: &Path) -> Result<Command> {
@@ -125,6 +133,6 @@ async fn supervise(name: &'static str, mut cmd: Command) -> Result<()> {
         tracing::info!(binary = name, "capability subprocess exited cleanly");
         Ok(())
     } else {
-        Err(anyhow::anyhow!("{name} exited with status {status}",))
+        Err(anyhow::anyhow!("{name} exited with status {status}"))
     }
 }

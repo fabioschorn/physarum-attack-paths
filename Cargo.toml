@@ -2,13 +2,15 @@
 resolver = "2"
 members = [
     "crates/physarum-protocol",
-    "crates/physarum-node-runtime",     # Gate M  — shared capability model and runtime types
+    "crates/physarum-node-runtime",     # Gate M   — shared capability model and runtime types
+    "crates/physarum-probe",            # Gate M.4 — shared probe + discovery library (internalized from physarum-agent)
     "crates/physarum-node",             # Gate M.2 — role-fluid node binary (capability dispatcher)
     "crates/physarum-server",
     "crates/physarum-agent",
-    "crates/physarum-scanner",          # Gate L  — async TCP-connect port scanner (internal, inspired by RustScan)
-    "crates/physarum-ebpf-observer",    # Gate J  — userspace TCP flow observer
+    "crates/physarum-scanner",          # Gate L   — async TCP-connect port scanner (internal, inspired by RustScan)
+    "crates/physarum-ebpf-observer",    # Gate J   — userspace TCP flow observer
     "crates/physarum-packet-observer",  # Gate L.3 — userspace ICMP packet observer (tc ingress)
+    "crates/physarum-maze",             # PF-1     — self-propagating maze agent (raw ICMP + keyless SSH)
     # Future members (uncomment as crates are scaffolded):
     # "crates/physarum-graph",
     # "crates/physarum-coordinator",

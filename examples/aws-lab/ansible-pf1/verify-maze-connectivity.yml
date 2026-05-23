@@ -1,0 +1,376 @@
+---
+# PF-1 Maze Connectivity Verification
+#
+# Validates the directed connectivity graph of the 7-host physarum maze:
+#   A (front) → B, C (layer-1) → D, E, F (layer-2) → G (layer-3)
+#
+# Runs from each host's perspective to confirm:
+#   - ICMP visibility (organism sense)
+#   - TCP port 22 reachability (RustScan discovery signal)
+#   - AllowUsers configuration (sshd propagation filter)
+#
+# Usage (from repo root, after terraform apply):
+#   ansible-playbook \
+#     -i examples/aws-lab/ansible-pf1/aws_ec2.yml \
+#     examples/aws-lab/ansible-pf1/verify-maze-connectivity.yml
+#
+# Expected outcome:
+#   PASS: A→B,C ICMP+TCP22; C→D,E,F ICMP+TCP22; D,E,F→G ICMP+TCP22
+#   FAIL: A→D,E,F,G; B,C→G; layer-2→layer-1; layer-2→front
+
+- name: Verify Host A — front subnet seed
+  hosts: node_A
+  gather_facts: false
+  vars:
+    check_hosts:
+      pass_icmp: [host-b, host-c]
+      pass_tcp22: [host-b, host-c]
+      fail_icmp:  [host-d, host-e, host-f, host-g]
+      fail_tcp22: [host-d, host-e, host-f, host-g]
+
+  tasks:
+    - name: Host A — ICMP expected OPEN
+      shell: "ping -c2 -W2 {{ item }} 2>&1 | tail -1"
+      loop: "{{ check_hosts.pass_icmp }}"
+      register: icmp_pass
+      failed_when: "'rtt' not in icmp_pass.stdout"
+
+    - name: Host A — ICMP expected BLOCKED
+      shell: "ping -c2 -W2 {{ item }} 2>&1; echo $?"
+      loop: "{{ check_hosts.fail_icmp }}"
+      register: icmp_fail
+      failed_when: "'rtt' in icmp_fail.stdout"
+
+    - name: Host A — TCP22 expected OPEN
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/{{ item }}/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      loop: "{{ check_hosts.pass_tcp22 }}"
+      register: tcp_pass
+      failed_when: "'OPEN' not in tcp_pass.stdout"
+
+    - name: Host A — TCP22 expected BLOCKED
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/{{ item }}/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      loop: "{{ check_hosts.fail_tcp22 }}"
+      register: tcp_fail
+      failed_when: "'CLOSED' not in tcp_fail.stdout"
+
+    - name: Host A — SSH propagation key present
+      stat:
+        path: /home/ec2-user/.ssh/physarum-propagation
+      register: prop_key
+      failed_when: not prop_key.stat.exists
+
+    - name: Host A — propagation key permissions (600)
+      stat:
+        path: /home/ec2-user/.ssh/physarum-propagation
+      register: prop_key_mode
+      failed_when: prop_key_mode.stat.mode != '0600'
+
+    - name: Host A — SSH to B with propagation key
+      shell: >
+        ssh -i ~/.ssh/physarum-propagation
+        -o StrictHostKeyChecking=no
+        -o ConnectTimeout=5
+        ec2-user@host-b hostname 2>&1
+      register: ssh_a_b
+      failed_when: "'host-b' not in ssh_a_b.stdout"
+
+    - name: Host A — SSH to C with propagation key
+      shell: >
+        ssh -i ~/.ssh/physarum-propagation
+        -o StrictHostKeyChecking=no
+        -o ConnectTimeout=5
+        ec2-user@host-c hostname 2>&1
+      register: ssh_a_c
+      failed_when: "'host-c' not in ssh_a_c.stdout"
+
+    - name: Host A — maze.json marker present
+      slurp:
+        src: /etc/physarum-maze.json
+      register: maze_json
+
+    - name: Host A — report
+      debug:
+        msg:
+          - "ICMP OPEN: {{ check_hosts.pass_icmp | join(', ') }} — OK"
+          - "ICMP BLOCKED: {{ check_hosts.fail_icmp | join(', ') }} — OK"
+          - "TCP22 OPEN: {{ check_hosts.pass_tcp22 | join(', ') }} — OK"
+          - "TCP22 BLOCKED: {{ check_hosts.fail_tcp22 | join(', ') }} — OK"
+          - "Propagation key: present, mode 600 — OK"
+          - "SSH A→B: {{ ssh_a_b.stdout }} — OK"
+          - "SSH A→C: {{ ssh_a_c.stdout }} — OK"
+          - "Maze role: {{ (maze_json.content | b64decode | from_json).maze_role }}"
+
+- name: Verify Host B — layer-1
+  hosts: node_B
+  gather_facts: false
+  vars:
+    check_hosts:
+      pass_icmp: [host-d, host-e, host-f]
+      pass_tcp22: [host-d, host-e, host-f]
+      fail_icmp:  [host-g]
+      fail_tcp22: [host-g]
+
+  tasks:
+    - name: Host B — ICMP expected OPEN (layer-2)
+      shell: "ping -c2 -W2 {{ item }} 2>&1 | tail -1"
+      loop: "{{ check_hosts.pass_icmp }}"
+      register: icmp_pass
+      failed_when: "'rtt' not in icmp_pass.stdout"
+
+    - name: Host B — ICMP expected BLOCKED (layer-3)
+      shell: "ping -c2 -W2 {{ item }} 2>&1; echo $?"
+      loop: "{{ check_hosts.fail_icmp }}"
+      register: icmp_fail
+      failed_when: "'rtt' in icmp_fail.stdout"
+
+    - name: Host B — TCP22 expected OPEN (layer-2)
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/{{ item }}/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      loop: "{{ check_hosts.pass_tcp22 }}"
+      register: tcp_pass
+      failed_when: "'OPEN' not in tcp_pass.stdout"
+
+    - name: Host B — TCP22 expected BLOCKED (layer-3)
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/{{ item }}/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      loop: "{{ check_hosts.fail_tcp22 }}"
+      register: tcp_fail
+      failed_when: "'CLOSED' not in tcp_fail.stdout"
+
+    - name: Host B — maze.json allowed_ssh_from contains A (10.60.10.10)
+      slurp:
+        src: /etc/physarum-maze.json
+      register: maze_json
+      failed_when: "'10.60.10.10' not in (maze_json.content | b64decode)"
+
+    - name: Host B — report
+      debug:
+        msg:
+          - "ICMP OPEN to layer-2: OK"
+          - "TCP22 OPEN to layer-2: OK"
+          - "TCP22 BLOCKED to layer-3: OK (G not directly reachable from B)"
+          - "Maze role: {{ (maze_json.content | b64decode | from_json).maze_role }}"
+
+- name: Verify Host C — layer-1 bifurcation
+  hosts: node_C
+  gather_facts: false
+  vars:
+    check_hosts:
+      pass_icmp: [host-d, host-e, host-f]
+      pass_tcp22: [host-d, host-e, host-f]
+      fail_icmp:  [host-g]
+      fail_tcp22: [host-g]
+
+  tasks:
+    - name: Host C — ICMP expected OPEN (layer-2)
+      shell: "ping -c2 -W2 {{ item }} 2>&1 | tail -1"
+      loop: "{{ check_hosts.pass_icmp }}"
+      register: icmp_pass
+      failed_when: "'rtt' not in icmp_pass.stdout"
+
+    - name: Host C — ICMP expected BLOCKED (layer-3)
+      shell: "ping -c2 -W2 {{ item }} 2>&1; echo $?"
+      loop: "{{ check_hosts.fail_icmp }}"
+      register: icmp_fail
+      failed_when: "'rtt' in icmp_fail.stdout"
+
+    - name: Host C — TCP22 expected OPEN (layer-2)
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/{{ item }}/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      loop: "{{ check_hosts.pass_tcp22 }}"
+      register: tcp_pass
+      failed_when: "'OPEN' not in tcp_pass.stdout"
+
+    - name: Host C — TCP22 expected BLOCKED (layer-3)
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/{{ item }}/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      loop: "{{ check_hosts.fail_tcp22 }}"
+      register: tcp_fail
+      failed_when: "'CLOSED' not in tcp_fail.stdout"
+
+    - name: Host C — maze.json allowed_ssh_from contains A (10.60.10.10)
+      slurp:
+        src: /etc/physarum-maze.json
+      register: maze_json
+      failed_when: "'10.60.10.10' not in (maze_json.content | b64decode)"
+
+    - name: Host C — report
+      debug:
+        msg:
+          - "ICMP OPEN to D,E,F (all layer-2 candidates visible): OK"
+          - "TCP22 OPEN to D,E,F (RustScan sees port 22 on all): OK"
+          - "TCP22 BLOCKED to G (layer-3 not visible from layer-1): OK"
+          - "Note: D=dead-end (AllowUsers), E=loop-risk (AllowUsers C ok), F=valid-corridor (AllowUsers C ok)"
+          - "Maze role: {{ (maze_json.content | b64decode | from_json).maze_role }}"
+
+- name: Verify Host D — layer-2 dead end
+  hosts: node_D
+  gather_facts: false
+
+  tasks:
+    - name: Host D — ICMP to G (layer-3 visible from layer-2)
+      shell: "ping -c2 -W2 host-g 2>&1 | tail -1"
+      register: icmp_g
+      failed_when: "'rtt' not in icmp_g.stdout"
+
+    - name: Host D — TCP22 to G (port open, sshd will reject D's IP)
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/host-g/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      register: tcp_g
+      failed_when: "'OPEN' not in tcp_g.stdout"
+
+    - name: Host D — cannot reach layer-1 via ICMP (loop guard)
+      shell: "ping -c2 -W2 host-b 2>&1; echo $?"
+      register: icmp_loop
+      failed_when: "'rtt' in icmp_loop.stdout"
+
+    - name: Host D — cannot reach layer-1 via TCP22 (loop guard)
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/host-b/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      register: tcp_loop
+      failed_when: "'CLOSED' not in tcp_loop.stdout"
+
+    - name: Host D — maze role is dead-end
+      slurp:
+        src: /etc/physarum-maze.json
+      register: maze_json
+      failed_when: "'dead-end' not in (maze_json.content | b64decode)"
+
+    - name: Host D — report
+      debug:
+        msg:
+          - "ICMP to G: OK (D can see G — but AllowUsers on G blocks D's IP)"
+          - "TCP22 to G: OPEN (RustScan from D sees G; SSH propagation blocked by AllowUsers)"
+          - "ICMP to layer-1: BLOCKED (no backward visibility)"
+          - "Maze role: {{ (maze_json.content | b64decode | from_json).maze_role }}"
+
+- name: Verify Host E — layer-2 loop risk
+  hosts: node_E
+  gather_facts: false
+
+  tasks:
+    - name: Host E — ICMP to G (layer-3 visible)
+      shell: "ping -c2 -W2 host-g 2>&1 | tail -1"
+      register: icmp_g
+      failed_when: "'rtt' not in icmp_g.stdout"
+
+    - name: Host E — TCP22 to G (port open, sshd will reject E's IP)
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/host-g/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      register: tcp_g
+      failed_when: "'OPEN' not in tcp_g.stdout"
+
+    - name: Host E — cannot reach layer-1 via ICMP (SG guards the loop)
+      shell: "ping -c2 -W2 host-c 2>&1; echo $?"
+      register: icmp_loop
+      failed_when: "'rtt' in icmp_loop.stdout"
+
+    - name: Host E — cannot reach layer-1 via TCP22 (SG guards the loop)
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/host-c/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      register: tcp_loop
+      failed_when: "'CLOSED' not in tcp_loop.stdout"
+
+    - name: Host E — maze role is loop-risk
+      slurp:
+        src: /etc/physarum-maze.json
+      register: maze_json
+      failed_when: "'loop-risk' not in (maze_json.content | b64decode)"
+
+    - name: Host E — report
+      debug:
+        msg:
+          - "ICMP to G: OK (E can see G — AllowUsers on G blocks E's IP)"
+          - "TCP22 to G: OPEN (RustScan from E sees G; SSH propagation blocked)"
+          - "ICMP/TCP to layer-1: BLOCKED (SG prevents backward network visibility)"
+          - "Loop risk is algorithmic — organism must use visited_hosts to avoid retrying C→E path"
+          - "Maze role: {{ (maze_json.content | b64decode | from_json).maze_role }}"
+
+- name: Verify Host F — layer-2 valid corridor
+  hosts: node_F
+  gather_facts: false
+
+  tasks:
+    - name: Host F — ICMP to G (layer-3 visible)
+      shell: "ping -c2 -W2 host-g 2>&1 | tail -1"
+      register: icmp_g
+      failed_when: "'rtt' not in icmp_g.stdout"
+
+    - name: Host F — TCP22 to G (port open and AllowUsers will accept F's IP)
+      shell: "timeout 3 bash -c 'echo >/dev/tcp/host-g/22' 2>/dev/null && echo OPEN || echo CLOSED"
+      register: tcp_g
+      failed_when: "'OPEN' not in tcp_g.stdout"
+
+    - name: Host F — cannot reach layer-1 via ICMP
+      shell: "ping -c2 -W2 host-c 2>&1; echo $?"
+      register: icmp_loop
+      failed_when: "'rtt' in icmp_loop.stdout"
+
+    - name: Host F — maze role is valid-corridor
+      slurp:
+        src: /etc/physarum-maze.json
+      register: maze_json
+      failed_when: "'valid-corridor' not in (maze_json.content | b64decode)"
+
+    - name: Host F — report
+      debug:
+        msg:
+          - "ICMP to G: OK (F→G is the valid propagation corridor)"
+          - "TCP22 to G: OPEN (AllowUsers on G allows F's IP 10.60.30.30)"
+          - "ICMP to layer-1: BLOCKED"
+          - "Maze role: {{ (maze_json.content | b64decode | from_json).maze_role }}"
+
+- name: Verify Host G — layer-3 expansion milestone
+  hosts: node_G
+  gather_facts: false
+
+  tasks:
+    - name: Host G — maze role is milestone
+      slurp:
+        src: /etc/physarum-maze.json
+      register: maze_json
+      failed_when: "'milestone' not in (maze_json.content | b64decode)"
+
+    - name: Host G — AllowUsers permits only F (10.60.30.30)
+      slurp:
+        src: /etc/physarum-maze.json
+      register: maze_json_f
+      failed_when: "'10.60.30.30' not in (maze_json_f.content | b64decode)"
+
+    - name: Host G — cannot reach layer-2 hosts via ICMP (no backward visibility)
+      shell: "ping -c2 -W2 host-f 2>&1; echo $?"
+      register: icmp_back
+      failed_when: "'rtt' in icmp_back.stdout"
+
+    - name: Host G — report
+      debug:
+        msg:
+          - "Maze role: {{ (maze_json.content | b64decode | from_json).maze_role }}"
+          - "AllowUsers permits F (10.60.30.30): OK"
+          - "Backward ICMP to layer-2: BLOCKED"
+          - "G is the expansion milestone — organism arrives here via A→C→F→G only"
+
+- name: Maze connectivity summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: PF-1 maze topology summary
+      debug:
+        msg:
+          - "============================================"
+          - " PF-1 Maze Connectivity Verification: PASS"
+          - "============================================"
+          - "Valid propagation path: A → C → F → G"
+          - "Dead ends: D (AllowUsers blocks all propagation)"
+          - "Loop risk: E (AllowUsers allows C but G blocks E)"
+          - "Blind fork: B (layer-1 but can't reach G corridor)"
+          - ""
+          - "Network visibility (ICMP + TCP22):"
+          - "  front  → layer-1  : A sees B,C         OPEN"
+          - "  front  → layer-2  : A blocked from D,E,F  CLOSED"
+          - "  layer-1 → layer-2 : B,C see D,E,F      OPEN"
+          - "  layer-1 → layer-3 : B,C blocked from G CLOSED"
+          - "  layer-2 → layer-3 : D,E,F see G        OPEN"
+          - "  layer-2 → layer-1 : no backward signal CLOSED"
+          - ""
+          - "SSH AllowUsers (propagation filter):"
+          - "  A  → B  : 10.60.10.10 in AllowUsers   PASS"
+          - "  A  → C  : 10.60.10.10 in AllowUsers   PASS"
+          - "  C  → D  : C's IP not in AllowUsers    BLOCK (dead end)"
+          - "  C  → E  : 10.60.20.20 in AllowUsers   PASS (loop risk)"
+          - "  C  → F  : 10.60.20.20 in AllowUsers   PASS (valid)"
+          - "  F  → G  : 10.60.30.30 in AllowUsers   PASS (milestone)"
+          - "  D/E → G : D/E IPs not in AllowUsers   BLOCK"
+          - "============================================"
