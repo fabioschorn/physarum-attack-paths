@@ -90,8 +90,7 @@ impl Lineage {
 
     pub fn save(&self) -> Result<()> {
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(LINEAGE_PATH, json)
-            .with_context(|| format!("write {LINEAGE_PATH}"))?;
+        std::fs::write(LINEAGE_PATH, json).with_context(|| format!("write {LINEAGE_PATH}"))?;
         Ok(())
     }
 

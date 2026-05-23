@@ -27,9 +27,7 @@ pub enum Outcome {
 /// us at the OS level — this is how the dead-end / wrong-source detection works).
 pub async fn propagate(target: Ipv4Addr, local_bin: &Path, lineage_b64: &str) -> Result<Outcome> {
     let target_s = target.to_string();
-    let local_bin_s = local_bin
-        .to_str()
-        .unwrap_or(REMOTE_BIN);
+    let local_bin_s = local_bin.to_str().unwrap_or(REMOTE_BIN);
 
     // ── Step 1: SCP binary to remote ─────────────────────────────────────────
     tracing::info!(%target, "SCP binary");

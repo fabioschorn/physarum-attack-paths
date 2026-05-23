@@ -25,7 +25,11 @@ pub async fn run(cli: Cli) -> Result<()> {
     lineage.save()?;
 
     if lineage.hops >= cli.max_hops {
-        tracing::warn!(hops = lineage.hops, max = cli.max_hops, "max hops reached — dormant");
+        tracing::warn!(
+            hops = lineage.hops,
+            max = cli.max_hops,
+            "max hops reached — dormant"
+        );
         return Ok(());
     }
 
@@ -146,12 +150,7 @@ fn init_lineage(cli: &Cli) -> Result<Lineage> {
 
 /// TCP connect probe — confirms port 22 is open and accepting connections.
 async fn port_22_open(ip: Ipv4Addr) -> bool {
-    match timeout(
-        Duration::from_secs(5),
-        TcpStream::connect((ip, 22u16)),
-    )
-    .await
-    {
+    match timeout(Duration::from_secs(5), TcpStream::connect((ip, 22u16))).await {
         Ok(Ok(_)) => {
             tracing::debug!(%ip, "port 22 open");
             true

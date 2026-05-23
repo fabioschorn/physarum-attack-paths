@@ -13,9 +13,7 @@ pub fn start(interface: String) -> mpsc::Receiver<Ipv4Addr> {
     let (tx, rx) = mpsc::channel(64);
 
     std::thread::spawn(move || {
-        let sock = unsafe {
-            libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP)
-        };
+        let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_ICMP) };
         if sock < 0 {
             tracing::error!(
                 error = %std::io::Error::last_os_error(),
@@ -57,7 +55,10 @@ pub fn start(interface: String) -> mpsc::Receiver<Ipv4Addr> {
         tracing::warn!(iface = %interface, "SO_BINDTODEVICE not available on this platform — capturing on all interfaces");
 
         // 5-second recv timeout so the thread can detect channel closure.
-        let tv = libc::timeval { tv_sec: 5, tv_usec: 0 };
+        let tv = libc::timeval {
+            tv_sec: 5,
+            tv_usec: 0,
+        };
         unsafe {
             libc::setsockopt(
                 sock,
@@ -72,14 +73,8 @@ pub fn start(interface: String) -> mpsc::Receiver<Ipv4Addr> {
 
         let mut buf = [0u8; 1500];
         loop {
-            let n = unsafe {
-                libc::recv(
-                    sock,
-                    buf.as_mut_ptr() as *mut libc::c_void,
-                    buf.len(),
-                    0,
-                )
-            };
+            let n =
+                unsafe { libc::recv(sock, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
 
             if n < 0 {
                 let err = std::io::Error::last_os_error();
@@ -131,7 +126,5 @@ fn parse_echo_request(bytes: &[u8]) -> Option<Ipv4Addr> {
     if icmp_type != 8 || icmp_code != 0 {
         return None; // not echo request
     }
-    Some(Ipv4Addr::new(
-        bytes[12], bytes[13], bytes[14], bytes[15],
-    ))
+    Some(Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]))
 }
