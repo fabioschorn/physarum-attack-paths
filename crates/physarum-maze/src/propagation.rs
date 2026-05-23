@@ -13,7 +13,6 @@ use std::path::Path;
 use tokio::process::Command;
 
 const REMOTE_BIN: &str = "/tmp/physarum-maze";
-const REMOTE_LOG: &str = "/tmp/physarum-maze.log";
 
 pub enum Outcome {
     Success,
