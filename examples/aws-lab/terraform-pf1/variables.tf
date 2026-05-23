@@ -58,3 +58,21 @@ variable "ami_id_override" {
   type        = string
   default     = ""
 }
+
+variable "artifact_bucket" {
+  description = "S3 bucket holding the physarum-maze binary. Must be in the same AWS account (168740128169)."
+  type        = string
+  default     = "physarum-artifacts-168740128169"
+}
+
+variable "artifact_prefix" {
+  description = "S3 key prefix for PF-1 artifacts (no trailing slash)."
+  type        = string
+  default     = "physarum-attack-paths/pf-1/linux-x86_64"
+}
+
+variable "artifact_region" {
+  description = "AWS region where the artifact bucket lives."
+  type        = string
+  default     = "us-east-1"
+}

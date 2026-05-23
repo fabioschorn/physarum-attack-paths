@@ -15,6 +15,25 @@ HOSTS
 # ── System tools ──────────────────────────────────────────────────────────────
 dnf install -y traceroute iputils jq curl sshpass 2>/dev/null || true
 
+# ── physarum-maze binary — download from S3 via IAM Instance Profile ──────────
+ARTIFACT_BUCKET="${artifact_bucket}"
+ARTIFACT_PREFIX="${artifact_prefix}"
+ARTIFACT_REGION="${artifact_region}"
+
+if ! command -v aws &>/dev/null; then
+    dnf install -y awscli2 2>/dev/null || dnf install -y aws-cli2 2>/dev/null || dnf install -y awscli 2>/dev/null || true
+fi
+
+if command -v aws &>/dev/null; then
+    aws s3 cp "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/physarum-maze" \
+        /usr/local/bin/physarum-maze \
+        --region "$ARTIFACT_REGION"
+    chmod +x /usr/local/bin/physarum-maze
+    echo "physarum-maze downloaded OK"
+else
+    echo "ERROR: AWS CLI unavailable — physarum-maze not installed" >&2
+fi
+
 # ── ec2-user — empty password for IP-based SSH propagation ───────────────────
 passwd -d ec2-user
 

@@ -34,12 +34,16 @@ resource "aws_instance" "host_a" {
   private_ip             = local.host_a_ip
   vpc_security_group_ids = [aws_security_group.host_a.id]
   key_name               = aws_key_pair.operator.key_name
+  iam_instance_profile   = aws_iam_instance_profile.pf1_ec2.name
 
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user-data/host-a.sh.tpl", {
     hostname           = "host-a"
     operator_ip        = local.operator_ip
     maze_hosts_entries = local.maze_hosts_entries
+    artifact_bucket    = var.artifact_bucket
+    artifact_prefix    = var.artifact_prefix
+    artifact_region    = var.artifact_region
   })
 
   tags = {

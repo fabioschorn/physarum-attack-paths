@@ -13,7 +13,8 @@ RUN cargo build --release \
     -p physarum-agent \
     -p physarum-node \
     -p physarum-ebpf-observer \
-    -p physarum-packet-observer
+    -p physarum-packet-observer \
+    -p physarum-maze
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
 FROM debian:13.5-slim
@@ -28,3 +29,4 @@ COPY --from=builder /app/target/release/physarum-agent /usr/local/bin/
 COPY --from=builder /app/target/release/physarum-node /usr/local/bin/
 COPY --from=builder /app/target/release/physarum-ebpf-observer /usr/local/bin/
 COPY --from=builder /app/target/release/physarum-packet-observer /usr/local/bin/
+COPY --from=builder /app/target/release/physarum-maze /usr/local/bin/
