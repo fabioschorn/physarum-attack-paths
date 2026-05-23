@@ -1,0 +1,32 @@
+[package]
+name              = "physarum-maze"
+description       = "PF-1 self-propagating maze agent — single binary, IP-based SSH propagation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "physarum-maze"
+path = "src/main.rs"
+
+[dependencies]
+tokio      = { workspace = true }
+clap       = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+tracing    = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow     = { workspace = true }
+chrono     = { workspace = true }
+
+# Raw ICMP socket (CAP_NET_RAW / root required at runtime)
+libc = "0.2"
+
+# Base64 encoding for passing lineage JSON as CLI argument
+base64 = "0.22"
+
+# Interface IP lookup
+if-addrs = "0.7"

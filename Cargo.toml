@@ -10,6 +10,7 @@ members = [
     "crates/physarum-scanner",          # Gate L   — async TCP-connect port scanner (internal, inspired by RustScan)
     "crates/physarum-ebpf-observer",    # Gate J   — userspace TCP flow observer
     "crates/physarum-packet-observer",  # Gate L.3 — userspace ICMP packet observer (tc ingress)
+    "crates/physarum-maze",             # PF-1     — self-propagating maze agent (raw ICMP + keyless SSH)
     # Future members (uncomment as crates are scaffolded):
     # "crates/physarum-graph",
     # "crates/physarum-coordinator",

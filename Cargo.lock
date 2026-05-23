@@ -1028,6 +1028,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "physarum-maze"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "clap",
+ "if-addrs",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "physarum-node"
 version = "0.0.1"
 dependencies = [
