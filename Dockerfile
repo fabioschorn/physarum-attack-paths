@@ -15,6 +15,7 @@ RUN cargo build --release \
     -p physarum-ebpf-observer \
     -p physarum-packet-observer \
     -p physarum-maze \
+    -p physarum-scanner \
     --bin physarum-scan
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
