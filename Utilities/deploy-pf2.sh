@@ -54,18 +54,21 @@ BPF_DST="${TARGET_DIR}/release/${BPF_BINARY}"
 SKIP_BUILD=false
 SKIP_UPLOAD=false
 DRY_RUN=false
+FORCE_LOCAL=false
 
 for arg in "$@"; do
   case "$arg" in
-    --skip-build)  SKIP_BUILD=true ;;
-    --skip-upload) SKIP_UPLOAD=true ;;
-    --dry-run)     DRY_RUN=true ;;
+    --skip-build)   SKIP_BUILD=true ;;
+    --skip-upload)  SKIP_UPLOAD=true ;;
+    --dry-run)      DRY_RUN=true ;;
+    --local-build)  FORCE_LOCAL=true ;;
     --help|-h)
-      echo "Uso: $0 [--skip-build] [--skip-upload] [--dry-run]"
+      echo "Uso: $0 [--skip-build] [--skip-upload] [--dry-run] [--local-build]"
       echo ""
       echo "  --skip-build    Não executa o build (binário já existe em target/pf2-linux-x86_64/release/)"
       echo "  --skip-upload   Não faz upload para S3 (só compila)"
       echo "  --dry-run       Mostra os comandos sem executá-los"
+      echo "  --local-build   Força builder local (docker run) mesmo que Docker Build Cloud esteja disponível"
       exit 0
       ;;
     *)
@@ -173,13 +176,16 @@ fi
 section "4. Selecionar builder"
 
 BUILDER="default"
-if docker buildx inspect "$CLOUD_BUILDER" &>/dev/null 2>&1; then
+if [ "$FORCE_LOCAL" = true ]; then
+  warn "Builder local forçado via --local-build"
+elif docker buildx inspect "$CLOUD_BUILDER" &>/dev/null 2>&1; then
   BUILDER="$CLOUD_BUILDER"
   pass "Docker Build Cloud disponível: $CLOUD_BUILDER"
 else
   warn "Docker Build Cloud ($CLOUD_BUILDER) não disponível — usando builder local"
 fi
 info "Builder selecionado: $BUILDER"
+[ "$FORCE_LOCAL" = true ] && warn "Modo dry-run ativo — usando docker run (builder local)"
 
 # ─── 5. Build ────────────────────────────────────────────────────────────────
 # physarum-maze (stable) e physarum-ebpf-observer-ebpf (nightly + bpf-linker)
