@@ -72,7 +72,7 @@ pub fn init_scripts(mode: ScriptsRequired) -> Result<Vec<ScriptFile>> {
                 Ok(parsed
                     .into_iter()
                     .filter(|sf| {
-                        sf.tags.as_ref().map_or(false, |tags| {
+                        sf.tags.as_ref().is_some_and(|tags| {
                             let script_tags: HashSet<&str> =
                                 tags.iter().map(String::as_str).collect();
                             required.iter().all(|t| script_tags.contains(t))
@@ -357,7 +357,7 @@ mod tests {
             assert!(sf
                 .tags
                 .as_ref()
-                .map_or(false, |t| t.contains(&"core_approved".to_string())));
+                .is_some_and(|t| t.contains(&"core_approved".to_string())));
             assert!(sf.call_format.is_some());
         }
     }

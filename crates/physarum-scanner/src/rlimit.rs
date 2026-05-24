@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn recommended_batch_size_in_range() {
         let bs = recommended_batch_size();
-        assert!(bs >= 100 && bs <= 65_535);
+        assert!((100..=65_535).contains(&bs));
     }
 
     #[test]

@@ -297,7 +297,7 @@ async fn main() -> Result<()> {
     }
 
     // CLI values override config file.
-    let batch_size = cli.batch_size.unwrap_or_else(|| recommended_batch_size());
+    let batch_size = cli.batch_size.unwrap_or_else(recommended_batch_size);
     let timeout_ms = cli.timeout;
     let tries = cli.tries.max(1);
 
