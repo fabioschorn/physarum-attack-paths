@@ -1032,6 +1032,8 @@ name = "physarum-maze"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "aya",
+ "aya-log",
  "base64",
  "chrono",
  "clap",

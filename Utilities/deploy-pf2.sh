@@ -44,6 +44,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_DIR="$PROJECT_ROOT/target/pf2-linux-x86_64"
 BINARIES=("physarum-maze")
 
+# eBPF bytecode (bpfel-unknown-none ELF, built locally via cargo xtask)
+BPF_TARGET="bpfel-unknown-none"
+BPF_BINARY="physarum-ebpf-observer-ebpf"
+BPF_SRC="${PROJECT_ROOT}/target/${BPF_TARGET}/release/${BPF_BINARY}"
+BPF_DST="${TARGET_DIR}/release/${BPF_BINARY}"
+
 # ─── Argumentos ──────────────────────────────────────────────────────────────
 SKIP_BUILD=false
 SKIP_UPLOAD=false
@@ -174,6 +180,38 @@ else
   warn "Docker Build Cloud ($CLOUD_BUILDER) não disponível — usando builder local"
 fi
 info "Builder selecionado: $BUILDER"
+
+# ─── 4b. Build eBPF bytecode (local, nightly, bpfel-unknown-none) ────────────
+section "4b. Build eBPF bytecode"
+
+if [ "$SKIP_BUILD" = true ]; then
+  warn "eBPF build ignorado (--skip-build). Verificando bytecode existente..."
+  if [ -f "$BPF_SRC" ]; then
+    SIZE=$(du -sh "$BPF_SRC" | awk '{print $1}')
+    mkdir -p "$TARGET_DIR/release"
+    cp "$BPF_SRC" "$BPF_DST"
+    pass "${BPF_BINARY} ($SIZE)"
+  else
+    warn "${BPF_BINARY} não encontrado em target/${BPF_TARGET}/release/ — eBPF será desabilitado no lab"
+  fi
+else
+  bpf_start=$(date +%s)
+  info "Compilando eBPF: cargo xtask build-ebpf --release"
+
+  if [ "$DRY_RUN" = true ]; then
+    echo -e "  ${YELLOW}[DRY-RUN]${NC} cargo xtask build-ebpf --release (requer nightly + rust-src)"
+  else
+    if (cd "$PROJECT_ROOT" && cargo xtask build-ebpf --release 2>&1 | sed 's/^/    /'); then
+      mkdir -p "$TARGET_DIR/release"
+      cp "$BPF_SRC" "$BPF_DST"
+      SIZE=$(du -sh "$BPF_DST" | awk '{print $1}')
+      pass "${BPF_BINARY} ($SIZE) — $(elapsed "$bpf_start")"
+    else
+      warn "eBPF build falhou — physarum-maze será deployed sem eBPF bytecode"
+      warn "Instale: rustup toolchain install nightly && rustup component add rust-src --toolchain nightly"
+    fi
+  fi
+fi
 
 # ─── 5. Build ────────────────────────────────────────────────────────────────
 section "5. Build Linux x86_64"
@@ -312,9 +350,21 @@ else
         --no-progress
   done
 
+  # Upload eBPF bytecode if it was built
+  if [ -f "$BPF_DST" ]; then
+    BPF_S3_URI="s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/${BPF_BINARY}"
+    info "Upload: ${BPF_BINARY}  →  $BPF_S3_URI"
+    run_or_dry "aws s3 cp ${BPF_BINARY}" \
+      aws s3 cp "$BPF_DST" "$BPF_S3_URI" \
+        --region "$ARTIFACT_REGION" \
+        --no-progress
+  else
+    warn "${BPF_BINARY} ausente — somente physarum-maze será enviado (eBPF desabilitado)"
+  fi
+
   if [ "$DRY_RUN" = false ]; then
     echo ""
-    info "Verificando objeto enviado:"
+    info "Verificando objetos enviados:"
     aws s3 ls "s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/" --region "$ARTIFACT_REGION" | \
       awk '{printf "    %s  %s  (%s bytes)\n", $1, $4, $3}'
   fi
@@ -360,7 +410,8 @@ if [ "$errors" -eq 0 ]; then
   echo '  IFACE=$(ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@$HOST_A_IP \'
   echo '    "ip -o link show | awk -F'\'': '\'' '\''{print \$2}'\'' | grep -v lo | head -1")'
   echo '  ssh -i examples/aws-lab/.keys/physarum-lab-devlead ec2-user@$HOST_A_IP \'
-  echo '    "sudo nohup /usr/local/bin/physarum-maze --mode seed --interface \$IFACE >/tmp/physarum-maze.log 2>&1 &"'
+  echo '    "sudo nohup /usr/local/bin/physarum-maze --mode seed --interface \$IFACE \'
+  echo '      --bpf-bytecode /usr/local/lib/physarum-ebpf-observer-ebpf >/tmp/physarum-maze.log 2>&1 &"'
   echo ""
   echo -e "${BOLD}Passo 3 — aguardar ~10 min e verificar adaptação (Ansible):${NC}"
   echo ""

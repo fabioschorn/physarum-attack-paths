@@ -31,6 +31,18 @@ if command -v aws &>/dev/null; then
         --region "$ARTIFACT_REGION"
     chmod +x /usr/local/bin/physarum-maze
     echo "physarum-maze downloaded OK"
+
+    # eBPF bytecode — optional, enables the 5th stimulus arm in physarum-maze.
+    # If not present in S3 the agent runs with 4 stimuli (ICMP, TCP-SYN,
+    # periodic /24 discovery, dormancy timer).
+    if aws s3 cp "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/physarum-ebpf-observer-ebpf" \
+        /usr/local/lib/physarum-ebpf-observer-ebpf \
+        --region "$ARTIFACT_REGION" 2>/dev/null; then
+        chmod 644 /usr/local/lib/physarum-ebpf-observer-ebpf
+        echo "physarum-ebpf-observer-ebpf downloaded OK"
+    else
+        echo "physarum-ebpf-observer-ebpf not in S3 — eBPF stimulus disabled" >&2
+    fi
 else
     echo "ERROR: AWS CLI unavailable — physarum-maze not installed" >&2
 fi
@@ -62,16 +74,19 @@ chown ec2-user:ec2-user /home/ec2-user/.ssh/config
 
 # ── Maze marker ───────────────────────────────────────────────────────────────
 # Host A only RECEIVES ICMP (from B and C pinging inbound).
-# No outbound ping timer here — A's eBPF captures incoming echo requests
-# and uses the source IP as the discovery stimulus.
+# No outbound ping timer here — A's raw ICMP socket captures incoming echo
+# requests and uses the source IP as the discovery stimulus.
+# eBPF (5th stimulus) is active when --bpf-bytecode is passed at agent launch.
 cat > /etc/physarum-maze.json <<EOF
 {
   "maze_role": "seed",
   "maze_layer": "front",
   "host": "${hostname}",
-  "propagation": "ip-based — no SSH key, source IP 10.60.10.10 is the credential",
-  "icmp_stimulus": "inbound — B and C ping A; eBPF captures source IPs",
-  "note": "PF-1 organism entry point. Only this host receives physarum-node at lab start."
+  "propagation": "ip-based — no SSH key, source IP is the credential",
+  "icmp_stimulus": "inbound — B and C ping A; raw ICMP socket captures source IPs",
+  "ebpf_stimulus": "inbound TCP accepts from 10.60/16 via tracepoint/sock/inet_sock_set_state",
+  "bpf_bytecode": "/usr/local/lib/physarum-ebpf-observer-ebpf",
+  "note": "PF-2 organism entry point. Launch: sudo physarum-maze --mode seed --interface <iface> --bpf-bytecode /usr/local/lib/physarum-ebpf-observer-ebpf"
 }
 EOF
 

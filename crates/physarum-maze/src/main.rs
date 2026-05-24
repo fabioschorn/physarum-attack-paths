@@ -3,6 +3,8 @@ use tracing_subscriber::EnvFilter;
 
 mod agent;
 mod discovery;
+#[cfg(target_os = "linux")]
+mod ebpf;
 mod icmp;
 mod lineage;
 mod propagation;
@@ -38,6 +40,13 @@ pub struct Cli {
     /// Propagated mode: base64-encoded lineage JSON from parent host
     #[arg(long, env = "PHYSARUM_LINEAGE_B64")]
     pub lineage_b64: Option<String>,
+
+    /// Path to compiled eBPF bytecode (physarum-ebpf-observer-ebpf ELF).
+    /// When provided, eBPF is used as a 5th stimulus source in addition to
+    /// ICMP, TCP-SYN, periodic discovery, and the dormancy timer.
+    /// Linux only — ignored on other platforms.
+    #[arg(long, env = "PHYSARUM_BPF_BYTECODE")]
+    pub bpf_bytecode: Option<std::path::PathBuf>,
 
     /// Maximum propagation depth — guards against infinite loops
     #[arg(long, default_value_t = 12, env = "PHYSARUM_MAX_HOPS")]

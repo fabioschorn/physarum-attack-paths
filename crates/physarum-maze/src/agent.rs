@@ -26,6 +26,7 @@ use std::net::Ipv4Addr;
 use std::path::Path;
 use std::time::Duration;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 pub async fn run(cli: Cli) -> Result<()> {
@@ -46,6 +47,7 @@ pub async fn run(cli: Cli) -> Result<()> {
 
     let mut icmp_rx = crate::icmp::start(cli.interface.clone());
     let mut tcp_rx = crate::tcp::start(cli.interface.clone());
+    let mut ebpf_rx: Option<mpsc::Receiver<Ipv4Addr>> = init_ebpf(&cli);
     let mut discovery_ticker =
         tokio::time::interval(Duration::from_secs(cli.discovery_interval_secs));
     let mut attempted: HashSet<Ipv4Addr> = HashSet::new();
@@ -106,6 +108,28 @@ pub async fn run(cli: Cli) -> Result<()> {
                         handle_candidate(
                             ip, "discovery", &mut lineage, &binary_path, &mut attempted,
                         ).await?;
+                    }
+                }
+            }
+
+            // ── eBPF inbound connection stimulus (Linux + bytecode path only) ──
+            maybe_ebpf = async {
+                if let Some(rx) = ebpf_rx.as_mut() {
+                    rx.recv().await
+                } else {
+                    std::future::pending::<Option<Ipv4Addr>>().await
+                }
+            } => {
+                match maybe_ebpf {
+                    Some(ip) => {
+                        dormant_at = tokio::time::Instant::now() + stimulus_timeout;
+                        handle_candidate(
+                            ip, "ebpf", &mut lineage, &binary_path, &mut attempted,
+                        ).await?;
+                    }
+                    None => {
+                        tracing::info!("eBPF channel closed");
+                        ebpf_rx = None;
                     }
                 }
             }
@@ -259,6 +283,29 @@ async fn port_22_open(ip: Ipv4Addr) -> bool {
             false
         }
     }
+}
+
+/// Initialize the optional eBPF stimulus receiver.
+///
+/// On Linux, if `--bpf-bytecode` was given, loads the eBPF program and returns
+/// a Receiver that emits source IPs of inbound TCP connections from 10.60/16.
+/// On all other platforms, or when no bytecode path is provided, returns None
+/// so the corresponding select! arm uses `std::future::pending` and never fires.
+fn init_ebpf(cli: &Cli) -> Option<mpsc::Receiver<Ipv4Addr>> {
+    #[cfg(target_os = "linux")]
+    if let Some(ref path) = cli.bpf_bytecode {
+        match crate::ebpf::start(path) {
+            Ok(rx) => {
+                tracing::info!(?path, "eBPF stimulus enabled");
+                return Some(rx);
+            }
+            Err(e) => {
+                tracing::warn!(err = %e, "eBPF stimulus init failed — continuing without eBPF");
+            }
+        }
+    }
+    let _ = cli; // suppress unused-variable on non-Linux
+    None
 }
 
 /// Determine the IPv4 address assigned to `interface`.
