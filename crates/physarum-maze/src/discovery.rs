@@ -31,11 +31,15 @@ pub async fn scan_local_subnet(local_ip: Ipv4Addr) -> Vec<Ipv4Addr> {
 
     let out = tokio::process::Command::new("rustscan")
         .args([
-            "-a", &subnet,    // CIDR target
-            "--range", "22",  // only scan port 22
-            "--ulimit", "500", // conservative file-descriptor limit (shared host)
-            "--timeout", "3000", // 3 s per host (ms)
-            "--no-nmap",      // skip nmap passthrough — we only need open/closed
+            "-a",
+            &subnet, // CIDR target
+            "--range",
+            "22", // only scan port 22
+            "--ulimit",
+            "500", // conservative file-descriptor limit (shared host)
+            "--timeout",
+            "3000",      // 3 s per host (ms)
+            "--no-nmap", // skip nmap passthrough — we only need open/closed
         ])
         .output()
         .await;
@@ -60,14 +64,19 @@ pub async fn scan_targeted(target: Ipv4Addr) {
 
     let result = tokio::process::Command::new("rustscan")
         .args([
-            "-a", &target.to_string(),
-            "--range", "22",
-            "--ulimit", "500",
-            "--timeout", "3000",
-            "--",          // nmap passthrough separator
-            "-sS",         // TCP SYN scan (requires CAP_NET_RAW)
-            "-sV",         // service version detection
-            "--host-timeout", "8s",
+            "-a",
+            &target.to_string(),
+            "--range",
+            "22",
+            "--ulimit",
+            "500",
+            "--timeout",
+            "3000",
+            "--",  // nmap passthrough separator
+            "-sS", // TCP SYN scan (requires CAP_NET_RAW)
+            "-sV", // service version detection
+            "--host-timeout",
+            "8s",
         ])
         .output()
         .await;
