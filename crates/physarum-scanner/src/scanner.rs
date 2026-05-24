@@ -1,5 +1,5 @@
-use crate::{PortList, ScanError};
 use crate::socket_iterator::SocketIterator;
+use crate::{PortList, ScanError};
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::{
     collections::HashMap,
@@ -361,8 +361,12 @@ mod tests {
         let l2 = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let p1 = l1.local_addr().unwrap().port();
         let p2 = l2.local_addr().unwrap().port();
-        tokio::spawn(async move { let _ = l1.accept().await; });
-        tokio::spawn(async move { let _ = l2.accept().await; });
+        tokio::spawn(async move {
+            let _ = l1.accept().await;
+        });
+        tokio::spawn(async move {
+            let _ = l2.accept().await;
+        });
         let ports = PortList::explicit(vec![p1, p2]);
         let mut result = Scanner::new(loopback(), ports)
             .timeout_ms(500)
@@ -382,7 +386,9 @@ mod tests {
     async fn excluded_port_not_reported() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move { let _ = listener.accept().await; });
+        tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
         let ports = PortList::explicit(vec![port]);
         let result = Scanner::new(loopback(), ports)
             .exclude_ports(vec![port])
@@ -390,7 +396,10 @@ mod tests {
             .run()
             .await
             .unwrap();
-        assert!(result.is_empty(), "excluded port should not appear in results");
+        assert!(
+            result.is_empty(),
+            "excluded port should not appear in results"
+        );
     }
 
     #[tokio::test]
@@ -398,7 +407,9 @@ mod tests {
         let ips: Vec<IpAddr> = vec!["127.0.0.1".parse().unwrap()];
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move { let _ = listener.accept().await; });
+        tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
         let ports = PortList::explicit(vec![port]);
         let result = Scanner::new(ips, ports)
             .timeout_ms(500)

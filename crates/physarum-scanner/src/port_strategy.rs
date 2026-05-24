@@ -77,14 +77,18 @@ impl PortStrategy {
     pub fn pick(range: &Option<PortRange>, ports: Option<Vec<u16>>, order: ScanOrder) -> Self {
         match (order, ports) {
             (ScanOrder::Serial, None) => {
-                let r = range.as_ref().expect("PortRange required when no explicit ports");
+                let r = range
+                    .as_ref()
+                    .expect("PortRange required when no explicit ports");
                 PortStrategy::Serial(SerialRange {
                     start: r.start,
                     end: r.end,
                 })
             }
             (ScanOrder::Random, None) => {
-                let r = range.as_ref().expect("PortRange required when no explicit ports");
+                let r = range
+                    .as_ref()
+                    .expect("PortRange required when no explicit ports");
                 PortStrategy::Random(RandomRange {
                     start: r.start,
                     end: r.end,
@@ -107,9 +111,7 @@ impl PortStrategy {
         match self {
             PortStrategy::Manual(ports) => ports.clone(),
             PortStrategy::Serial(r) => (r.start..=r.end).collect(),
-            PortStrategy::Random(r) => {
-                RangeIterator::new(r.start.into(), r.end.into()).collect()
-            }
+            PortStrategy::Random(r) => RangeIterator::new(r.start.into(), r.end.into()).collect(),
         }
     }
 }
@@ -165,7 +167,10 @@ mod tests {
     fn port_range_parse_valid() {
         assert_eq!(
             PortRange::parse("1-1000").unwrap(),
-            PortRange { start: 1, end: 1000 }
+            PortRange {
+                start: 1,
+                end: 1000
+            }
         );
         assert_eq!(
             PortRange::parse("80-80").unwrap(),

@@ -182,7 +182,10 @@ mod tests {
     #[test]
     fn parse_ports_range_exclusive_end() {
         // RustScan uses start..end (exclusive), so 100-105 → [100,101,102,103,104].
-        assert_eq!(parse_ports("udp 100-105 \"data\""), vec![100, 101, 102, 103, 104]);
+        assert_eq!(
+            parse_ports("udp 100-105 \"data\""),
+            vec![100, 101, 102, 103, 104]
+        );
     }
 
     #[test]

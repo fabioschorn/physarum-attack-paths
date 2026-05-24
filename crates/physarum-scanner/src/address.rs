@@ -128,12 +128,11 @@ pub fn parse_excluded(exclude: &Option<Vec<String>>, resolver: &Resolver) -> Vec
 pub fn build_resolver(spec: Option<&str>) -> Resolver {
     match spec {
         Some(raw) => {
-            let ips = read_resolver_from_file(raw)
-                .unwrap_or_else(|_| {
-                    raw.split(',')
-                        .filter_map(|s| IpAddr::from_str(s.trim()).ok())
-                        .collect()
-                });
+            let ips = read_resolver_from_file(raw).unwrap_or_else(|_| {
+                raw.split(',')
+                    .filter_map(|s| IpAddr::from_str(s.trim()).ok())
+                    .collect()
+            });
             let mut cfg = ResolverConfig::new();
             for ip in ips {
                 cfg.add_name_server(NameServerConfig::new(
@@ -246,10 +245,7 @@ mod tests {
 
     #[test]
     fn multiple_cidr_ranges_combined() {
-        let addresses = vec![
-            "127.0.0.1".to_string(),
-            "192.168.0.0/30".to_string(),
-        ];
+        let addresses = vec!["127.0.0.1".to_string(), "192.168.0.0/30".to_string()];
         let ips = parse_addresses(&addresses, &None);
         assert_eq!(ips.len(), 5); // 1 + 4
     }

@@ -167,11 +167,7 @@ impl Script {
             IpAddr::V4(_) => "4",
             IpAddr::V6(_) => "6",
         };
-        let script_path = self
-            .path
-            .as_deref()
-            .and_then(|p| p.to_str())
-            .unwrap_or("");
+        let script_path = self.path.as_deref().and_then(|p| p.to_str()).unwrap_or("");
 
         let to_run = call_format
             .replace("{{script}}", script_path)
@@ -358,7 +354,10 @@ mod tests {
         let p = fixture("test_script.txt");
         if p.exists() {
             let sf = ScriptFile::new(p).expect("should parse");
-            assert!(sf.tags.as_ref().map_or(false, |t| t.contains(&"core_approved".to_string())));
+            assert!(sf
+                .tags
+                .as_ref()
+                .map_or(false, |t| t.contains(&"core_approved".to_string())));
             assert!(sf.call_format.is_some());
         }
     }
