@@ -13,31 +13,9 @@ ${maze_hosts_entries}
 HOSTS
 
 # ── System tools ──────────────────────────────────────────────────────────────
-dnf install -y traceroute iputils jq curl nmap 2>&1 || true
+dnf install -y traceroute iputils jq curl 2>&1 || true
 # sshpass is critical for the organism propagation — install explicitly
 dnf install -y sshpass 2>&1 || { echo "WARNING: sshpass install failed — propagation will not work" >&2; }
-
-# ── RustScan v2.4.1 — port discovery for the physarum organism ────────────────
-# AL2023 does not ship rustscan; download the pre-built x86_64 binary from
-# the GitHub Release.  nmap is already installed above for the -sS passthrough.
-RUSTSCAN_VERSION="2.4.1"
-RUSTSCAN_URL="https://github.com/RustScan/RustScan/releases/download/${RUSTSCAN_VERSION}/rustscan_${RUSTSCAN_VERSION}_amd64.deb"
-RUSTSCAN_DEB="/tmp/rustscan.deb"
-if curl -fsSL -o "$RUSTSCAN_DEB" "$RUSTSCAN_URL" 2>/dev/null; then
-    # deb package on AL2023: use alien to convert or extract manually
-    dnf install -y alien 2>/dev/null || true
-    if command -v alien &>/dev/null; then
-        alien -r "$RUSTSCAN_DEB" -o /tmp/ 2>/dev/null && dnf install -y /tmp/rustscan-*.rpm 2>/dev/null || true
-    fi
-    if ! command -v rustscan &>/dev/null; then
-        # Fallback: extract binary directly from the deb archive
-        cd /tmp && ar x rustscan.deb && tar -xf data.tar.* ./usr/bin/rustscan 2>/dev/null || true
-        [ -f /tmp/usr/bin/rustscan ] && install -m 755 /tmp/usr/bin/rustscan /usr/local/bin/rustscan
-    fi
-else
-    echo "WARNING: rustscan download failed — /24 discovery will be skipped" >&2
-fi
-command -v rustscan &>/dev/null && echo "rustscan $(rustscan --version 2>&1 | head -1) installed OK" || echo "WARNING: rustscan not available" >&2
 
 # ── ec2-user — empty password for IP-based SSH propagation ───────────────────
 # The physarum organism propagates without any SSH key. Source IP is the

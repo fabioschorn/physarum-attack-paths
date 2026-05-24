@@ -13,26 +13,8 @@ ${maze_hosts_entries}
 HOSTS
 
 # ── System tools ──────────────────────────────────────────────────────────────
-dnf install -y traceroute iputils jq curl nmap 2>&1 || true
+dnf install -y traceroute iputils jq curl 2>&1 || true
 dnf install -y sshpass 2>&1 || { echo "WARNING: sshpass install failed — propagation will not work" >&2; }
-
-# ── RustScan v2.4.1 — /24 subnet discovery for the physarum organism ──────────
-RUSTSCAN_VERSION="2.4.1"
-RUSTSCAN_URL="https://github.com/RustScan/RustScan/releases/download/${RUSTSCAN_VERSION}/rustscan_${RUSTSCAN_VERSION}_amd64.deb"
-RUSTSCAN_DEB="/tmp/rustscan.deb"
-if curl -fsSL -o "$RUSTSCAN_DEB" "$RUSTSCAN_URL" 2>/dev/null; then
-    dnf install -y alien 2>/dev/null || true
-    if command -v alien &>/dev/null; then
-        alien -r "$RUSTSCAN_DEB" -o /tmp/ 2>/dev/null && dnf install -y /tmp/rustscan-*.rpm 2>/dev/null || true
-    fi
-    if ! command -v rustscan &>/dev/null; then
-        cd /tmp && ar x rustscan.deb && tar -xf data.tar.* ./usr/bin/rustscan 2>/dev/null || true
-        [ -f /tmp/usr/bin/rustscan ] && install -m 755 /tmp/usr/bin/rustscan /usr/local/bin/rustscan
-    fi
-else
-    echo "WARNING: rustscan download failed — /24 discovery will be skipped" >&2
-fi
-command -v rustscan &>/dev/null && echo "rustscan installed OK" || echo "WARNING: rustscan not available" >&2
 
 # ── physarum-maze binary — download from S3 via IAM Instance Profile ──────────
 ARTIFACT_BUCKET="${artifact_bucket}"

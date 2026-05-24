@@ -30,3 +30,6 @@ base64 = "0.22"
 
 # Interface IP lookup
 if-addrs = "0.7"
+
+# /24 subnet and targeted port discovery (internal TCP-connect scanner)
+physarum-scanner = { path = "../physarum-scanner" }

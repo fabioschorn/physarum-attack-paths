@@ -1037,6 +1037,7 @@ dependencies = [
  "clap",
  "if-addrs",
  "libc",
+ "physarum-scanner",
  "serde",
  "serde_json",
  "tokio",

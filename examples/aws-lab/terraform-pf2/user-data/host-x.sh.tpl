@@ -4,7 +4,7 @@
 # Role: cross subnet (10.60.50.0/24), appears ~5 minutes into PF-2 run.
 # Behaviour:
 #   - Receives ICMP from G → X's agent discovers G → AlreadyColonized → secondary conduit
-#   - Sends TCP SYN to A.1:22 every 30s (timer starts at T+5min from boot)
+#   - Sends TCP SYN to A.1:22 every 30s (timer starts at T+60s from boot; 5min gate is Terraform)
 #   - Accepts propagation from A.1 via empty-password SSH
 #
 # TCP stimulus: the timer issues `nc -z <A1_IP> 22` which creates a TCP SYN
@@ -22,26 +22,8 @@ ${maze_hosts_entries}
 HOSTS
 
 # ── System tools ──────────────────────────────────────────────────────────────
-dnf install -y traceroute iputils jq curl nmap nmap-ncat 2>&1 || true
+dnf install -y traceroute iputils jq curl nmap-ncat 2>&1 || true
 dnf install -y sshpass 2>&1 || { echo "WARNING: sshpass install failed — propagation will not work" >&2; }
-
-# ── RustScan v2.4.1 — port discovery for the physarum organism ────────────────
-RUSTSCAN_VERSION="2.4.1"
-RUSTSCAN_URL="https://github.com/RustScan/RustScan/releases/download/${RUSTSCAN_VERSION}/rustscan_${RUSTSCAN_VERSION}_amd64.deb"
-RUSTSCAN_DEB="/tmp/rustscan.deb"
-if curl -fsSL -o "$RUSTSCAN_DEB" "$RUSTSCAN_URL" 2>/dev/null; then
-    dnf install -y alien 2>/dev/null || true
-    if command -v alien &>/dev/null; then
-        alien -r "$RUSTSCAN_DEB" -o /tmp/ 2>/dev/null && dnf install -y /tmp/rustscan-*.rpm 2>/dev/null || true
-    fi
-    if ! command -v rustscan &>/dev/null; then
-        cd /tmp && ar x rustscan.deb && tar -xf data.tar.* ./usr/bin/rustscan 2>/dev/null || true
-        [ -f /tmp/usr/bin/rustscan ] && install -m 755 /tmp/usr/bin/rustscan /usr/local/bin/rustscan
-    fi
-else
-    echo "WARNING: rustscan download failed — /24 discovery will be skipped" >&2
-fi
-command -v rustscan &>/dev/null && echo "rustscan installed OK" || echo "WARNING: rustscan not available" >&2
 
 # ── ec2-user — empty password for IP-based SSH propagation ───────────────────
 passwd -d ec2-user

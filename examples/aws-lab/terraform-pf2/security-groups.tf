@@ -31,7 +31,9 @@ resource "aws_security_group" "host_a" {
   vpc_id      = aws_vpc.maze.id
   egress {
     description = "All outbound"
-    from_port   = 0; to_port = 0; protocol = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = { Name = "physarum-pf2-host-a" }
@@ -43,7 +45,9 @@ resource "aws_security_group" "host_a1" {
   vpc_id      = aws_vpc.maze.id
   egress {
     description = "All outbound"
-    from_port   = 0; to_port = 0; protocol = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = { Name = "physarum-pf2-host-a1" }
@@ -55,7 +59,9 @@ resource "aws_security_group" "host_b" {
   vpc_id      = aws_vpc.maze.id
   egress {
     description = "All outbound"
-    from_port   = 0; to_port = 0; protocol = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = { Name = "physarum-pf2-host-b" }
@@ -67,7 +73,9 @@ resource "aws_security_group" "host_c" {
   vpc_id      = aws_vpc.maze.id
   egress {
     description = "All outbound"
-    from_port   = 0; to_port = 0; protocol = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = { Name = "physarum-pf2-host-c" }
@@ -79,7 +87,9 @@ resource "aws_security_group" "host_d" {
   vpc_id      = aws_vpc.maze.id
   egress {
     description = "All outbound"
-    from_port   = 0; to_port = 0; protocol = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = { Name = "physarum-pf2-host-d" }
@@ -91,7 +101,9 @@ resource "aws_security_group" "host_e" {
   vpc_id      = aws_vpc.maze.id
   egress {
     description = "All outbound"
-    from_port   = 0; to_port = 0; protocol = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = { Name = "physarum-pf2-host-e" }
@@ -103,7 +115,9 @@ resource "aws_security_group" "host_f" {
   vpc_id      = aws_vpc.maze.id
   egress {
     description = "All outbound"
-    from_port   = 0; to_port = 0; protocol = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = { Name = "physarum-pf2-host-f" }
@@ -115,7 +129,9 @@ resource "aws_security_group" "host_g" {
   vpc_id      = aws_vpc.maze.id
   egress {
     description = "All outbound"
-    from_port   = 0; to_port = 0; protocol = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = { Name = "physarum-pf2-host-g" }
@@ -127,7 +143,9 @@ resource "aws_security_group" "host_x" {
   vpc_id      = aws_vpc.maze.id
   egress {
     description = "All outbound"
-    from_port   = 0; to_port = 0; protocol = "-1"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
   tags = { Name = "physarum-pf2-host-x" }
@@ -165,26 +183,32 @@ resource "aws_security_group_rule" "operator_ssh" {
 # G pings D, E, F (existing) and X (PF-2 addition).
 
 resource "aws_security_group_rule" "host_a_icmp_from_layer1" {
-  for_each          = toset([aws_security_group.host_b.id, aws_security_group.host_c.id])
-  type              = "ingress"
-  description       = "ICMP from layer-1 (B/C ping A — stimulus)"
-  from_port         = -1; to_port = -1; protocol = "icmp"
+  for_each                 = toset([aws_security_group.host_b.id, aws_security_group.host_c.id])
+  type                     = "ingress"
+  description              = "ICMP from layer-1 (B/C ping A - stimulus)"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = each.value
   security_group_id        = aws_security_group.host_a.id
 }
 
 resource "aws_security_group_rule" "host_a1_icmp_from_b" {
-  type              = "ingress"
-  description       = "ICMP from B (B pings A.1 — stimulus to keep A.1 agent alive)"
-  from_port         = -1; to_port = -1; protocol = "icmp"
+  type                     = "ingress"
+  description              = "ICMP from B (B pings A.1 - stimulus to keep A.1 agent alive)"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = aws_security_group.host_b.id
   security_group_id        = aws_security_group.host_a1.id
 }
 
 resource "aws_security_group_rule" "host_a1_icmp_from_c" {
-  type              = "ingress"
-  description       = "ICMP from C (C pings A.1 — stimulus)"
-  from_port         = -1; to_port = -1; protocol = "icmp"
+  type                     = "ingress"
+  description              = "ICMP from C (C pings A.1 - stimulus)"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = aws_security_group.host_c.id
   security_group_id        = aws_security_group.host_a1.id
 }
@@ -195,9 +219,11 @@ resource "aws_security_group_rule" "host_b_icmp_from_layer2" {
     aws_security_group.host_e.id,
     aws_security_group.host_f.id,
   ])
-  type              = "ingress"
-  description       = "ICMP from layer-2"
-  from_port         = -1; to_port = -1; protocol = "icmp"
+  type                     = "ingress"
+  description              = "ICMP from layer-2"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = each.value
   security_group_id        = aws_security_group.host_b.id
 }
@@ -208,42 +234,52 @@ resource "aws_security_group_rule" "host_c_icmp_from_layer2" {
     aws_security_group.host_e.id,
     aws_security_group.host_f.id,
   ])
-  type              = "ingress"
-  description       = "ICMP from layer-2"
-  from_port         = -1; to_port = -1; protocol = "icmp"
+  type                     = "ingress"
+  description              = "ICMP from layer-2"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = each.value
   security_group_id        = aws_security_group.host_c.id
 }
 
 resource "aws_security_group_rule" "host_d_icmp_from_g" {
-  type              = "ingress"
-  description       = "ICMP from G"
-  from_port         = -1; to_port = -1; protocol = "icmp"
+  type                     = "ingress"
+  description              = "ICMP from G"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = aws_security_group.host_g.id
   security_group_id        = aws_security_group.host_d.id
 }
 
 resource "aws_security_group_rule" "host_e_icmp_from_g" {
-  type              = "ingress"
-  description       = "ICMP from G"
-  from_port         = -1; to_port = -1; protocol = "icmp"
+  type                     = "ingress"
+  description              = "ICMP from G"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = aws_security_group.host_g.id
   security_group_id        = aws_security_group.host_e.id
 }
 
 resource "aws_security_group_rule" "host_f_icmp_from_g" {
-  type              = "ingress"
-  description       = "ICMP from G"
-  from_port         = -1; to_port = -1; protocol = "icmp"
+  type                     = "ingress"
+  description              = "ICMP from G"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = aws_security_group.host_g.id
   security_group_id        = aws_security_group.host_f.id
 }
 
 # PF-2: G pings X — X captures ICMP from G and discovers G.
 resource "aws_security_group_rule" "host_x_icmp_from_g" {
-  type              = "ingress"
-  description       = "ICMP from G (G pings X — ICMP stimulus for X to discover G)"
-  from_port         = -1; to_port = -1; protocol = "icmp"
+  type                     = "ingress"
+  description              = "ICMP from G (G pings X - ICMP stimulus for X to discover G)"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
   source_security_group_id = aws_security_group.host_g.id
   security_group_id        = aws_security_group.host_x.id
 }
@@ -252,26 +288,32 @@ resource "aws_security_group_rule" "host_x_icmp_from_g" {
 
 # front → layer-1: A propagates to B and C
 resource "aws_security_group_rule" "host_b_ssh_from_a" {
-  type              = "ingress"
-  description       = "SSH from A (propagation)"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  type                     = "ingress"
+  description              = "SSH from A (propagation)"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = aws_security_group.host_a.id
   security_group_id        = aws_security_group.host_b.id
 }
 
 resource "aws_security_group_rule" "host_c_ssh_from_a" {
-  type              = "ingress"
-  description       = "SSH from A (propagation)"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  type                     = "ingress"
+  description              = "SSH from A (propagation)"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = aws_security_group.host_a.id
   security_group_id        = aws_security_group.host_c.id
 }
 
 # front: A propagates to A.1 (same subnet — PF-2)
 resource "aws_security_group_rule" "host_a1_ssh_from_a" {
-  type              = "ingress"
-  description       = "SSH from A (propagation A→A.1)"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  type                     = "ingress"
+  description              = "SSH from A (propagation A to A.1)"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = aws_security_group.host_a.id
   security_group_id        = aws_security_group.host_a1.id
 }
@@ -280,37 +322,45 @@ resource "aws_security_group_rule" "host_a1_ssh_from_a" {
 # A.1's sshd rejects X's auth (not in AllowUsers), but the raw TCP SYN is
 # captured by A.1's tcp.rs listener. SG must allow the TCP connection to reach A.1.
 resource "aws_security_group_rule" "host_a1_tcp22_from_x" {
-  type              = "ingress"
-  description       = "TCP 22 from X (TCP SYN stimulus — sshd rejects auth; raw socket captures SYN)"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  type                     = "ingress"
+  description              = "TCP 22 from X (TCP SYN stimulus - sshd rejects auth; raw socket captures SYN)"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = aws_security_group.host_x.id
   security_group_id        = aws_security_group.host_a1.id
 }
 
-# layer-1 → layer-2: B and C can reach D, E, F (sshd rejects D unless organism hits it)
+# layer-1 → layer-2: B and C can reach D, E, F
 resource "aws_security_group_rule" "host_d_ssh_from_layer1" {
-  for_each = toset([aws_security_group.host_b.id, aws_security_group.host_c.id])
-  type              = "ingress"
-  description       = "SSH from layer-1"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  for_each                 = toset([aws_security_group.host_b.id, aws_security_group.host_c.id])
+  type                     = "ingress"
+  description              = "SSH from layer-1"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = each.value
   security_group_id        = aws_security_group.host_d.id
 }
 
 resource "aws_security_group_rule" "host_e_ssh_from_layer1" {
-  for_each = toset([aws_security_group.host_b.id, aws_security_group.host_c.id])
-  type              = "ingress"
-  description       = "SSH from layer-1"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  for_each                 = toset([aws_security_group.host_b.id, aws_security_group.host_c.id])
+  type                     = "ingress"
+  description              = "SSH from layer-1"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = each.value
   security_group_id        = aws_security_group.host_e.id
 }
 
 resource "aws_security_group_rule" "host_f_ssh_from_layer1" {
-  for_each = toset([aws_security_group.host_b.id, aws_security_group.host_c.id])
-  type              = "ingress"
-  description       = "SSH from layer-1"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  for_each                 = toset([aws_security_group.host_b.id, aws_security_group.host_c.id])
+  type                     = "ingress"
+  description              = "SSH from layer-1"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = each.value
   security_group_id        = aws_security_group.host_f.id
 }
@@ -322,9 +372,11 @@ resource "aws_security_group_rule" "host_g_ssh_from_layer2" {
     aws_security_group.host_e.id,
     aws_security_group.host_f.id,
   ])
-  type              = "ingress"
-  description       = "SSH from layer-2"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  type                     = "ingress"
+  description              = "SSH from layer-2"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = each.value
   security_group_id        = aws_security_group.host_g.id
 }
@@ -332,18 +384,22 @@ resource "aws_security_group_rule" "host_g_ssh_from_layer2" {
 # PF-2: X SSHes into G to run the already-colonized check.
 # G's sshd AllowUsers includes X so the check command can execute.
 resource "aws_security_group_rule" "host_g_ssh_from_x" {
-  type              = "ingress"
-  description       = "SSH from X (already-colonized check; G accepted in AllowUsers)"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  type                     = "ingress"
+  description              = "SSH from X (already-colonized check; G accepted in AllowUsers)"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = aws_security_group.host_x.id
   security_group_id        = aws_security_group.host_g.id
 }
 
 # PF-2: A.1 propagates to X
 resource "aws_security_group_rule" "host_x_ssh_from_a1" {
-  type              = "ingress"
-  description       = "SSH from A.1 (propagation A.1→X)"
-  from_port         = 22; to_port = 22; protocol = "tcp"
+  type                     = "ingress"
+  description              = "SSH from A.1 (propagation A.1 to X)"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
   source_security_group_id = aws_security_group.host_a1.id
   security_group_id        = aws_security_group.host_x.id
 }
