@@ -1,9 +1,6 @@
 [package]
 name              = "physarum-scanner"
-description       = "Async TCP connect port scanner for physarum-agent candidate discovery"
-# Inspired by RustScan's high-level TCP-connect discovery approach (github.com/RustScan/RustScan).
-# Implemented independently in tokio for physarum-agent; no code copied from RustScan.
-# TCP-connect subset only — no Nmap/scripts, no UDP, no rlimit manipulation, no subprocess.
+description       = "Full-featured async port scanner — TCP/UDP, CIDR/DNS resolution, LCG port ordering, scripting engine, rlimit management. Ported and improved from RustScan."
 
 version.workspace      = true
 edition.workspace      = true
@@ -13,11 +10,23 @@ authors.workspace      = true
 repository.workspace   = true
 
 [dependencies]
+# workspace
 tokio     = { workspace = true }
 futures   = { workspace = true }
 tracing   = { workspace = true }
 thiserror = { workspace = true }
-libc      = "0.2"
+anyhow    = { workspace = true }
+serde     = { workspace = true }
+rand      = { workspace = true }
+# port scanning / addressing
+libc             = "0.2"
+gcd              = "2"
+cidr-utils       = "0.6"
+# DNS resolution
+hickory-resolver = { version = "0.24", features = ["dns-over-rustls"] }
+# config / scripting
+toml             = "1"
+dirs             = "6"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "net", "time", "macros"] }
