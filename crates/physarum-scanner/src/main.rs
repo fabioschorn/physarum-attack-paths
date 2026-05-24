@@ -307,11 +307,19 @@ async fn main() -> Result<()> {
     let tries = cli.tries.max(1);
 
     // ── targets ───────────────────────────────────────────────────────────────
-    let exclude_hosts = cli.exclude_addresses.unwrap_or_default();
-    let ips = parse_addresses(
-        &cli.addresses,
-        &if exclude_hosts.is_empty() { None } else { Some(exclude_hosts) },
-    );
+    // parse_addresses uses hickory-resolver which creates its own Tokio runtime
+    // internally.  Dropping it inside an async context panics.  spawn_blocking
+    // moves the work to a thread-pool thread where runtime nesting is allowed.
+    let addresses_clone = cli.addresses.clone();
+    let exclude_hosts = cli.exclude_addresses.clone().unwrap_or_default();
+    let ips = tokio::task::spawn_blocking(move || {
+        parse_addresses(
+            &addresses_clone,
+            &if exclude_hosts.is_empty() { None } else { Some(exclude_hosts) },
+        )
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("address resolution panicked: {e}"))?;
 
     if ips.is_empty() {
         bail!("no valid target addresses resolved from {:?}", cli.addresses);
