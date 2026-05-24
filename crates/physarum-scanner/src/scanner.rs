@@ -83,11 +83,11 @@ impl Scanner {
         self
     }
 
-    /// Supply per-port UDP payloads (optional).
+    /// Override the per-port UDP payload map (optional).
     ///
-    /// Ports absent from the map receive an empty datagram.
-    /// This mirrors RustScan's nmap-payloads integration, but the caller
-    /// provides the map so the library stays payload-agnostic.
+    /// When not set (default), the scanner automatically uses the embedded
+    /// Nmap payload database via [`crate::nmap_payloads::nmap_udp_payloads`].
+    /// Ports absent from whichever map is active receive an empty datagram.
     pub fn udp_payloads(mut self, payloads: HashMap<u16, Vec<u8>>) -> Self {
         self.udp_payloads = payloads;
         self
@@ -210,26 +210,25 @@ impl Scanner {
             "starting UDP scan"
         );
 
+        // Use caller-supplied payloads, or fall back to the embedded Nmap database.
+        let payloads: &HashMap<u16, Vec<u8>> = if self.udp_payloads.is_empty() {
+            crate::nmap_payloads::nmap_udp_payloads()
+        } else {
+            &self.udp_payloads
+        };
+
         let mut open: Vec<SocketAddr> = Vec::new();
         let mut ftrs: FuturesUnordered<_> = FuturesUnordered::new();
         let mut iter = SocketIterator::new(&self.ips, &ports);
 
         for socket in iter.by_ref().take(self.batch_size) {
-            let payload = self
-                .udp_payloads
-                .get(&socket.port())
-                .cloned()
-                .unwrap_or_default();
+            let payload = payloads.get(&socket.port()).cloned().unwrap_or_default();
             ftrs.push(Self::probe_udp(socket, self.timeout, self.tries, payload));
         }
 
         while let Some(result) = ftrs.next().await {
             if let Some(socket) = iter.next() {
-                let payload = self
-                    .udp_payloads
-                    .get(&socket.port())
-                    .cloned()
-                    .unwrap_or_default();
+                let payload = payloads.get(&socket.port()).cloned().unwrap_or_default();
                 ftrs.push(Self::probe_udp(socket, self.timeout, self.tries, payload));
             }
             match result {

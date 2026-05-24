@@ -15,6 +15,7 @@
 //! | `benchmark/mod.rs`       | [`benchmark`]                 | named scan timers |
 //! | `tui.rs`                 | [`output`]                    | warning!/detail!/output! macros |
 //! | `main.rs` (ulimit)       | [`rlimit`]                    | RLIMIT_NOFILE management |
+//! | `build.rs` (nmap-payloads) | [`nmap_payloads`]           | UDP payload DB, embedded via `include_str!` |
 //!
 //! # Key improvements over RustScan
 //!
@@ -22,7 +23,9 @@
 //! - **Typed errors** (`ScanError`) instead of `assert!`-on-error panics.
 //! - **`SocketIterator`** replaces the pre-allocated `Vec<SocketAddr>` — zero
 //!   allocation overhead for large IP × port products.
-//! - **UDP payload map** is caller-supplied rather than baked into build.rs.
+//! - **UDP payload map** is embedded at compile time (`include_str!`) and parsed
+//!   lazily — no `build.rs` code generation required.  Callers can override
+//!   with [`scanner::Scanner::udp_payloads`] for custom probes.
 //! - **`ScanConfig`** struct lets library users compose scan parameters without
 //!   a Clap dependency.
 //! - **`rlimit`** module exposed as a plain function so library users can tune
@@ -55,6 +58,7 @@ pub mod address;
 pub mod benchmark;
 pub mod config;
 pub mod error;
+pub mod nmap_payloads;
 pub mod output;
 pub mod port_strategy;
 pub mod rlimit;
