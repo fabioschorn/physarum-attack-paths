@@ -86,6 +86,15 @@ impl Lineage {
         self.updated_at = Utc::now().to_rfc3339();
     }
 
+    /// Remove a dead end mark and reset the edge score to neutral (1.0).
+    /// Called when the host sends an active stimulus — the environment changed.
+    pub fn unmark_dead_end(&mut self, target_ip: &str) {
+        self.dead_ends.remove(target_ip);
+        let edge = self.edge_key(target_ip);
+        self.scores.entry(edge).and_modify(|s| *s = 1.0);
+        self.updated_at = Utc::now().to_rfc3339();
+    }
+
     /// Record a host already running physarum-maze; mild score reduction since
     /// the corridor is valid but the endpoint is occupied.
     pub fn mark_colonized(&mut self, target_ip: &str) {

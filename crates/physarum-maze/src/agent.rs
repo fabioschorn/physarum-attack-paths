@@ -170,8 +170,16 @@ async fn handle_candidate(
         return Ok(());
     }
     if lineage.is_dead_end(&ip_str) {
-        tracing::debug!(%src_ip, stimulus, "known dead end — skip");
-        return Ok(());
+        if stimulus == "discovery" {
+            tracing::debug!(%src_ip, stimulus, "known dead end — skip passive probe");
+            return Ok(());
+        }
+        // Active stimulus (icmp/tcp-syn/ebpf): the host is signalling its presence,
+        // meaning the environment changed since the dead end was recorded.
+        // Remove the mark and fall through to re-validate.
+        tracing::info!(%src_ip, stimulus, "dead-ended host sent active stimulus — revalidating");
+        lineage.unmark_dead_end(&ip_str);
+        attempted.remove(&src_ip);
     }
     if lineage.is_colonized(&ip_str) {
         tracing::debug!(%src_ip, stimulus, "already colonized — skip");
