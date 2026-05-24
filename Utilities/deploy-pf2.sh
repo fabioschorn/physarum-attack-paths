@@ -181,40 +181,11 @@ else
 fi
 info "Builder selecionado: $BUILDER"
 
-# ─── 4b. Build eBPF bytecode (local, nightly, bpfel-unknown-none) ────────────
-section "4b. Build eBPF bytecode"
-
-if [ "$SKIP_BUILD" = true ]; then
-  warn "eBPF build ignorado (--skip-build). Verificando bytecode existente..."
-  if [ -f "$BPF_SRC" ]; then
-    SIZE=$(du -sh "$BPF_SRC" | awk '{print $1}')
-    mkdir -p "$TARGET_DIR/release"
-    cp "$BPF_SRC" "$BPF_DST"
-    pass "${BPF_BINARY} ($SIZE)"
-  else
-    warn "${BPF_BINARY} não encontrado em target/${BPF_TARGET}/release/ — eBPF será desabilitado no lab"
-  fi
-else
-  bpf_start=$(date +%s)
-  info "Compilando eBPF: cargo xtask build-ebpf --release"
-
-  if [ "$DRY_RUN" = true ]; then
-    echo -e "  ${YELLOW}[DRY-RUN]${NC} cargo xtask build-ebpf --release (requer nightly + rust-src)"
-  else
-    if (cd "$PROJECT_ROOT" && cargo xtask build-ebpf --release 2>&1 | sed 's/^/    /'); then
-      mkdir -p "$TARGET_DIR/release"
-      cp "$BPF_SRC" "$BPF_DST"
-      SIZE=$(du -sh "$BPF_DST" | awk '{print $1}')
-      pass "${BPF_BINARY} ($SIZE) — $(elapsed "$bpf_start")"
-    else
-      warn "eBPF build falhou — physarum-maze será deployed sem eBPF bytecode"
-      warn "Instale: rustup toolchain install nightly && rustup component add rust-src --toolchain nightly"
-    fi
-  fi
-fi
-
 # ─── 5. Build ────────────────────────────────────────────────────────────────
-section "5. Build Linux x86_64"
+# physarum-maze (stable) e physarum-ebpf-observer-ebpf (nightly + bpf-linker)
+# são compilados em stages separados dentro do mesmo Dockerfile, exportados
+# juntos para $TARGET_DIR/release/ via scratch stage — mesmo padrão do PF-1.
+section "5. Build Linux x86_64 + eBPF bytecode"
 
 if [ "$SKIP_BUILD" = true ]; then
   warn "Build ignorado (--skip-build). Verificando binários existentes..."
@@ -238,14 +209,34 @@ else
 
     TMP_DOCKERFILE=$(mktemp "${TMPDIR:-/tmp}/Dockerfile.pf2.XXXXXX")
     cat > "$TMP_DOCKERFILE" <<'DOCKERFILE_CONTENT'
-FROM rust:1-slim-bookworm AS builder
+# Stage 1 — physarum-maze (stable Rust)
+FROM rust:1-slim-bookworm AS maze-builder
 RUN apt-get update -qq && apt-get install -y --no-install-recommends gcc libc6-dev
 WORKDIR /workspace
 COPY . .
 RUN cargo build --release -p physarum-maze
 
+# Stage 2 — eBPF bytecode (nightly + bpf-linker)
+# bpf-linker needs clang and LLVM to link BPF ELF objects.
+FROM rust:1-slim-bookworm AS ebpf-builder
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    gcc libc6-dev clang llvm-dev libclang-dev
+RUN rustup toolchain install nightly \
+    && rustup component add rust-src --toolchain nightly
+RUN cargo +nightly install bpf-linker
+WORKDIR /workspace
+COPY . .
+RUN cargo +nightly build \
+    --manifest-path crates/physarum-ebpf-observer-ebpf/Cargo.toml \
+    --target bpfel-unknown-none \
+    -Z build-std=core \
+    --release
+
+# Export both artifacts into a single scratch stage so --output lands both
+# files in $TARGET_DIR/release/ on the host.
 FROM scratch AS export
-COPY --from=builder /workspace/target/release/physarum-maze .
+COPY --from=maze-builder /workspace/target/release/physarum-maze .
+COPY --from=ebpf-builder /workspace/crates/physarum-ebpf-observer-ebpf/target/bpfel-unknown-none/release/physarum-ebpf-observer-ebpf .
 DOCKERFILE_CONTENT
 
     CREATED_DOCKERIGNORE=false
@@ -303,6 +294,18 @@ DOCKERIGNORE_CONTENT
         set -euxo pipefail
         apt-get update -qq && apt-get install -y --no-install-recommends gcc libc6-dev 2>&1
         cargo build --release -p physarum-maze 2>&1
+        # eBPF bytecode (nightly + bpf-linker)
+        apt-get install -y --no-install-recommends clang llvm-dev libclang-dev 2>&1
+        rustup toolchain install nightly
+        rustup component add rust-src --toolchain nightly
+        cargo +nightly install bpf-linker
+        cargo +nightly build \
+          --manifest-path crates/physarum-ebpf-observer-ebpf/Cargo.toml \
+          --target bpfel-unknown-none \
+          -Z build-std=core \
+          --release 2>&1
+        cp crates/physarum-ebpf-observer-ebpf/target/bpfel-unknown-none/release/physarum-ebpf-observer-ebpf \
+           /target/release/physarum-ebpf-observer-ebpf
       "
     )
 
@@ -319,7 +322,7 @@ DOCKERIGNORE_CONTENT
   fi
 
   echo ""
-  section "5b. Binários gerados"
+  section "5b. Artefatos gerados"
   for bin in "${BINARIES[@]}"; do
     if [ "$DRY_RUN" = true ]; then
       info "[DRY-RUN] $bin → $TARGET_DIR/release/$bin"
@@ -331,6 +334,15 @@ DOCKERIGNORE_CONTENT
       errors=$((errors + 1))
     fi
   done
+  # eBPF bytecode — optional artefact
+  if [ "$DRY_RUN" = true ]; then
+    info "[DRY-RUN] ${BPF_BINARY} → $TARGET_DIR/release/${BPF_BINARY}"
+  elif [ -f "$BPF_DST" ]; then
+    SIZE=$(du -sh "$BPF_DST" | awk '{print $1}')
+    pass "${BPF_BINARY}  ($SIZE)  → $BPF_DST"
+  else
+    warn "${BPF_BINARY} não gerado — eBPF stimulus desabilitado no lab"
+  fi
 fi
 
 [ "$errors" -gt 0 ] && { echo ""; fail "Abortando — binários ausentes."; exit 1; }
@@ -350,7 +362,7 @@ else
         --no-progress
   done
 
-  # Upload eBPF bytecode if it was built
+  # eBPF bytecode — upload if present (built in the same Docker stage)
   if [ -f "$BPF_DST" ]; then
     BPF_S3_URI="s3://${ARTIFACT_BUCKET}/${ARTIFACT_PREFIX}/${BPF_BINARY}"
     info "Upload: ${BPF_BINARY}  →  $BPF_S3_URI"
@@ -359,7 +371,7 @@ else
         --region "$ARTIFACT_REGION" \
         --no-progress
   else
-    warn "${BPF_BINARY} ausente — somente physarum-maze será enviado (eBPF desabilitado)"
+    warn "${BPF_BINARY} ausente — physarum-maze será deployed sem eBPF (5th stimulus desabilitado)"
   fi
 
   if [ "$DRY_RUN" = false ]; then

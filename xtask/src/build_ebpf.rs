@@ -13,9 +13,14 @@ const BPF_TARGET: &str = "bpfel-unknown-none";
 pub fn run(args: &[String]) {
     let release = args.contains(&"--release".to_string());
 
-    let mut cmd = Command::new("cargo");
+    // Use `rustup run nightly cargo` so the correct toolchain is selected
+    // regardless of whether `cargo` on PATH is the rustup shim or a system
+    // binary (e.g. Homebrew) that does not understand the `+toolchain` flag.
+    let mut cmd = Command::new("rustup");
     cmd.args([
-        "+nightly",
+        "run",
+        "nightly",
+        "cargo",
         "build",
         "--manifest-path",
         EBF_MANIFEST,
