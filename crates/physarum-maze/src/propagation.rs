@@ -18,15 +18,28 @@ pub enum Outcome {
     Success,
     ScpFailed,
     SshFailed,
+    /// Target already runs physarum-maze — record as secondary conduit, do not re-deploy.
+    AlreadyColonized,
 }
 
 /// Push binary to `target` via SCP and launch the propagated instance.
+///
+/// Step 0 checks whether the target already runs physarum-maze; if so it
+/// returns `Outcome::AlreadyColonized` without touching the remote binary.
 ///
 /// Returns `Outcome::ScpFailed` when SCP is rejected (sshd AllowUsers blocks
 /// us at the OS level — this is how the dead-end / wrong-source detection works).
 pub async fn propagate(target: Ipv4Addr, local_bin: &Path, lineage_b64: &str) -> Result<Outcome> {
     let target_s = target.to_string();
     let local_bin_s = local_bin.to_str().unwrap_or(REMOTE_BIN);
+
+    // ── Step 0: colonization check ────────────────────────────────────────────
+    // Do not overwrite an already-running instance.  SSH failure is treated as
+    // "not colonized" so normal propagation proceeds and handles its own errors.
+    if already_colonized(&target_s).await {
+        tracing::info!(%target, "already colonized — secondary conduit");
+        return Ok(Outcome::AlreadyColonized);
+    }
 
     // ── Step 1: SCP binary to remote ─────────────────────────────────────────
     tracing::info!(%target, "SCP binary");
@@ -97,5 +110,39 @@ pub async fn propagate(target: Ipv4Addr, local_bin: &Path, lineage_b64: &str) ->
     } else {
         tracing::warn!(%target, "SSH launch failed");
         Ok(Outcome::SshFailed)
+    }
+}
+
+/// SSH into `target` and test whether physarum-maze binary exists and its
+/// systemd unit is active.  Returns `false` on any connection error so the
+/// caller treats unreachable hosts as "not yet colonized".
+async fn already_colonized(target_s: &str) -> bool {
+    let check_cmd = format!(
+        "test -f {bin} && systemctl is-active physarum-maze >/dev/null 2>&1 && echo OCCUPIED || echo EMPTY",
+        bin = REMOTE_BIN
+    );
+
+    let out = Command::new("sshpass")
+        .args([
+            "-p",
+            "",
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "ConnectTimeout=5",
+            "-o",
+            "BatchMode=no",
+            &format!("ec2-user@{}", target_s),
+            &check_cmd,
+        ])
+        .output()
+        .await;
+
+    match out {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim() == "OCCUPIED",
+        Err(_) => false,
     }
 }

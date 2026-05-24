@@ -2,9 +2,11 @@ use clap::{Parser, ValueEnum};
 use tracing_subscriber::EnvFilter;
 
 mod agent;
+mod discovery;
 mod icmp;
 mod lineage;
 mod propagation;
+mod tcp;
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum Mode {
@@ -17,17 +19,19 @@ pub enum Mode {
 #[derive(Parser, Debug)]
 #[command(
     name = "physarum-maze",
-    about = "PF-1 self-propagating maze agent (physarum slime-mould model)",
-    long_about = "Listens for ICMP echo requests (eBPF-inspired raw socket stimulus), \
-                  confirms SSH on discovered hosts, and propagates itself via SCP + \
-                  empty-password SSH.  Maintains a lineage JSON with D_ij path scores."
+    about = "PF-1/PF-2 self-propagating maze agent (physarum slime-mould model)",
+    long_about = "Listens for ICMP echo requests and TCP SYN packets to port 22, \
+                  runs periodic /24 nmap discovery, confirms SSH on discovered hosts, \
+                  and propagates itself via SCP + empty-password SSH.  Detects already-\
+                  colonized hosts and records secondary conduits.  Maintains a lineage \
+                  JSON with D_ij path scores."
 )]
 pub struct Cli {
     /// Operating mode
     #[arg(long, default_value = "seed")]
     pub mode: Mode,
 
-    /// Network interface to capture ICMP on (must match the maze subnet iface)
+    /// Network interface to capture ICMP/TCP on (must match the maze subnet iface)
     #[arg(long, default_value = "eth0", env = "PHYSARUM_IFACE")]
     pub interface: String,
 
@@ -39,9 +43,13 @@ pub struct Cli {
     #[arg(long, default_value_t = 12, env = "PHYSARUM_MAX_HOPS")]
     pub max_hops: usize,
 
-    /// Seconds without ICMP stimulus before the agent goes dormant
+    /// Seconds without ICMP/TCP stimulus before the agent goes dormant
     #[arg(long, default_value_t = 120, env = "PHYSARUM_STIMULUS_TIMEOUT")]
     pub stimulus_timeout_secs: u64,
+
+    /// Interval in seconds between periodic /24 nmap subnet discovery runs
+    #[arg(long, default_value_t = 60, env = "PHYSARUM_DISCOVERY_INTERVAL")]
+    pub discovery_interval_secs: u64,
 }
 
 #[tokio::main]
