@@ -19,14 +19,14 @@ use tokio::sync::mpsc;
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct TcpEvent {
-    src_addr:   [u8; 4],
-    dst_addr:   [u8; 4],
-    src_port:   u16,
-    dst_port:   u16,
-    pid:        u32,
-    comm:       [u8; 16],
+    src_addr: [u8; 4],
+    dst_addr: [u8; 4],
+    src_port: u16,
+    dst_port: u16,
+    pid: u32,
+    comm: [u8; 16],
     event_type: u8,
-    _pad:       [u8; 3],
+    _pad: [u8; 3],
 }
 
 /// event_type == 1: inbound TCP accept — a remote peer connected to us.
