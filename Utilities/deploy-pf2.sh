@@ -33,7 +33,7 @@ WARN="${YELLOW}⚠${NC}"
 INFO="${BLUE}→${NC}"
 
 # ─── Configuração PF-2 ───────────────────────────────────────────────────────
-CLOUD_BUILDER="cloud-fs09-physarum-attack-paths"
+CLOUD_BUILDER="cloud-expertsonline-physarum-attack-paths"
 DOCKER_IMAGE="rust:1-slim-bookworm"
 ARTIFACT_BUCKET="physarum-artifacts-168740128169"
 ARTIFACT_PREFIX="physarum-attack-paths/pf-2/linux-x86_64"
