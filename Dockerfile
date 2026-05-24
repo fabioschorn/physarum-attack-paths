@@ -15,8 +15,7 @@ RUN cargo build --release \
     -p physarum-ebpf-observer \
     -p physarum-packet-observer \
     -p physarum-maze \
-    -p physarum-scanner \
-    --bin physarum-scan
+    -p physarum-scanner
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
 FROM debian:13.5-slim
