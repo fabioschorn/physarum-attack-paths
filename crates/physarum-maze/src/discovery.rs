@@ -85,8 +85,7 @@ pub async fn scan_targeted(target: Ipv4Addr) {
         Ok(o) if o.status.success() => {
             let last = String::from_utf8_lossy(&o.stdout)
                 .lines()
-                .filter(|l| l.contains("22/") || l.starts_with("Host:"))
-                .last()
+                .rfind(|l| l.contains("22/") || l.starts_with("Host:"))
                 .unwrap_or("")
                 .to_string();
             tracing::debug!(%target, info = %last, "targeted scan complete");
