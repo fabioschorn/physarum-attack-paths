@@ -100,35 +100,61 @@ The system does **not** simulate slime mold. It borrows the *form* of the differ
 
 ### Current prototype (implemented)
 
+The implemented prototype now has three cooperating layers:
+
+```text
+1. Adaptive graph layer
+   physarum-server + physarum-agent
+   -> registration, peer probing, ProbeReport ingest, /graph, /paths
+
+2. Sensing and discovery layer
+   physarum-ebpf-observer
+   physarum-packet-observer
+   physarum-scanner
+   physarum-probe
+   -> TCP/ICMP stimulus capture, RustScan-compatible discovery, probe execution
+
+3. Organism runtime layer
+   physarum-node
+   physarum-node-runtime
+   physarum-maze
+   -> role-fluid runtime consolidation, autonomous maze propagation, lineage memory
 ```
-┌──────────┐    HTTP probes    ┌──────────┐
-│  agent-b │◄─────────────────►│  agent-c │
-└─────┬────┘                   └─────┬────┘
-      │  ProbeReport                 │  ProbeReport
-      │  (POST /report)              │  (POST /report)
-      ▼                              ▼
-┌─────────────────────────────────────────┐
-│            physarum-server              │
-│                                         │
-│  POST /register  →  agent registry      │
-│  GET  /agents    →  list agents         │
-│  GET  /peers/{id}→  neighbor set        │
-│  POST /report    →  ProbeReport ingest  │
-│  GET  /graph     →  D_ij / q_ema dump   │
-└─────────────────────────────────────────┘
+
+At the graph layer, the original coordinator model remains implemented and useful:
+
+```text
+agents register -> agents probe -> reports arrive -> Q_ij -> q_ema -> D_ij -> /paths
 ```
 
-Each agent:
-1. Registers with the coordinator on startup.
-2. Fetches its peer list from the coordinator.
-3. Sends HTTP probes to each peer, measuring RTT and success.
-4. Builds a local observation window (20-sample `VecDeque`).
-5. Computes a `ProbeReport` (success_rate, avg_rtt_ms) and POSTs it to the coordinator.
-6. The coordinator runs the `Q_ij → q_ema → D_ij` pipeline and stores the result in the graph.
+At the sensing layer, nodes can observe and discover candidate corridors instead of relying only on a predeclared peer list:
 
-### Future architecture *(not yet implemented)*
+```text
+TCP state / packet stimulus -> candidate host -> scanner/probe -> edge evidence
+```
 
-A full production deployment will add eBPF flow capture, signed reports over QUIC, mTLS peer probing, attestation, and coordinator sharding. See [Future architecture](#future-architecture) below.
+At the organism layer, `physarum-maze` has validated the full pre-final behavior in AWS:
+
+```text
+PF-1: one seed expands through a 7-node maze and records lineage.
+PF-2: the organism re-senses new structure, handles TCP stimulus, avoids duplicate propagation into already-colonized G, and records a secondary conduit.
+```
+
+The current architecture is therefore no longer just a server with fixed clients. It is a research organism composed of graph memory, local senses, bounded discovery, propagation, and lineage.
+
+### Next architecture tracks *(planned)*
+
+The immediate planned tracks are intentionally narrow:
+
+```text
+Issue #106
+  physarum-llm research/design for the Causal Continuity Paradox.
+
+Issue #89 / Gate N.0
+  secure organism identity, mTLS, and lineage threat model after Issue #106.
+```
+
+No broader production runtime is claimed yet. Secure identity, signed lineage, and mTLS are planned design/implementation gates, not current guarantees.
 
 ---
 
@@ -415,7 +441,7 @@ Summary:
 
 ## Future architecture
 
-> The sections below describe the **planned full architecture**. Items marked ✔ are implemented.
+> The sections below describe the planned secure/strategic evolution of the prototype. Items marked ✔ are already implemented.
 
 ### Autonomous propagation organism *(✔ implemented — PF-1, PF-2)*
 
