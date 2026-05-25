@@ -85,7 +85,7 @@ physarum-attack-paths/
 │   ├── physarum-ebpf-observer-ebpf  eBPF bytecode (no_std)
 │   ├── physarum-packet-observer   raw-socket stimulus capture (ICMP + TCP SYN)
 │   ├── physarum-packet-observer-ebpf  eBPF bytecode for packet observer
-│   ├── physarum-scanner           async port scanner — full RustScan feature parity
+│   ├── physarum-scanner           native async discovery engine
 │   ├── physarum-probe             probe execution library (shared by agent and maze)
 │   ├── physarum-node              node runtime (role selection, stimulus dispatch)
 │   ├── physarum-node-runtime      node runtime library
@@ -188,7 +188,7 @@ Gates A–K.1 proved the reinforcement model under controlled topologies where e
 
 `physarum-maze` is a single self-contained binary that:
 
-1. **Discovers** candidate hosts in the local /24 via `physarum-scanner` (RustScan-backed async TCP scan, optional ICMP/UDP).
+1. **Discovers** candidate hosts in the local /24 via `physarum-scanner` (native async TCP discovery, optional ICMP/UDP).
 2. **Stimulates** each candidate — raw TCP SYN socket, ICMP, and eBPF tracepoint events feed the same scoring loop.
 3. **Propagates** to the highest-scored candidate by SCP-ing the binary over empty-password SSH, then launching it on the remote node via `systemd-run`.
 4. **Records lineage** in `/tmp/physarum-lineage.json` — origin IP, propagation path, hop count, per-edge scores, visited IPs, secondary conduits.
@@ -196,10 +196,10 @@ Gates A–K.1 proved the reinforcement model under controlled topologies where e
 ### Stimulus sources
 
 ```
-TCP SYN (raw socket)   physarum-packet-observer captures inbound SYN packets; source IP = discovery signal
-ICMP echo reply        raw socket listener captures ICMP replies; source IP = live host signal
-eBPF tracepoint        tracepoint/sock/inet_sock_set_state; confirms connection-level reachability
-Nmap /24 scan          physarum-scanner enumerates all live hosts in the local subnet
+TCP SYN (raw socket)          physarum-packet-observer captures inbound SYN packets; source IP = discovery signal
+ICMP echo reply               raw socket listener captures ICMP replies; source IP = live host signal
+eBPF tracepoint               tracepoint/sock/inet_sock_set_state; confirms connection-level reachability
+physarum-scanner /24 discovery enumerates reachable hosts in the local subnet
 ```
 
 All four stimulus types feed the same scoring map keyed by source IP. Stronger stimulus → higher score → organism propagates there next.
@@ -271,7 +271,7 @@ cross subnet    (10.60.50.0/24)   X (cross-probe — appears T+5min)
 **Three adaptive behaviors validated:**
 
 ```
-1. Lateral discovery    A discovers A.1 via /24 nmap scan (physarum-scanner)
+1. Lateral discovery    A discovers A.1 via /24 physarum-scanner discovery
                         A.1 (10.60.10.20) appears in A's lineage.visited
 
 2. Cross-subnet stimulus  X sends TCP SYN to A.1:22 every 30s (bash /dev/tcp built-in)
@@ -363,7 +363,7 @@ An isolated `terraform-vuln/` environment is planned to validate the paradox res
 | J.1 | eBPF observer agent flow correlation | COMPLETED |
 | K | Segmented adaptive flow-path lab (5-node) | COMPLETED |
 | K.1 | Autonomous path selection (negative-log scoring) | COMPLETED |
-| L | physarum-scanner (RustScan feature parity + rlimit) | COMPLETED |
+| L | physarum-scanner native discovery engine | COMPLETED |
 | L.2 | Local interface stimulus evidence | COMPLETED |
 | L.3 | ICMP stimulus evidence | COMPLETED |
 | M | physarum-maze node runtime (autonomous propagation) | COMPLETED |
