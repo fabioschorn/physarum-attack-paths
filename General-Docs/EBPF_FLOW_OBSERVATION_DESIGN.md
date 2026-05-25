@@ -293,15 +293,15 @@ IPv6 flows                      — v1 is IPv4 only
 
 ## Future direction — controlled Physarum-inspired expansion
 
-The long-term direction is to model agents as computational analogues of Physarum polycephalum. In controlled environments, agents may eventually use eBPF flow evidence and RustScan-based service discovery to identify candidate next steps, expand through the environment, reinforce productive paths, and decay weaker or unproductive paths.
+The long-term direction is to model agents as computational analogues of Physarum polycephalum. In controlled environments, agents may use eBPF flow evidence and native `physarum-scanner` discovery to identify candidate next steps, expand through the environment, reinforce productive paths, and decay weaker or unproductive paths.
 
-This future work remains intentionally separate from the Stage 0 eBPF design. PR #62 defines the passive flow observation foundation. RustScan integration, agent replication, and controlled expansion will be defined in future gates.
+This future work remains intentionally separate from the Stage 0 eBPF design. PR #62 defines the passive flow observation foundation. Native discovery, agent replication, and controlled expansion are defined by later gates.
 
 The intended sequence:
 
 ```text
 1. eBPF passive flow observation first.
-2. RustScan later as a library available to agents for service discovery.
+2. physarum-scanner discovery as an organism capability.
 3. Controlled Physarum-inspired expansion/replication in future gates.
 ```
 
