@@ -68,7 +68,6 @@ See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the canon
 - [Development workflow](#development-workflow)
 - [Roadmap](#roadmap)
 - [Planned evolution](#planned-evolution)
-- [Relationship to upstream IP](#relationship-to-upstream-ip)
 - [References](#references)
 
 ---
@@ -407,22 +406,6 @@ clear lab mode vs secure mode separation
 ```
 
 No production security guarantees are claimed before Gate N.
-
----
-
-## Relationship to upstream IP
-
-`Physarum` is designed as a complementary system to the upstream patented framework for *Attack-Path Probability Modeling*. It does not replace that framework; it augments it by replacing static, scanner-derived edge probability `P(e)` with live, observation-driven conductivity `D_ij`.
-
-Specifically:
-
-- **§8.4** (`P(e)` from `W(e)`) becomes the `t=0` initial condition of the Physarum dynamics.
-- **§8.5** (Yen K-shortest path enumeration) can operate on the live `D/L` cost function.
-
-Potential independent contribution areas:
-
-1. **Reconciliation across heterogeneous segmentation primitives** such as AWS Security Groups, Azure NSGs, Kubernetes NetworkPolicies, and on-prem firewalls.
-2. **Closed-loop refinement of the attack graph during agent execution**, where validation outcomes feed back into edge conductivities in real time.
 
 ---
 
