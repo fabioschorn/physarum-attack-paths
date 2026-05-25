@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired autonomous attack-path organism.** `physarum-attack-paths` is a Rust research prototype for building a living, evidence-driven attack-path graph. It combines adaptive edge scoring (`Q_ij → q_ema → D_ij`), active probing, eBPF/packet stimulus observation, RustScan-compatible discovery, and controlled lab propagation. PF-1 and PF-2 validated the current organism model in real AWS VPC labs: a single seed expanded through a maze, re-sensed new structure, detected an already-colonized node, and preserved a secondary conduit.
+> **Bio-inspired attack-path organism for adaptive security graph discovery.** `physarum-attack-paths` is a Rust research prototype that turns distributed network evidence into a living attack-path graph. It combines adaptive edge scoring (`Q_ij → q_ema → D_ij`), active probing, eBPF/packet-level stimulus observation, RustScan-compatible discovery, and controlled lab propagation. PF-1 and PF-2 validated the current organism model in real AWS VPC labs: one seed expanded through an unknown maze, re-sensed new structure, recognized an already-colonized node, and preserved a secondary conduit.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
