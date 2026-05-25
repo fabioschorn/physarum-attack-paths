@@ -598,3 +598,28 @@ The strategic autonomy questions remain the north star — `physarum-llm` is the
 concrete gate that moves the organism from "react to known SSH targets" to "reason
 about any accessible port on any reachable host."
 
+---
+
+## 12. Future visualization idea: wasm-lab
+
+> **Status:** Research/backlog idea only. Not part of the current implementation roadmap.
+
+A browser-based `wasm-lab` may still be useful later as a visualization and teaching tool for the organism model.
+
+Possible value:
+
+```text
+show q_ema / D_ij reinforcement over time
+animate PF-1/PF-2 lineage expansion
+visualize secondary_conduits and already-colonized behavior
+replay saved GraphSnapshot or lineage JSON evidence
+explain organism behavior to non-engineering audiences
+```
+
+This should remain separate from the main README status table until there is an actual implementation issue or prototype.
+
+Potential future issue title:
+
+```text
+Research: evaluate wasm-lab visualization for PF lineage and adaptive graph replay
+```
