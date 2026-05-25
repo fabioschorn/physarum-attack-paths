@@ -392,7 +392,7 @@ The current prototype has completed the component gates through Gate M and the p
 
 The organism is currently confined to hosts reachable through the validated SSH/SCP lab propagation path. If a host is reachable only through a non-SSH service, the organism may observe the host but cannot yet cross it.
 
-Issue #106 explores whether a lab-only, safety-gated `physarum-llm` component can select context-specific propagation strategies from observed ports, banners, and OS hints. This is not implemented and remains blocked on design and safety review.
+Issue #106 explores whether a lab-only, safety-gated `physarum-llm` component can select context-specific propagation strategies from observed ports, banners, and OS hints. This is not implemented and remains pending design and safety review.
 
 ### Gate N — secure organism identity
 
