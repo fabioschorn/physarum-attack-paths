@@ -370,9 +370,9 @@ This note is research positioning only.
 
 ---
 
-## 10. Micromouse-inspired exploration and RustScan candidate-path discovery
+## 10. Micromouse-inspired exploration and physarum-scanner candidate-path discovery
 
-> **Status (2026-05-24):** The Micromouse framing predicted the gate sequence K→L→M→N. Gates K, K.1, L, L.2, L.3, M, M.4 are complete. PF-1 and PF-2 labs validated autonomous propagation beyond the original scope of Gate M (full SCP+SSH self-propagation with lineage, stimulus-driven scoring, secondary conduits). Gate N (mTLS) is next. The framing remains valid as a communication tool; the sensing model (RustScan + active probes + eBPF) is implemented in `physarum-maze`.
+> **Status (2026-05-24):** The Micromouse framing predicted the gate sequence K→L→M→N. Gates K, K.1, L, L.2, L.3, M, M.4 are complete. PF-1 and PF-2 labs validated autonomous propagation beyond the original scope of Gate M (full SCP+SSH self-propagation with lineage, stimulus-driven scoring, secondary conduits). Gate N (mTLS) is next. The framing remains valid as a communication tool; the sensing model (`physarum-scanner` + active probes + eBPF/packet observation) is implemented in `physarum-maze`.
 
 ### Source of the insight
 
@@ -393,7 +393,7 @@ The fastest path is not always the shortest path. A longer corridor with better 
 |---|---|
 | Unknown maze | Unknown network / lab topology |
 | Walls / corridors | Blocked / reachable network channels |
-| IR sensors | RustScan + active probes + eBPF passive observation |
+| IR sensors | `physarum-scanner` + active probes + eBPF/packet observation |
 | Maze memory (internal map) | Adaptive graph (GraphSnapshot, EdgeSnapshot) |
 | Flood fill / route planning | Path scoring and reinforcement model (`/paths`) |
 | Fastest path, not shortest | Best path by latency, loss, jitter, stability, and flow evidence |
@@ -413,16 +413,16 @@ Physarum-attack-paths: a distributed agent organism occupies, senses, reinforces
 Micromouse uses IR sensors to detect walls one step ahead. This project uses three complementary sensing mechanisms:
 
 ```text
-RustScan (future)  -> candidate-path discovery: find open ports and services on adjacent hosts
+physarum-scanner   -> candidate-path discovery: find reachable hosts/services in bounded scope
 active probes      -> viability testing: confirm reachability and measure quality (latency, loss, jitter)
-eBPF observer      -> passive-flow confirmation: observe real OS-level TCP flows without adding probe traffic
+eBPF/packet senses -> passive or stimulus-driven confirmation without relying only on scheduled probes
 ```
 
-RustScan provides candidate-path discovery. It helps the organism identify possible next channels when no peer list is pre-declared — analogous to the Micromouse detecting a new open corridor.
+`physarum-scanner` provides candidate-path discovery. It helps the organism identify possible next channels when no peer list is pre-declared — analogous to the Micromouse detecting a new open corridor.
 
 Active probes correspond to the robot physically moving into a corridor and measuring how easy it is to traverse.
 
-eBPF flow observation corresponds to the robot sensing traffic already flowing through a channel — confirming that the corridor is in active use, not just structurally open.
+eBPF/packet observation corresponds to the robot sensing traffic or stimuli already flowing through a channel — confirming that the corridor is active, not just structurally open.
 
 ---
 
@@ -431,10 +431,10 @@ eBPF flow observation corresponds to the robot sensing traffic already flowing t
 Micromouse builds a complete maze map before the optimized run. This project builds an adaptive graph that is continuously updated as probes report back:
 
 ```text
-Q_ij          -> raw probe quality signal
-q_ema         -> smoothed quality memory (exponential moving average)
-D_ij          -> adaptive edge conductivity (reinforces strong channels, weakens poor ones)
-FlowObservation -> confirms that a channel carries real traffic, not only probe traffic
+Q_ij             -> raw probe quality signal
+q_ema            -> smoothed quality memory (exponential moving average)
+D_ij             -> adaptive edge conductivity (reinforces strong channels, weakens poor ones)
+FlowObservation  -> confirms that a channel carries real traffic, not only probe traffic
 ```
 
 The graph is not a static map. Like a living slime mold, it continuously remodels itself based on incoming stimuli.
@@ -448,7 +448,7 @@ The Micromouse analogy predicted the gate sequence. Actual outcomes annotated:
 ```text
 Gate K    segmented adaptive flow-path lab                        ✔ DONE (Issue #76)
 Gate K.1  autonomous path selection, negative-log scoring         ✔ DONE (Issue #80 / PR #82)
-Gate L    RustScan-backed candidate-path discovery                ✔ DONE (physarum-scanner crate)
+Gate L    physarum-scanner candidate-path discovery               ✔ DONE
 Gate L.2  local interface stimulus evidence                       ✔ DONE
 Gate L.3  ICMP stimulus evidence                                  ✔ DONE
 Gate M    controlled expansion from discovered candidates         ✔ DONE (physarum-maze, SCP+SSH propagation)
@@ -458,9 +458,7 @@ PF-2      adaptive re-routing lab (9-node AWS, TCP/ICMP stimuli)  ✔ DONE
 Gate N    mTLS + Ed25519 lineage signatures                       → PLANNED
 ```
 
-Gate M went further than originally scoped: physarum-maze achieved full SCP+SSH
-self-propagation with lineage recording, stimulus-driven scoring, and secondary
-conduit detection — validated in real AWS labs (PF-1, PF-2).
+Gate M went further than originally scoped: physarum-maze achieved full SCP+SSH self-propagation with lineage recording, stimulus-driven scoring, and secondary conduit detection — validated in real AWS labs (PF-1, PF-2).
 
 ---
 
@@ -594,9 +592,7 @@ physarum-llm → LLM oracle for exploit-based propagation (Issue #106) — IN PL
 Gate N    → mTLS + Ed25519 lineage signatures
 ```
 
-The strategic autonomy questions remain the north star — `physarum-llm` is the first
-concrete gate that moves the organism from "react to known SSH targets" to "reason
-about any accessible port on any reachable host."
+The strategic autonomy questions remain the north star — `physarum-llm` is the first concrete gate that moves the organism from "react to known SSH targets" to "reason about any accessible port on any reachable host."
 
 ---
 
