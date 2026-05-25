@@ -1,6 +1,6 @@
 # Role-Fluid Agent Architecture — Roadmap and Design Intent
 
-**Status:** Design intent captured — no implementation in this document  
+**Status:** Historical design intent — superseded in part by Gate M/M.4, PF-1, and PF-2  
 **Issue:** #63  
 **Author:** Dev Lead  
 **Date:** 2026-05-11
@@ -9,13 +9,24 @@
 
 ## Summary
 
-This document captures the architectural direction of the physarum-attack-paths project beyond the eBPF Stage 0 design. It records what has been validated, what is being built next, and where the project is going in the long term. No code is implemented here.
+This document captures the architectural direction that led from the original eBPF Stage 0 design toward the role-fluid `physarum-node` and autonomous `physarum-maze` organism model.
+
+Several ideas in this document were originally future-looking. Many are now implemented or superseded:
+
+```text
+Gate I/J/J.1   eBPF observation and FlowObservation API validated
+Gate L         physarum-scanner native discovery engine implemented
+Gate M/M.4     physarum-node runtime and probe/discovery consolidation completed
+PF-1/PF-2      autonomous maze propagation and adaptive re-routing validated
+```
+
+This document should be read as design history and architectural intent. The current canonical architecture is maintained in `General-Docs/ARCHITECTURE.md`.
 
 ---
 
 ## 1. Validated foundation
 
-Gates A through H established that the core reinforcement mechanism works under real network conditions before anything autonomous is attempted.
+Gates A through H established that the core reinforcement mechanism works under real network conditions before autonomous behavior is attempted.
 
 ```text
 Gate A   Design S3 artifact delivery and EC2 bootstrap
@@ -25,111 +36,97 @@ Gate D   AWS Phase Identity — lab_phase variable, resource naming, SG topology
 Gate E   AWS Mode 2 segmented B→C→D runtime validation
 Gate F   B/C/D TLA+ Path-Selection Model — formal verification of path re-selection under degradation
 Gate G   Docker Weighted Competing Paths Validation — Physarum scoring in controlled containers
-Gate H   AWS tc/netem Weighted Competing Paths Validation — real network degradation, convergence in ~240 s,
-         score separation Δ~5–7 %
+Gate H   AWS tc/netem Weighted Competing Paths Validation — real network degradation and convergence
 ```
 
 Gate H was the critical validation:
 
 ```text
-two competing paths (B→C→D vs B→E→D) with real tc/netem degradation applied at C
-path re-selection emerged from the scoring state after network quality changed,
-without manual path override by the operator
+two competing paths with real tc/netem degradation
+path re-selection emerged from scoring state after network quality changed
 q_ema and D_ij reinforcement/decay cycle proven under real AWS conditions
 ```
 
-This proven foundation is the prerequisite for everything that follows. The scoring mechanism does not change — the input signals generalize.
+This foundation remains valid. The scoring mechanism does not change — the input signals and runtime capabilities generalize.
 
 ---
 
-## 2. Near-term eBPF direction
+## 2. eBPF direction
 
-The next implementation step is passive flow observation using eBPF. The design is defined in:
-
-```text
-General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md   (Issue #61 / PR #62)
-```
-
-### Current near-term process layout
+Passive flow observation adds evidence that active probing alone cannot provide.
 
 ```text
 physarum-agent           core agent: probing, scoring, reporting
 physarum-ebpf-observer   sidecar: TCP state tracepoint, metadata only
 ```
 
-The sidecar is a **transitional validation design**. It is the right approach for the near term because:
-
-- eBPF has additional kernel and runtime complexity that should be validated independently before integration into the core agent.
-- The observer can be toggled, restarted, or replaced without touching the stable agent binary.
-- Privilege isolation: `CAP_BPF` and `CAP_PERFMON` are confined to the sidecar; the core agent remains unprivileged.
-
-The two-process layout is not the final architecture.
-
-### Stage sequence for eBPF work
+The original two-process layout was a transitional validation design. It was useful because:
 
 ```text
-Stage 0   Design document (Issue #61 / PR #62) ← done
-Stage 1   FlowObservation model + POST/GET /flow-observations + unit tests   → Gate I
-Stage 2   physarum-ebpf-observer crate; TCP state tracepoint; posts to server
-Stage 3   AWS EC2 validation on Amazon Linux 2023                            → Gate J
-Stage 4   Scoring integration proposal (combine probes + passive flows)      → Gate K
+eBPF complexity could be validated independently
+observer restart/replacement did not disturb the stable agent
+CAP_BPF / CAP_PERFMON stayed isolated in the sidecar
 ```
+
+This work was later incorporated into the broader role-fluid direction through Gate M and Gate M.4.
 
 ---
 
-## 3. Future unified agent direction
+## 3. Role-fluid runtime direction
 
-After the eBPF sidecar is validated, the long-term direction is a **unified physarum-agent runtime**.
+The long-term direction is a unified organism runtime where one binary can carry multiple capabilities and activate them according to the environment.
 
 ```text
-near term (transitional)         future
-──────────────────────────       ──────────────────────────────────────────
-physarum-agent                   physarum-agent unified runtime
-physarum-ebpf-observer               core agent runtime
-                                     coordinator / server capability
-                                     client / reporting capability
-                                     eBPF observation capability
-                                     RustScan / service-discovery capability
-                                     Physarum scoring
-                                     controlled expansion / replication logic
-                                     state reconciliation logic
+original transitional layout       role-fluid direction
+───────────────────────────        ───────────────────────────────────────
+physarum-agent                     physarum-node / physarum-maze organism
+physarum-ebpf-observer                 probe execution
+                                      packet/eBPF observation
+                                      native discovery
+                                      scoring
+                                      controlled propagation
+                                      lineage/state memory
 ```
 
-The unified binary carries all core capabilities and switches roles at runtime based on observed conditions.
+The role-fluid idea is now partially validated:
+
+```text
+Gate M      physarum-node supervises role-specific children
+Gate M.4    probe/discovery internalized through physarum-probe
+PF-1/PF-2   physarum-maze validates autonomous organism behavior
+```
 
 ---
 
 ## 4. Role-fluid agent model
 
-The future agent is **role-fluid**: its role is not permanently fixed but adapts to the network state it observes. This role-fluid behavior is future architecture intent; it has not yet been implemented or validated.
+A role-fluid agent is not permanently fixed as only a client or only a server. Its responsibilities can adapt to network state and local evidence.
 
-### Roles an agent may assume
+### Roles an organism node may assume
 
 ```text
-coordinator / server      bootstraps the network, holds the authoritative graph
-client / reporter         probes paths, reports scores to the coordinator
-flow observer             runs the eBPF observation loop
-service-discovery worker  runs RustScan-backed port enumeration on candidate hosts
-path scorer               computes q_ema / D_ij for its local edges
-expansion unit            propagates to the next highest-scored node
-local recovery            if upstream coordinator is unreachable, assumes coordinator role
+coordinator / server      bootstraps or exposes graph state
+client / reporter         probes paths and reports scores
+flow observer             observes kernel/network metadata
+service-discovery worker  runs physarum-scanner discovery on candidate hosts
+path scorer               computes or contributes to q_ema / D_ij scoring
+expansion unit            propagates to the next highest-scored node in a lab
+local recovery            preserves organism behavior when upstream path weakens
 ```
 
 ### Role transition example
 
 ```text
 Initial state:
-  machine A = seed / coordinator agent
+  machine A = seed / coordinator-like organism node
 
 Expansion:
-  A propagates agents to B and C
-  B and C initially report to A as clients
+  A propagates to B and C in a controlled lab
+  B and C continue sensing and reporting from their new positions
 
 Role transition:
-  B loses the flow / path to A
-  B promotes itself to local coordinator
-  B continues expansion from its current position
-  the organism continues to grow from B's foothold
+  a downstream node observes a stronger path than the original seed path
+  the organism reinforces the new path and preserves old useful paths as secondary conduits
 ```
 
 This matches the Physarum analogy:
@@ -138,7 +135,7 @@ This matches the Physarum analogy:
 spread through the maze
 reinforce useful channels
 abandon weak / dead paths
-continue growing from viable points even when the original seed point is isolated
+continue growing from viable points even when the original seed point is no longer dominant
 ```
 
 ### Core conceptual principle
@@ -150,24 +147,24 @@ Agents are the computational substance that occupies and reinforces paths.
 
 ---
 
-## 5. RustScan as a future agent capability
+## 5. physarum-scanner as an organism capability
 
-RustScan (Rust, MIT licensed) is the identified tool for service-discovery experiments in a future gate.
+`physarum-scanner` is the native discovery engine for the project.
 
 ### Intended role
 
 ```text
-eBPF passive flow evidence identifies candidate destinations worth probing.
-RustScan enumerates all open TCP ports at those destinations.
-Port discovery results feed into the physarum graph as candidate edges and nodes.
+eBPF or packet stimulus identifies candidate destinations worth probing.
+physarum-scanner enumerates reachable services or hosts within the bounded lab scope.
+Discovery results feed into the physarum graph as candidate edges and nodes.
 ```
 
 ### Integration model
 
 ```text
-RustScan embedded as a library dependency inside physarum-agent
-not called as an external subprocess
-port discovery results → candidate observations → physarum graph edges
+physarum-scanner is an internal project crate
+not an external subprocess dependency
+scan/discovery results -> candidate observations -> graph edges and organism decisions
 ```
 
 ### Semantic rule
@@ -176,35 +173,32 @@ port discovery results → candidate observations → physarum graph edges
 Open ports are exposure observations, not proof of authorized access or exploitability.
 ```
 
-RustScan discovery results are observations that enrich the graph. They do not grant authorization or imply that the agent may proceed without operator-defined scope.
-
-**RustScan integration is not part of the current eBPF Stage 0/Stage 1 work. It is a future gate.**
+Discovery enriches the graph. It does not grant authorization or imply that the organism may proceed outside operator-defined scope.
 
 ---
 
 ## 6. Controlled Physarum-inspired expansion
 
-The project models agents as computational analogues of Physarum polycephalum. In controlled environments, agents may eventually use passive flow evidence and service-discovery evidence to identify candidate next steps, reinforce productive paths, and decay weaker or unproductive paths.
+The project models agents as computational analogues of *Physarum polycephalum*. In controlled environments, agents may use passive-flow evidence, packet-level stimulus, and native discovery to identify candidate next steps, reinforce productive paths, and decay weaker or unproductive paths.
 
-### Autonomous propagation cycle (future)
+### Autonomous propagation cycle
 
 ```text
-1. eBPF observer detects passive flows to reachable hosts
-        → port 80/443 flow seen = traversable signal = candidate to explore
+1. Packet/eBPF observer detects stimulus from a reachable host
+        -> inbound TCP/ICMP signal becomes a candidate to explore
 
-2. RustScan enumerates all open TCP ports at the discovered host
-        → not only the obvious ports
+2. physarum-scanner performs bounded discovery
+        -> local /24 discovery or targeted /32 characterization depending on context
 
-3. Physarum scoring (q_ema / D_ij) ranks available paths
-        → strongest filament = highest scored path = where the agent goes next
+3. Physarum scoring ranks available paths
+        -> strongest filament = highest scored path = preferred next movement
 
-4. Agent propagates to the next node and repeats from there
-        → graph expands dynamically at runtime
-        → no pre-defined topology, no pre-provisioned agent nodes
-        → emergent network map built by the agent itself
+4. Agent propagates in the controlled lab
+        -> graph expands dynamically at runtime
+        -> no pre-defined final target required
 
-5. Weak paths decay (q_ema drops), dead ends are abandoned
-        → the agent self-organizes around reachable, productive paths
+5. Weak paths decay and dead ends are abandoned
+        -> the organism self-organizes around reachable, productive paths
 ```
 
 ### How q_ema / D_ij generalizes to the autonomous model
@@ -212,21 +206,32 @@ The project models agents as computational analogues of Physarum polycephalum. I
 The scoring formula does not change. The input signals generalize:
 
 ```text
-eBPF flow frequency     → more observed flows to a host = stronger edge signal
-RustScan result         → useful open ports found = positive reinforcement
-Propagation outcome     → agent reached the node successfully = q_ema rises
-Dead end                → no open ports, no propagation path = q_ema decays, edge removed
-New node discovered     → edge bootstraps at q_ema=0, grows with evidence
+eBPF / packet stimulus  -> stronger edge signal
+physarum-scanner result -> reachable candidate evidence
+Propagation outcome     -> successful movement reinforces the edge
+Dead end                -> score decays, path becomes less preferred
+New node discovered     -> candidate edge is bootstrapped and evaluated
 ```
 
 ---
 
-## 7. Intended sequence
+## 7. Actual outcome vs original intent
+
+Original intended sequence:
 
 ```text
-1. eBPF passive flow observation first          (near term — Gate I / Gate J)
-2. RustScan as a library for service discovery  (future gate)
-3. Controlled Physarum-inspired expansion       (future gate — after scoring integration)
+1. eBPF passive flow observation
+2. native service discovery
+3. controlled Physarum-inspired expansion
+```
+
+Actual validated outcome:
+
+```text
+1. eBPF and packet observation validated through Gates I/J/J.1/L.3
+2. physarum-scanner implemented and used in Gates L/L.1/L.2/PF-1/PF-2
+3. physarum-node consolidated runtime roles in Gate M/M.4
+4. physarum-maze validated autonomous propagation in PF-1/PF-2
 ```
 
 ---
@@ -234,22 +239,23 @@ New node discovered     → edge bootstraps at q_ema=0, grows with evidence
 ## 8. What this document does NOT authorize
 
 ```text
-eBPF code                  → defined in EBPF_FLOW_OBSERVATION_DESIGN.md, implemented in Gate J
-RustScan integration       → future gate, not implemented in eBPF Stage 0/1
-Role-fluid runtime         → future gate, not implemented in eBPF Stage 0/1
-Scoring changes            → Stage 4 only, after passive evidence is validated
-Uncontrolled expansion     → out of scope; future expansion work is intended for controlled environments
+Uncontrolled expansion
+Internet scanning
+Public target probing
+Production deployment without Gate N security design
+LLM-assisted propagation before Issue #106 design/safety review
 ```
 
 ---
 
-## 9. Relationship to existing design documents
+## 9. Relationship to current documents
 
 ```text
-EBPF_FLOW_OBSERVATION_DESIGN.md    Stage 0 design — sidecar, Aya stack, TCP state tracepoint
-PROTOTYPE_ROADMAP.md               Gate history and milestone tracking
-QUALITY_GATE.md                    Gate definitions and acceptance criteria
-INSIGHTS_AND_BRAINSTORM.md         Exploratory ideas (not authoritative)
+ARCHITECTURE.md                    current canonical system architecture
+QUALITY_GATE.md                    current gate status and acceptance criteria
+EBPF_FLOW_OBSERVATION_DESIGN.md    original eBPF Stage 0 design
+INSIGHTS_AND_BRAINSTORM.md         exploratory ideas, not authoritative
+GitHub Issues/PRs                  detailed historical record and evidence
 ```
 
-This document is the architectural bridge between the validated foundation (Gates A–H) and the future autonomous agent direction.
+This document remains useful as a bridge between the validated foundation and the role-fluid organism direction, but it is no longer the primary roadmap.
