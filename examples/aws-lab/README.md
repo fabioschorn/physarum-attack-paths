@@ -296,7 +296,7 @@ Required cleanup:
 
 ```bash
 cd examples/aws-lab/terraform
-terraform destroy -var="operator_cidr=187.101.126.140/32"
+terraform destroy -var="operator_cidr=<OPERATOR_IP>/32"
 ```
 
 Watch for forgotten costs:
@@ -400,18 +400,18 @@ export AWS_PROFILE=<profile-name>
 The `operator_cidr` must be your workstation IP. The coordinator API (port 8080) is not
 yet authenticated — the Security Group is the only access control. Use a `/32` CIDR.
 
-Dev Lead test value: `187.101.126.140/32`. Other operators: substitute your own IP.
+Dev Lead test value: `<OPERATOR_IP>/32`. Other operators: substitute your own IP.
 
 ```bash
 cd examples/aws-lab/terraform
 
 terraform init
 terraform fmt -recursive
-terraform plan  -var="operator_cidr=187.101.126.140/32"
-terraform apply -var="operator_cidr=187.101.126.140/32"
+terraform plan  -var="operator_cidr=<OPERATOR_IP>/32"
+terraform apply -var="operator_cidr=<OPERATOR_IP>/32"
 
 # Always destroy when done
-terraform destroy -var="operator_cidr=187.101.126.140/32"
+terraform destroy -var="operator_cidr=<OPERATOR_IP>/32"
 ```
 
 To auto-detect your current IP instead of hard-coding:
@@ -440,14 +440,14 @@ docker run --rm \
   -e AWS_SESSION_TOKEN \
   "$TF_IMAGE" init
 
-# plan — substitute your operator CIDR; Dev Lead value: 187.101.126.140/32
+# plan — substitute your operator CIDR; Dev Lead value: <OPERATOR_IP>/32
 docker run --rm \
   -v "$TF_DIR:/workspace" \
   -w /workspace \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
   -e AWS_SESSION_TOKEN \
-  "$TF_IMAGE" plan -var="operator_cidr=187.101.126.140/32"
+  "$TF_IMAGE" plan -var="operator_cidr=<OPERATOR_IP>/32"
 
 # apply
 docker run --rm -it \
@@ -456,7 +456,7 @@ docker run --rm -it \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
   -e AWS_SESSION_TOKEN \
-  "$TF_IMAGE" apply -var="operator_cidr=187.101.126.140/32"
+  "$TF_IMAGE" apply -var="operator_cidr=<OPERATOR_IP>/32"
 
 # destroy (always run when done)
 docker run --rm -it \
@@ -465,7 +465,7 @@ docker run --rm -it \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
   -e AWS_SESSION_TOKEN \
-  "$TF_IMAGE" destroy -var="operator_cidr=187.101.126.140/32"
+  "$TF_IMAGE" destroy -var="operator_cidr=<OPERATOR_IP>/32"
 ```
 
 For AWS named profile, replace the `-e AWS_*` flags with:
@@ -860,7 +860,7 @@ The real `user-data/server.sh` and `user-data/agent.sh` now implement this patte
 
 ### 16.7 Runtime validation plan
 
-After binary deployment, validation commands must be run from `187.101.126.140/32` (Dev Lead workstation). The coordinator API (port 8080) is not yet authenticated — the Security Group is the only access control. Do not open `operator_cidr` to `0.0.0.0/0` for this validation.
+After binary deployment, validation commands must be run from `<OPERATOR_IP>/32` (Dev Lead workstation). The coordinator API (port 8080) is not yet authenticated — the Security Group is the only access control. Do not open `operator_cidr` to `0.0.0.0/0` for this validation.
 
 ```bash
 SERVER_IP=$(terraform -chdir=examples/aws-lab/terraform output -raw server_public_ip)
@@ -1022,17 +1022,17 @@ cd examples/aws-lab/terraform
 
 terraform init
 terraform plan \
-  -var="operator_cidr=187.101.126.140/32" \
+  -var="operator_cidr=<OPERATOR_IP>/32" \
   -var="artifact_bucket=<your-artifact-bucket>" \
   -var="enable_artifact_download=true"
 
 terraform apply \
-  -var="operator_cidr=187.101.126.140/32" \
+  -var="operator_cidr=<OPERATOR_IP>/32" \
   -var="artifact_bucket=<your-artifact-bucket>" \
   -var="enable_artifact_download=true"
 ```
 
-Dev Lead test value for `operator_cidr`: `187.101.126.140/32`. Other operators: substitute your own IP.
+Dev Lead test value for `operator_cidr`: `<OPERATOR_IP>/32`. Other operators: substitute your own IP.
 
 `artifact_region` defaults to `aws_region` (`us-east-1`). Set explicitly if the bucket is in a different region:
 
@@ -1076,7 +1076,7 @@ Always destroy after testing to avoid ongoing EC2 charges:
 cd examples/aws-lab/terraform
 
 terraform destroy \
-  -var="operator_cidr=187.101.126.140/32" \
+  -var="operator_cidr=<OPERATOR_IP>/32" \
   -var="artifact_bucket=<your-artifact-bucket>" \
   -var="enable_artifact_download=true"
 ```
@@ -1129,7 +1129,7 @@ instance_type      = t3.micro
 architecture       = x86_64
 AMI                = Amazon Linux 2023 (ami-027a2644c5c1d0aff)
 artifact delivery  = S3 + EC2 IAM Instance Profile (no static credentials)
-operator access    = SSH only from 187.101.126.140/32
+operator access    = SSH only from <OPERATOR_IP>/32
 public port 8080   = NOT exposed (removed in PR #42)
 validation method  = Ansible playbook via SSH (validate-runtime.yml)
 ```
@@ -1286,7 +1286,7 @@ If concurrent phase1 and phase2 environments are needed in the future, use separ
 **lab_mode:** segmented-b-c-d  
 **instance_type:** t3.micro  
 **architecture:** x86_64  
-**operator_cidr:** 187.101.126.140/32  
+**operator_cidr:** <OPERATOR_IP>/32  
 **artifact_prefix:** physarum-attack-paths/dev/linux-x86_64 (reused from Phase 1; no code changes since PR #43)
 
 ### Terraform plan
@@ -1299,7 +1299,7 @@ agent_b_from_d SG rule: absent (phase2)
 agent_d_from_b SG rule: absent (phase2)
 B↔C rules: present
 C↔D rules: present
-SSH ingress: 187.101.126.140/32 only
+SSH ingress: <OPERATOR_IP>/32 only
 server-a:8080 public ingress: absent
 ```
 

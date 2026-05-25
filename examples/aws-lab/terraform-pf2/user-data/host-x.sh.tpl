@@ -70,7 +70,8 @@ cat > /usr/local/bin/physarum-tcp-stimulus.sh <<'SCRIPT'
 #!/bin/bash
 # TCP SYN to A.1:22 — physarum-maze on A.1 captures the SYN via raw socket
 # and treats X's IP as a new discovery candidate.
-nc -z -w2 ${tcp_stimulus_target} 22 >/dev/null 2>&1 || true
+# Uses bash /dev/tcp built-in (no nc/ncat dependency).
+timeout 3 bash -c "echo >/dev/tcp/${tcp_stimulus_target}/22" 2>/dev/null || true
 SCRIPT
 chmod +x /usr/local/bin/physarum-tcp-stimulus.sh
 
