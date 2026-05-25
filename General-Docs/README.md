@@ -4,10 +4,18 @@ This directory contains general project documentation that supports the main `ph
 
 ## Available documents
 
-- [Prototype Roadmap — Local A/B/C Laboratory](./PROTOTYPE_ROADMAP.md)
+| Document | Purpose |
+|---|---|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Full system architecture — all four generations (server/agent → eBPF → physarum-maze → physarum-llm) |
+| [QUALITY_GATE.md](./QUALITY_GATE.md) | Gate definitions, acceptance criteria, evidence links (Gates A–K.1) |
+| [PROTOTYPE_ROADMAP.md](./PROTOTYPE_ROADMAP.md) | Phased implementation plan and milestone history |
+| [ROLE_FLUID_AGENT_ARCHITECTURE.md](./ROLE_FLUID_AGENT_ARCHITECTURE.md) | eBPF direction + role-fluid agent design intent (Issue #63) |
+| [EBPF_FLOW_OBSERVATION_DESIGN.md](./EBPF_FLOW_OBSERVATION_DESIGN.md) | eBPF Stage 0 design — Aya stack, TCP state tracepoint, sidecar model |
+| [INSIGHTS_AND_BRAINSTORM.md](./INSIGHTS_AND_BRAINSTORM.md) | Exploratory ideas — not authoritative |
+| [DOCUMENTATION_GUIDELINES.md](./DOCUMENTATION_GUIDELINES.md) | Documentation ownership model and contribution rules |
 
 ## Purpose
 
-The main `README.md` keeps the high-level project vision, architecture, mathematical model, and conceptual references.
+The main `README.md` keeps the high-level project vision, architecture summary, and quick-start instructions.
 
-This `General-Docs/` directory is intended for practical planning documents, prototype notes, implementation roadmaps, lab guides, and operational write-ups that should not make the main README too long.
+This `General-Docs/` directory holds practical planning documents, design intent, implementation roadmaps, and lab operational notes that should not make the main README too long.
