@@ -39,13 +39,9 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | AWS lab — PF-1 (organic expansion maze, 7-node) | ✔ validated — autonomous SCP+SSH propagation |
 | AWS lab — PF-2 (adaptive re-routing, 9-node) | ✔ validated — lateral discovery, TCP stimulus, secondary conduits |
 | `physarum-llm` crate | planned — Issue #106 (Causal Continuity Paradox resolution) |
-| Gate N — mTLS + Ed25519 lineage signatures | planned |
-| `examples/wasm-lab` visual simulator | docs / planned |
-| MCPM-inspired `/path-density` endpoint | planned |
-| Persistence / ClickHouse | planned |
-| TOON export | planned |
+| Gate N — mTLS + Ed25519 lineage signatures | planned after Issue #106 |
 
-See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the full system architecture and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria.
+See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the full system architecture and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria. Longer-term research ideas are tracked in [General-Docs/INSIGHTS_AND_BRAINSTORM.md](./General-Docs/INSIGHTS_AND_BRAINSTORM.md).
 
 ---
 
@@ -132,7 +128,7 @@ Each agent:
 
 ### Future architecture *(not yet implemented)*
 
-A full production deployment will add eBPF flow capture, signed reports over QUIC, mTLS peer probing, attestation, ClickHouse persistence, TOON serialization, and coordinator sharding. See [Future architecture](#future-architecture) below.
+A full production deployment will add eBPF flow capture, signed reports over QUIC, mTLS peer probing, attestation, and coordinator sharding. See [Future architecture](#future-architecture) below.
 
 ---
 
@@ -202,66 +198,36 @@ physarum-attack-paths/
 ├── Dockerfile                            # multi-stage: rust:1.86-slim → debian:bookworm-slim
 │
 ├── crates/
-│   ├── physarum-protocol/           ✔    # shared wire types across all crates
-│   │                                    # AgentInfo, ProbeReport, GraphSnapshot,
-│   │                                    # FlowObservation, PathResult, PathsResponse
-│   │
-│   ├── physarum-server/             ✔    # HTTP coordinator (Axum 0.7 + Tokio)
-│   │                                    # POST /register · GET /agents · GET /peers/{id}
-│   │                                    # POST /report · GET /graph · GET /paths
-│   │                                    # POST /flow-observations · GET /flow-observations
-│   │
-│   ├── physarum-agent/              ✔    # peer-probing agent
-│   │                                    # 20-sample VecDeque window, Q_ij → ProbeReport
-│   │
-│   ├── physarum-ebpf-observer/      ✔    # eBPF userspace sidecar (Aya runtime)
-│   ├── physarum-ebpf-observer-ebpf/ ✔    # eBPF bytecode (no_std, tracepoint/sock/inet_sock_set_state)
-│   │
-│   ├── physarum-packet-observer/    ✔    # raw-socket stimulus capture (TCP SYN + ICMP)
-│   ├── physarum-packet-observer-ebpf/ ✔  # eBPF bytecode for packet observer
-│   │
-│   ├── physarum-scanner/            ✔    # async port scanner — full RustScan feature parity
-│   │                                    # TCP/UDP, CIDR/DNS, LCG port ordering, rlimit mgmt
-│   │
-│   ├── physarum-probe/              ✔    # probe execution library (shared by agent + maze)
-│   ├── physarum-node/               ✔    # node runtime — role selection, stimulus dispatch
-│   ├── physarum-node-runtime/       ✔    # node runtime library
-│   │
-│   └── physarum-maze/               ✔    # self-propagating maze agent (PF-1, PF-2)
-│                                        # discovers hosts → scores → SCP binary → SSH propagate
-│                                        # records lineage JSON at each hop
+│   ├── physarum-protocol          ✔      # shared wire types across all crates
+│   ├── physarum-server            ✔      # HTTP coordinator
+│   ├── physarum-agent             ✔      # peer-probing agent
+│   ├── physarum-ebpf-observer     ✔      # eBPF userspace sidecar
+│   ├── physarum-ebpf-observer-ebpf ✔     # eBPF bytecode
+│   ├── physarum-packet-observer   ✔      # raw-socket stimulus capture
+│   ├── physarum-packet-observer-ebpf ✔   # eBPF bytecode for packet observer
+│   ├── physarum-scanner           ✔      # async port scanner — RustScan feature parity
+│   ├── physarum-probe             ✔      # probe execution library
+│   ├── physarum-node              ✔      # node runtime
+│   ├── physarum-node-runtime      ✔      # node runtime library
+│   └── physarum-maze              ✔      # self-propagating maze agent
 │
 ├── examples/
-│   ├── local-lab/                   ✔    # manual A/B/C lab + check-local-lab.sh
-│   ├── docker-lab/                  ✔    # Docker Compose A/B/C lab + check-docker-lab.sh
-│   ├── aws-lab/                     ✔    # AWS EC2/VPC lab — Terraform + S3 artifacts + SSH/Ansible; Mode 1 and Mode 2 validated
-│   └── wasm-lab/                    ◌    # future visual simulator plan — docs only
+│   ├── local-lab/                 ✔      # manual A/B/C lab
+│   ├── docker-lab/                ✔      # Docker Compose A/B/C lab
+│   └── aws-lab/                   ✔      # AWS EC2/VPC labs through PF-2
 │
 ├── formal/
-│   └── tla/                         ✔    # TLA+ formal models — three verified specs
-│       ├── PhysarumEdgeModel.tla        # single-edge: q_ema · D_ij pipeline (SCALE=1000)
-│       ├── PhysarumMultiAgentModel.tla  # B→C, C→D, B→D: PathSelectionSafety (148,877 states)
-│       ├── PhysarumNegativeLogModel.tla # Gate K.1 negative-log scoring: HopPenaltyBounds
-│       └── README.md                    # how to run TLC, invariants, artefacts
+│   └── tla/                       ✔      # TLA+ formal models — three verified specs
 │
 ├── General-Docs/
-│   ├── ARCHITECTURE.md                  # full system architecture — all four generations
-│   ├── QUALITY_GATE.md                  # gate definitions and acceptance criteria
-│   ├── EBPF_FLOW_OBSERVATION_DESIGN.md  # eBPF Stage 0 design — sidecar, Aya, TCP state tracepoint
-│   ├── ROLE_FLUID_AGENT_ARCHITECTURE.md # role-fluid unified agent roadmap
-│   ├── INSIGHTS_AND_BRAINSTORM.md       # research notes and future directions
+│   ├── ARCHITECTURE.md
+│   ├── QUALITY_GATE.md
+│   ├── EBPF_FLOW_OBSERVATION_DESIGN.md
+│   ├── ROLE_FLUID_AGENT_ARCHITECTURE.md
+│   ├── INSIGHTS_AND_BRAINSTORM.md
 │   └── README.md
 │
 ├── Utilities/                           # developer tooling — never shipped in binaries
-│   ├── README.md
-│   ├── check-env.sh
-│   ├── build.sh
-│   ├── dist-local.sh
-│   └── git-scripts/
-│       ├── commit.sh
-│       ├── checkpoint.sh
-│       └── release.sh
-│
 └── .github/
     └── workflows/
         ├── ci.yml                        # build + clippy (-D warnings) + test
@@ -279,7 +245,6 @@ physarum-attack-paths/
 | `examples/aws-lab/terraform` | EC2/VPC — Mode 1, Mode 2, tc/netem, Gates K/K.1 | ✔ validated |
 | `examples/aws-lab/terraform-pf1` | 7-node autonomous expansion maze (PF-1) | ✔ validated — A→C→E→F→G in 55s |
 | `examples/aws-lab/terraform-pf2` | 9-node adaptive re-routing (PF-2) | ✔ validated — lateral discovery + TCP stimulus + secondary conduits |
-| `examples/wasm-lab` | Browser-based visual simulator | docs / planned |
 | `formal/tla` | TLA+ formal models — 3 specs verified by TLC | ✔ implemented |
 
 ---
@@ -444,8 +409,7 @@ Summary:
 | PF-1 | Organic expansion maze — 7-node autonomous SCP+SSH propagation | ✔ done |
 | PF-2 | Adaptive re-routing — 9-node, lateral discovery, TCP stimulus, secondary conduits | ✔ done |
 | `physarum-llm` | LLM-aware adaptive propagation — Causal Continuity Paradox resolution | planned — Issue #106 |
-| Gate N | mTLS + Ed25519 lineage signatures | planned |
-| Future | MCPM path density · MCTS/self-play prioritization · TOON export · ClickHouse | planned |
+| Gate N | mTLS + Ed25519 lineage signatures | planned after Issue #106 |
 
 ---
 
@@ -493,7 +457,6 @@ The organism is currently confined to hosts reachable via SSH. If a host has SSH
 | GET  | `/v1/neighbors/{agent_id}` | Discovery |
 | GET  | `/v1/graph` | Full graph dump |
 | GET  | `/v1/paths/topk` | K most attractive paths to target |
-| GET  | `/v1/toon/{target}` | TOON serialization for downstream |
 | WS   | `/v1/stream` | Live drift + validation event stream |
 
 ### eBPF program *(planned)*
@@ -532,7 +495,6 @@ p_i ∈ [0.00, 0.25]  →  Layer 1 (Protected Core)
 - Monotonic nonces + Ed25519 signatures — replay and forgery prevention
 - QUIC + mutual TLS — transport encryption and identity pinning
 - TPM / Nitro / Azure CVM / GCP Confidential VM attestation — boot-time identity
-- ClickHouse audit log — forensic recomputation from raw signed reports
 
 ---
 
@@ -544,7 +506,6 @@ Specifically:
 
 - **§8.4** (`P(e)` from `W(e)`) becomes the `t=0` initial condition of the Physarum dynamics.
 - **§8.5** (Yen K-shortest path enumeration) operates unchanged on the live `D/L` cost function *(planned)*.
-- **§8.10** (TOON serialization) gains two new fields: `d_ij` and `q_ema` *(planned)*.
 
 Two distinct contributions are candidates for independent IP claims:
 
