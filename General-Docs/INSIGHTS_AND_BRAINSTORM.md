@@ -4,9 +4,13 @@ This document captures exploratory ideas, research insights, and future directio
 
 It is intentionally separate from the operational prototype roadmap. The roadmap defines what we are building next. This document preserves promising ideas that may influence future architecture, research positioning, or patent-style invention framing.
 
+**Last reviewed:** 2026-05-24 — sections annotated with current status after Gates K.1, L, M, M.4, PF-1, PF-2.
+
 ---
 
 ## 1. MCPM-inspired attack-path density
+
+> **Status (2026-05-24):** All prerequisites now met (stable `/paths`, Gate K.1, autonomous propagation). MCPM remains future work — deferred until `physarum-llm` (Issue #106) is validated. See section 7 for updated ordering.
 
 ### Source of the insight
 
@@ -207,22 +211,30 @@ this project -> distributed sensing -> adaptive morphology -> multi-path density
 
 ## 7. Manager recommendation
 
-Do not implement MCPM-inspired path exploration immediately.
+> **Status (2026-05-24):** Steps 1–3 are complete. The project took a different direction for step 4 — autonomous propagation (physarum-maze, PF-1, PF-2) and LLM-aware adaptive propagation (physarum-llm, Issue #106) were prioritised over MCPM. MCPM remains valid as the next research layer after physarum-llm is validated.
 
-Recommended order:
+Original order (recorded for historical reference):
 
 ```text
-1. Keep validating A/B/C with q_ema and enriched ProbeReport.
-2. Add A/B/C/D lab with a fourth agent representing a deeper or crown-jewel layer.
-3. Implement a basic /paths endpoint using existing D_ij/q_ema values.
-4. Only then consider MCPM-inspired stochastic path-density exploration.
+1. Keep validating A/B/C with q_ema and enriched ProbeReport.        ✔ DONE — Gates A–H
+2. Add A/B/C/D lab with a fourth agent.                              ✔ DONE — Gate K.1 (5-node)
+3. Implement a basic /paths endpoint using existing D_ij/q_ema.      ✔ DONE — Gate K.1 negative-log scoring
+4. Only then consider MCPM-inspired stochastic path-density.         → DEFERRED — after physarum-llm (Issue #106)
 ```
 
-Reason:
+Updated order (current):
 
 ```text
-MCPM-inspired traversal is promising, but it depends on a stable adaptive graph first.
-Without a reliable graph substrate, path-density simulation would only add complexity.
+4a. physarum-llm — LLM-aware adaptive propagation (Issue #106)       → IN PLANNING
+4b. MCPM-inspired path density — after 4a is validated               → FUTURE
+```
+
+Reason for revised order:
+
+```text
+The Causal Continuity Paradox (see Issue #106) is a more fundamental gap than path
+density. An organism that cannot cross a port-80-only host gains nothing from MCPM
+until it can propagate across any accessible port. physarum-llm resolves that first.
 ```
 
 ---
@@ -250,6 +262,8 @@ Possible scope:
 ## 9. Future Research: MCTS/Self-Play Graph Traversal for Path Prioritization
 
 > This is not part of the core architecture. The core remains Physarum polycephalum-inspired adaptive graph formation and path scoring; MCTS/self-play is recorded only as a possible future research layer for validation prioritization.
+
+> **Status (2026-05-24):** Prerequisites now met — Phase 1 (full mesh) and Phase 2 (segmented B→C→D) both validated. The "active, learned prioritization" role is currently being filled by `physarum-llm` (Issue #106), which uses an LLM oracle instead of RL. MCTS/self-play remains a valid long-term research direction and may complement physarum-llm once the LLM integration is stable. The `PropagationStrategy` output from physarum-llm (confidence score, method, rationale) is a natural precursor to the reward signals described below.
 
 ### Source
 
@@ -358,6 +372,8 @@ This note is research positioning only.
 
 ## 10. Micromouse-inspired exploration and RustScan candidate-path discovery
 
+> **Status (2026-05-24):** The Micromouse framing predicted the gate sequence K→L→M→N. Gates K, K.1, L, L.2, L.3, M, M.4 are complete. PF-1 and PF-2 labs validated autonomous propagation beyond the original scope of Gate M (full SCP+SSH self-propagation with lineage, stimulus-driven scoring, secondary conduits). Gate N (mTLS) is next. The framing remains valid as a communication tool; the sensing model (RustScan + active probes + eBPF) is implemented in `physarum-maze`.
+
 ### Source of the insight
 
 Micromouse is a competitive robotics discipline in which an autonomous robot enters an unknown maze, explores it, builds an internal map, and then runs the fastest possible route to the centre.
@@ -425,22 +441,26 @@ The graph is not a static map. Like a living slime mold, it continuously remodel
 
 ---
 
-### Gate sequence ahead
+### Gate sequence — original prediction vs. actual outcome
 
-The Micromouse analogy maps naturally onto the planned gate sequence:
+The Micromouse analogy predicted the gate sequence. Actual outcomes annotated:
 
 ```text
-Gate K   -> segmented adaptive flow-path lab with known agents (topology exploration, flow counting, path comparison, adaptation)
-Gate L   -> RustScan-backed candidate-path discovery (organism senses unknown channels without a pre-declared peer list)
-Gate M   -> controlled expansion from discovered candidates (organism propagates toward promising paths)
-Gate N   -> role-fluid distributed organism behavior (agents adapt roles based on position, flow evidence, and graph state)
+Gate K    segmented adaptive flow-path lab                        ✔ DONE (Issue #76)
+Gate K.1  autonomous path selection, negative-log scoring         ✔ DONE (Issue #80 / PR #82)
+Gate L    RustScan-backed candidate-path discovery                ✔ DONE (physarum-scanner crate)
+Gate L.2  local interface stimulus evidence                       ✔ DONE
+Gate L.3  ICMP stimulus evidence                                  ✔ DONE
+Gate M    controlled expansion from discovered candidates         ✔ DONE (physarum-maze, SCP+SSH propagation)
+Gate M.4  scoring adapter / edge weighting                        ✔ DONE
+PF-1      organic expansion maze lab (7-node AWS)                 ✔ DONE
+PF-2      adaptive re-routing lab (9-node AWS, TCP/ICMP stimuli)  ✔ DONE
+Gate N    mTLS + Ed25519 lineage signatures                       → PLANNED
 ```
 
-Gate K is the first step toward Micromouse-style adaptive route comparison: known topology, real flows, direct vs indirect path comparison, adaptation when a channel degrades.
-
-Gate L introduces the exploration phase: RustScan discovers candidate channels that were not pre-declared.
-
-Gates M and N move toward the distributed organism framing: the system does not just observe, it expands and adapts.
+Gate M went further than originally scoped: physarum-maze achieved full SCP+SSH
+self-propagation with lineage recording, stimulus-driven scoring, and secondary
+conduit detection — validated in real AWS labs (PF-1, PF-2).
 
 ---
 
@@ -470,9 +490,11 @@ These are complementary, not competing. The Micromouse framing explains sensing 
 
 ## 11. Future agent autonomy: from local reactions to strategic organism behavior
 
+> **Status (2026-05-24):** The strategic autonomy questions listed in this section are now the formal motivation for `physarum-llm` (Issue #106 — "Causal Continuity Paradox of Origin and Destination"). The LLM oracle answers "which propagation method should I use for this target?" — the first concrete implementation of distributed strategic decision-making. See Issue #106 for the full architecture.
+
 ### Current state
 
-The current agent has started to move beyond a fixed client role. It already performs bounded local autonomy:
+The current agent (`physarum-maze`) has moved well beyond a fixed client role. It already performs bounded local autonomy:
 
 ```text
 observe eBPF flow cues
@@ -560,14 +582,19 @@ The system is not only a coordinator that computes paths from reports.
 It is a distributed organism whose nodes can sense, validate, remember, choose, and eventually change role based on environmental conditions.
 ```
 
-Near-term gates should continue to prove one behavior at a time:
+Near-term gates continue to prove one behavior at a time:
 
 ```text
-Gate L.2 -> local-interface scope + eBPF-triggered discovery from inbound stimuli
-Gate L.3 -> packet-level ICMP sensing with before/after evidence
-Gate M   -> role-fluid physarum-node runtime
-Gate N   -> secure service-mesh-like communication with TLS/mTLS
+Gate L.2  ✔ local-interface scope + eBPF-triggered discovery from inbound stimuli
+Gate L.3  ✔ packet-level ICMP sensing with before/after evidence
+Gate M    ✔ physarum-maze self-propagating runtime (SCP+SSH, lineage, scoring)
+PF-1      ✔ organic expansion maze — autonomous multi-hop colonisation
+PF-2      ✔ adaptive re-routing — lateral discovery, cross-subnet stimulus, secondary conduits
+physarum-llm → LLM oracle for exploit-based propagation (Issue #106) — IN PLANNING
+Gate N    → mTLS + Ed25519 lineage signatures
 ```
 
-The strategic autonomy questions should remain visible as the north star for Gate M and Gate N.
+The strategic autonomy questions remain the north star — `physarum-llm` is the first
+concrete gate that moves the organism from "react to known SSH targets" to "reason
+about any accessible port on any reachable host."
 

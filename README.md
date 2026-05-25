@@ -1,11 +1,11 @@
 # physarum-attack-paths
 
-> **Bio-inspired adaptive attack-path graph prototype.** Rust agents perform peer probes, summarize short-term local observations, and send stimulus-oriented reports to a coordinator. The coordinator updates Q_ij, q_ema, and D_ij to maintain a living directed graph. AWS cloud labs (Mode 1, Mode 2, and tc/netem weighted competing paths) are implemented and validated. eBPF passive flow observation is implemented and AWS EC2 validated (Gate J) — `physarum-ebpf-observer` attaches to `tracepoint/sock/inet_sock_set_state` on kernel 6.18 and posts metadata-only FlowObservation events to the coordinator. Gate J.1 complete (Issue #72): the observer captures physarum-agent probe flows (5-tuple: source=agent-b, dest=agent-c:9002, direction=outbound, event=connect_established) and the adaptive graph edge agent-b → agent-c (q_ema≈1.0) correlates with the observed flow. Signatures, persistence, TOON, and the full role-fluid unified runtime are planned future phases.
+> **Bio-inspired autonomous attack-path organism.** A self-propagating Rust agent (`physarum-maze`) traverses real AWS VPC topologies without pre-provisioned targets — it discovers hosts via raw TCP/ICMP stimulus and `/24` port scanning (`physarum-scanner`), propagates itself via SCP over empty-password SSH, and records a cryptographic lineage at each hop. The underlying adaptive edge model (Q_ij → q_ema → D_ij) has been formally verified (TLA+) and validated through Gates A–PF-2: from local A/B/C probing to 9-node autonomous re-routing labs. eBPF passive flow observation (`physarum-ebpf-observer`, `physarum-packet-observer`) is AWS EC2 validated on kernel 6.18. The next frontier — the *Causal Continuity Paradox of Origin and Destination*, where the organism is confined to hosts reachable only via SSH — is being explored through planned LLM-aware adaptive propagation (`physarum-llm`, Issue #106).
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
 [![Rust](https://img.shields.io/badge/rust-1.86%2B-orange.svg)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey.svg)](https://github.com/fabioschorn/physarum-attack-paths/releases)
+[![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](https://github.com/fabioschorn/physarum-attack-paths/releases)
 [![CI](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml/badge.svg)](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml)
 
 `physarum-attack-paths` is a distributed system for discovering, validating, and continuously refining cybersecurity attack paths across heterogeneous computing environments. It abstracts away from the static, scanner-centric view of the network and replaces it with a **living topology**: each host runs a lightweight Rust agent, and the system as a whole behaves like the slime mold *Physarum polycephalum* — strengthening the routes that carry real flow and pruning the routes that don't.
@@ -23,26 +23,29 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | `physarum-protocol` shared wire types | ✔ implemented |
 | `physarum-server` HTTP coordinator | ✔ implemented |
 | `physarum-agent` peer-probing agent | ✔ implemented |
+| `physarum-ebpf-observer` crate | ✔ implemented — AWS EC2 validated, kernel 6.18, Gate J/J.1 |
+| `physarum-packet-observer` crate | ✔ implemented — raw TCP/ICMP stimulus capture, Gate L.3 |
+| `physarum-scanner` crate | ✔ implemented — full RustScan feature parity, Gate L |
+| `physarum-node` crate | ✔ implemented — supervised runtime (agent + observer), Gate M |
+| `physarum-maze` crate | ✔ implemented — self-propagating maze agent, PF-1/PF-2 |
+| `POST /flow-observations` · `GET /flow-observations` | ✔ implemented — Gate I |
+| `GET /paths` endpoint (negative-log adaptive scoring) | ✔ implemented — Gate K.1 |
+| TLA+ formal models (`formal/tla`) | ✔ implemented — 3 specs: single-edge, multi-agent, negative-log |
 | A/B/C local lab (`examples/local-lab`) | ✔ implemented |
 | A/B/C Docker lab (`examples/docker-lab`) | ✔ implemented |
 | A/B/C/D Docker lab (Agent D) | ✔ implemented |
-| TLA+ edge dynamics model (`formal/tla`) | ✔ implemented |
-| `GET /paths` endpoint (adaptive path scoring) | ✔ implemented |
-| `examples/aws-lab` | ✔ implemented — Mode 1, Mode 2, and AWS tc/netem weighted paths validated |
-| `examples/wasm-lab` | docs / planned |
-| `physarum-graph` crate | planned |
-| `physarum-ebpf-observer` crate | implemented + AWS EC2 validated — Gate J complete (Issue #69) · Gate J.1 complete (Issue #72) |
-| `physarum-coordinator` crate (full) | planned |
-| `physarum-cli` crate | planned |
-| `/path-density` endpoint | planned |
-| `POST /flow-observations` · `GET /flow-observations` | implemented — Gate I |
-| AWS Terraform | ✔ implemented — Phase 1, Phase 2, and weighted-paths lab validated |
-| WASM visual simulator | planned |
-| mTLS / Ed25519 / attestation | planned |
+| AWS lab — Mode 1, Mode 2, tc/netem weighted paths | ✔ validated — Gates C, E, H |
+| AWS lab — Gate K/K.1 (segmented adaptive + path selection) | ✔ validated |
+| AWS lab — PF-1 (organic expansion maze, 7-node) | ✔ validated — autonomous SCP+SSH propagation |
+| AWS lab — PF-2 (adaptive re-routing, 9-node) | ✔ validated — lateral discovery, TCP stimulus, secondary conduits |
+| `physarum-llm` crate | planned — Issue #106 (Causal Continuity Paradox resolution) |
+| Gate N — mTLS + Ed25519 lineage signatures | planned |
+| `examples/wasm-lab` visual simulator | docs / planned |
+| MCPM-inspired `/path-density` endpoint | planned |
 | Persistence / ClickHouse | planned |
 | TOON export | planned |
 
-See [General-Docs/PROTOTYPE_ROADMAP.md](./General-Docs/PROTOTYPE_ROADMAP.md) for the full phased plan and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria.
+See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the full system architecture and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria.
 
 ---
 
@@ -200,28 +203,33 @@ physarum-attack-paths/
 │
 ├── crates/
 │   ├── physarum-protocol/           ✔    # shared wire types across all crates
-│   │   └── src/lib.rs                   # AgentInfo, RegisterRequest/Response,
-│   │                                    # ProbeReport, GraphSnapshot, EdgeSnapshot,
-│   │                                    # PathEdge, PathResult, PathsResponse
+│   │                                    # AgentInfo, ProbeReport, GraphSnapshot,
+│   │                                    # FlowObservation, PathResult, PathsResponse
 │   │
 │   ├── physarum-server/             ✔    # HTTP coordinator (Axum 0.7 + Tokio)
-│   │   └── src/
-│   │       ├── main.rs                  # CLI (--listen), router, Arc<AppState>
-│   │       ├── state.rs                 # RwLock<HashMap<AgentId, AgentInfo>>
-│   │       └── routes/
-│   │           ├── health.rs            # GET  /health
-│   │           ├── agents.rs            # POST /register · GET /agents
-│   │           ├── peers.rs             # GET  /peers/{agent_id}
-│   │           ├── report.rs            # POST /report  (ProbeReport ingest + D_ij update)
-│   │           ├── graph.rs             # GET  /graph   (GraphSnapshot)
-│           └── paths.rs             # GET  /paths   (adaptive path scoring, DFS)
+│   │                                    # POST /register · GET /agents · GET /peers/{id}
+│   │                                    # POST /report · GET /graph · GET /paths
+│   │                                    # POST /flow-observations · GET /flow-observations
 │   │
-│   └── physarum-agent/              ✔    # host agent binary
-│       └── src/
-│           ├── main.rs                  # tokio runtime, registration, probe loop
-│           ├── probes.rs                # peer HTTP probes with RTT measurement
-│           ├── reporter.rs              # ProbeReport submission to coordinator
-│           └── neighbors.rs             # NeighborState, observation window (VecDeque)
+│   ├── physarum-agent/              ✔    # peer-probing agent
+│   │                                    # 20-sample VecDeque window, Q_ij → ProbeReport
+│   │
+│   ├── physarum-ebpf-observer/      ✔    # eBPF userspace sidecar (Aya runtime)
+│   ├── physarum-ebpf-observer-ebpf/ ✔    # eBPF bytecode (no_std, tracepoint/sock/inet_sock_set_state)
+│   │
+│   ├── physarum-packet-observer/    ✔    # raw-socket stimulus capture (TCP SYN + ICMP)
+│   ├── physarum-packet-observer-ebpf/ ✔  # eBPF bytecode for packet observer
+│   │
+│   ├── physarum-scanner/            ✔    # async port scanner — full RustScan feature parity
+│   │                                    # TCP/UDP, CIDR/DNS, LCG port ordering, rlimit mgmt
+│   │
+│   ├── physarum-probe/              ✔    # probe execution library (shared by agent + maze)
+│   ├── physarum-node/               ✔    # node runtime — role selection, stimulus dispatch
+│   ├── physarum-node-runtime/       ✔    # node runtime library
+│   │
+│   └── physarum-maze/               ✔    # self-propagating maze agent (PF-1, PF-2)
+│                                        # discovers hosts → scores → SCP binary → SSH propagate
+│                                        # records lineage JSON at each hop
 │
 ├── examples/
 │   ├── local-lab/                   ✔    # manual A/B/C lab + check-local-lab.sh
@@ -230,13 +238,14 @@ physarum-attack-paths/
 │   └── wasm-lab/                    ◌    # future visual simulator plan — docs only
 │
 ├── formal/
-│   └── tla/                         ✔    # TLA+ edge dynamics model
-│       ├── PhysarumEdgeModel.tla        # formal spec: q_ema · D_ij pipeline
-│       ├── PhysarumEdgeModel.cfg        # TLC config (SCALE=1000, TypeOK, Safety)
+│   └── tla/                         ✔    # TLA+ formal models — three verified specs
+│       ├── PhysarumEdgeModel.tla        # single-edge: q_ema · D_ij pipeline (SCALE=1000)
+│       ├── PhysarumMultiAgentModel.tla  # B→C, C→D, B→D: PathSelectionSafety (148,877 states)
+│       ├── PhysarumNegativeLogModel.tla # Gate K.1 negative-log scoring: HopPenaltyBounds
 │       └── README.md                    # how to run TLC, invariants, artefacts
 │
 ├── General-Docs/
-│   ├── PROTOTYPE_ROADMAP.md             # full phased implementation plan
+│   ├── ARCHITECTURE.md                  # full system architecture — all four generations
 │   ├── QUALITY_GATE.md                  # gate definitions and acceptance criteria
 │   ├── EBPF_FLOW_OBSERVATION_DESIGN.md  # eBPF Stage 0 design — sidecar, Aya, TCP state tracepoint
 │   ├── ROLE_FLUID_AGENT_ARCHITECTURE.md # role-fluid unified agent roadmap
@@ -265,11 +274,13 @@ physarum-attack-paths/
 
 | Lab | What it runs | Status |
 |---|---|---|
-| `examples/local-lab` | A/B/C agents + server on localhost, manual setup | ✔ implemented |
-| `examples/docker-lab` | A/B/C agents + server in Docker Compose | ✔ implemented |
-| `examples/aws-lab` | EC2/VPC AWS lab — Terraform, S3 artifact delivery, SSH/Ansible validation | ✔ Mode 1, Mode 2, and tc/netem weighted paths validated |
+| `examples/local-lab` | A/B/C agents + server on localhost | ✔ implemented |
+| `examples/docker-lab` | A/B/C/D agents + server in Docker Compose | ✔ implemented |
+| `examples/aws-lab/terraform` | EC2/VPC — Mode 1, Mode 2, tc/netem, Gates K/K.1 | ✔ validated |
+| `examples/aws-lab/terraform-pf1` | 7-node autonomous expansion maze (PF-1) | ✔ validated — A→C→E→F→G in 55s |
+| `examples/aws-lab/terraform-pf2` | 9-node adaptive re-routing (PF-2) | ✔ validated — lateral discovery + TCP stimulus + secondary conduits |
 | `examples/wasm-lab` | Browser-based visual simulator | docs / planned |
-| `formal/tla` | TLA+ model of the adaptive edge dynamics | ✔ implemented |
+| `formal/tla` | TLA+ formal models — 3 specs verified by TLC | ✔ implemented |
 
 ---
 
@@ -416,39 +427,53 @@ cargo test --workspace
 
 ## Roadmap
 
-The current prototype implements the adaptive edge pipeline end-to-end for an A/B/C agent cluster. The full phased plan is in [General-Docs/PROTOTYPE_ROADMAP.md](./General-Docs/PROTOTYPE_ROADMAP.md).
+The current prototype implements the adaptive edge pipeline end-to-end for an A/B/C agent cluster through autonomous maze propagation (PF-1, PF-2). The full architecture is in [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md).
 
 Summary:
 
 | Phase | Focus | State |
 |---|---|---|
 | 0 | Protocol + coordinator scaffold + CI | ✔ done |
-| 1 | Agent probing + A/B/C lab + Docker lab + TLA+ model | ✔ done |
+| 1 | Agent probing + A/B/C local/Docker lab + TLA+ edge model | ✔ done |
 | 2 | Agent D + `/paths` endpoint + AWS Mode 1, Mode 2, tc/netem weighted paths | ✔ done |
-| 3 — Gate I | FlowObservation model + `POST /flow-observations` + `GET /flow-observations` + unit tests | implemented |
-| 4 — Gate J | `physarum-ebpf-observer` crate + TCP state tracepoint + AWS EC2 validation | implemented — Issue #69 |
-| 5 — Gate K | Scoring integration — combine active probes + passive eBPF flows into `D_ij` / `q_ema` | planned |
-| Future | RustScan-backed service discovery + role-fluid unified agent runtime | planned |
-| Future | Production hardening (mTLS, attestation, ClickHouse, TOON) | planned |
+| Gate I | FlowObservation model + POST/GET `/flow-observations` | ✔ done |
+| Gate J/J.1 | `physarum-ebpf-observer` — TCP state tracepoint, AWS EC2 kernel 6.18 | ✔ done — Issue #69/72 |
+| Gate K/K.1 | Segmented 5-node lab + negative-log scoring + autonomous path selection | ✔ done — Issue #76/80 |
+| Gate L/L.1/L.2/L.3 | `physarum-scanner` (RustScan) + eBPF-triggered discovery + ICMP stimulus | ✔ done — Issue #87 |
+| Gate M/M.4 | `physarum-node` runtime + per-edge multiplier scoring adapter | ✔ done |
+| PF-1 | Organic expansion maze — 7-node autonomous SCP+SSH propagation | ✔ done |
+| PF-2 | Adaptive re-routing — 9-node, lateral discovery, TCP stimulus, secondary conduits | ✔ done |
+| `physarum-llm` | LLM-aware adaptive propagation — Causal Continuity Paradox resolution | planned — Issue #106 |
+| Gate N | mTLS + Ed25519 lineage signatures | planned |
+| Future | MCPM path density · MCTS/self-play prioritization · TOON export · ClickHouse | planned |
 
 ---
 
 ## Future architecture
 
-> The sections below describe the **planned full architecture**. None of these components are implemented yet unless explicitly noted.
+> The sections below describe the **planned full architecture**. Items marked ✔ are implemented.
 
-### Role-fluid unified agent *(planned — design captured)*
+### Autonomous propagation organism *(✔ implemented — PF-1, PF-2)*
 
-The current eBPF design uses a separate `physarum-ebpf-observer` sidecar alongside `physarum-agent` as a transitional validation design. This keeps the stable agent binary untouched while eBPF is proven on AWS EC2.
+`physarum-maze` is the current embodiment of the role-fluid agent concept. A single self-contained binary:
+- Discovers hosts in the local `/24` via `physarum-scanner` (TCP/ICMP/UDP)
+- Scores candidates using raw TCP SYN and ICMP stimulus from `physarum-packet-observer`
+- Propagates itself via SCP + empty-password SSH + `systemd-run`
+- Detects already-colonized nodes and records secondary conduits (score ×0.8 ×1.2)
+- Records full lineage JSON at each hop (origin, path, hops, visited, scores, secondary_conduits)
 
-The long-term roadmap is a **unified, role-fluid `physarum-agent` runtime** in which a single agent binary may act as coordinator/server, client/reporter, flow observer, service-discovery worker, path scorer, or local recovery unit depending on runtime conditions. If an agent loses its upstream coordinator connection, it may assume a local coordinator role and continue expansion from its current position.
-
-A future gate will add **RustScan-backed service discovery** as a library capability inside the agent, feeding port discovery results directly into the physarum graph as candidate edges and nodes.
+**RustScan-backed service discovery** (✔ implemented — `physarum-scanner`, Gate L) feeds port discovery into the physarum graph as candidate edges.
 
 > *Agents are not only observers of paths; agents are the computational substance that occupies and reinforces paths.*
 
-The full architectural roadmap is documented in [General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md](./General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md).
+The role-fluid design intent is documented in [General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md](./General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md).
 The eBPF Stage 0 design is documented in [General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md](./General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md).
+
+### Causal Continuity Paradox — `physarum-llm` *(planned — Issue #106)*
+
+The organism is currently confined to hosts reachable via SSH. If a host has SSH closed but port 80 open (e.g., Apache 2.4.49 with CVE-2021-41773), the organism observes the host via eBPF but cannot propagate.
+
+`physarum-llm` is planned to resolve this by querying an LLM oracle that generates context-specific propagation strategies given the target's observed open ports, banners, and OS hints. The design is lab-only, safety-gated, and blocked on the threat-model review in Issue #106. API keys are never stored in lineage.
 
 ---
 
@@ -537,12 +562,14 @@ Two distinct contributions are candidates for independent IP claims:
 
 For Rust-side dependencies of architectural significance:
 
-- `axum` — HTTP framework (current coordinator)
+- `axum` — HTTP framework (coordinator)
 - `tokio` — async runtime
-- `petgraph` — graph data structures *(coordinator graph, current)*
-- `aya` — pure-Rust eBPF library *(planned)*
+- `petgraph` — graph data structures (coordinator graph)
+- `aya` — pure-Rust eBPF library ✔ (physarum-ebpf-observer, physarum-packet-observer)
+- `clap` — CLI argument parsing (physarum-maze, physarum-scan)
+- `async-openai` — OpenAI-compatible API client *(planned — physarum-llm)*
 - `quinn` — QUIC transport *(planned)*
-- `ed25519-dalek` — signature scheme *(planned)*
+- `ed25519-dalek` — signature scheme *(planned — Gate N)*
 
 ---
 

@@ -1,11 +1,12 @@
 # TLA+ Formal Models — Adaptive Edge Dynamics
 
-This directory contains two formal specifications for `physarum-attack-paths`:
+This directory contains three formal specifications for `physarum-attack-paths`:
 
-| Module | Scope | SCALE (cfg) |
-|---|---|---|
-| `PhysarumEdgeModel.tla` | Single directed edge (original) | 1000 |
-| `PhysarumMultiAgentModel.tla` | Three directed edges: B→C, C→D, B→D | 10 |
+| Module | Scope | SCALE (cfg) | Gate |
+|---|---|---|---|
+| `PhysarumEdgeModel.tla` | Single directed edge — EMA + sigmoid conductivity | 1000 | Phase 1 |
+| `PhysarumMultiAgentModel.tla` | Three directed edges: B→C, C→D, B→D — product scoring | 10 | Gate F |
+| `PhysarumNegativeLogModel.tla` | Three directed edges — negative-log scoring (Gate K.1) | 10 | Gate K.1 |
 
 ---
 
@@ -201,21 +202,24 @@ These invariants confirm that:
 
 ---
 
-## 7. Why this is not yet a full distributed-system specification
+## 7. Formal coverage vs. runtime evolution
 
-This model covers **one edge, one update step at a time**.  A full
-distributed model would also need to represent:
+The three models together cover the mathematical heart of the scoring pipeline
+through Gate K.1.  Elements of the runtime that are **not yet formally modelled**:
 
-- multiple agents running concurrently with message-passing delays;
-- the coordinator's graph state and probe scheduling;
-- observation windows (the 20-sample `VecDeque` per peer in each agent);
-- the `/paths` and path-density endpoints planned for a future phase;
-- MCPM-inspired stochastic traversal logic.
+| Runtime element | Status |
+|---|---|
+| Multiple agents, concurrent message-passing delays | Not modelled |
+| Coordinator graph state and probe scheduling | Not modelled |
+| 20-sample VecDeque observation window per peer | Not modelled |
+| physarum-maze multiplier scoring (×1.5/×0.05/×0.8/×1.2, PF-1/PF-2) | Not modelled |
+| Secondary conduit detection and lineage recording | Not modelled |
+| physarum-scanner /24 discovery loop and stimulus prioritisation | Not modelled |
+| Causal Continuity Paradox resolution via physarum-llm (Issue #106) | Future formal work |
+| `/path-density` endpoint and MCPM-inspired stochastic traversal | Future formal work |
 
-Those extensions are planned in subsequent phases of the project (see
-`General-Docs/INSIGHTS_AND_BRAINSTORM.md`).  The current model isolates
-the adaptive edge dynamics so they can be verified and kept stable as the
-system grows.
+The current models isolate the adaptive edge dynamics so they can be verified
+and kept stable as the system grows around them.
 
 ---
 
@@ -275,6 +279,14 @@ meaningful conductivity.
 edge vs. live indirect path).  Weighted competing paths with multiple
 positive alternatives are tracked separately in Issue #52.
 
+> **Scoring model note:** `PathScoreBCD` uses the original
+> product-of-conductivities formula (`d_ij_bc × d_ij_cd ÷ SCALE`).
+> The runtime `/paths` endpoint uses negative-log scoring since Gate K.1:
+> `score = exp(-(Σ -ln(max(q_ema_i, 0.001)) + 0.05×(k-1)))`.
+> The Mode 2 property (blocked direct edge cannot outscore a live indirect
+> path) holds under both formulas.  The negative-log model is formalised
+> separately in `PhysarumNegativeLogModel.tla` (section 9).
+
 ### 8.4 SCALE = 10
 
 With `SCALE = 10`, each of the six variables has 11 possible values:
@@ -332,3 +344,110 @@ TLC version:       TLC2 2026.05.04.141011
 - Coordinator (server A) — not an edge endpoint in the probe topology
 - Concurrent scheduling, message delays, or observation windows
 - The `/paths` endpoint DFS logic, MCPM, or MCTS
+- The negative-log scoring formula introduced in Gate K.1 (see section 9)
+
+---
+
+## 9. Negative-log scoring model — `PhysarumNegativeLogModel.tla`
+
+### 9.1 Motivation
+
+`PhysarumMultiAgentModel.tla` uses the original product-of-conductivities path
+score (`PathScoreBCD = d_ij_bc × d_ij_cd ÷ SCALE`).  Gate K.1 introduced a
+negative-log scoring model that incorporates a per-extra-hop penalty, enabling
+correct path re-selection in the presence of multiple healthy multi-hop paths:
+
+```
+score(p, k edges) = exp(-(Σᵢ -ln(max(q_ema_i, Q_EMA_FLOOR)) + HOP_WEIGHT × (k-1)))
+                  = Πᵢ max(q_ema_i, Q_EMA_FLOOR) × exp(-HOP_WEIGHT × (k-1))
+```
+
+`PhysarumNegativeLogModel.tla` formally verifies two structural properties of
+this formula that the product model cannot express.
+
+### 9.2 Scoring formula — scaled integer representation
+
+| Quantity | Runtime value | Scaled (SCALE=10) |
+|---|---|---|
+| `Q_EMA_FLOOR` | 0.001 | `Q_FLOOR = 1` |
+| `exp(-HOP_WEIGHT)` | exp(-0.05) ≈ 0.9512 | `HOP_FACTOR = 9` |
+| `ScoreBD` | `max(q_ema_bd, 0.001)` | `QFloor(q_ema_bd)` |
+| `ScoreBCD` | `max(q_bc,0.001) × max(q_cd,0.001) × 0.9512` | `(QFloor(q_bc) × QFloor(q_cd) × 9) ÷ 10 ÷ 10` |
+
+At SCALE=10 with all edges healthy (q_ema = SCALE):
+
+```
+ScoreBD  = 10
+ScoreBCD = 10 × 10 × 9 ÷ 10 ÷ 10 = 9
+```
+
+The hop penalty correctly reduces the two-hop score below the one-hop maximum.
+
+### 9.3 State variables and edge update
+
+Same six variables as `PhysarumMultiAgentModel` (`q_ema_bc`, `d_ij_bc`,
+`q_ema_cd`, `d_ij_cd`, `q_ema_bd`, `d_ij_bd`).  The `NextEdge` operator and
+transition structure are identical — the new contribution is the scoring
+operators (`ScoreBD`, `ScoreBCD`) and the two new invariants.
+
+### 9.4 Invariants
+
+| Invariant | Property |
+|---|---|
+| `TypeOK` | All 6 variables ∈ 0..SCALE |
+| `Safety` | All 6 variables bounded in [0, SCALE] |
+| `HopPenaltyBounds` | When all edges are at maximum conductivity, direct one-hop path outscores two-hop indirect path |
+| `CrossoverCorrectness` | When indirect path wins with both indirect edges fully healthy, direct edge has degraded below `HOP_FACTOR` |
+
+**`HopPenaltyBounds`** — formalises that `HOP_WEIGHT > 0` strictly penalises
+multi-hop paths relative to an equally healthy direct path:
+
+```
+(q_ema_bc = SCALE ∧ q_ema_cd = SCALE ∧ q_ema_bd = SCALE) ⇒ ScoreBD ≥ ScoreBCD
+```
+
+At SCALE=10: ScoreBD=10 ≥ ScoreBCD=9 ✓
+
+**`CrossoverCorrectness`** — formalises the Gate K.1 Phase 2 observation:
+path re-selection to the indirect path only occurs when the direct edge has
+degraded below the hop-penalty threshold.
+
+```
+(q_ema_bc = SCALE ∧ q_ema_cd = SCALE ∧ ScoreBCD > ScoreBD) ⇒ q_ema_bd < HOP_FACTOR
+```
+
+At SCALE=10: indirect wins (ScoreBCD=9 > ScoreBD) only when q_ema_bd < 9 = HOP_FACTOR.
+Runtime equivalent: path flip occurs when q_ema_bd drops below ~0.91 (the crossover
+threshold observed in Gate K.1 Phase 2 at q_ema_bd ≈ 0.85).
+
+### 9.5 How to run
+
+```bash
+cd formal/tla
+java -XX:+UseParallelGC -jar tla2tools.jar \
+  PhysarumNegativeLogModel.tla \
+  -config PhysarumNegativeLogModel.cfg
+```
+
+### 9.6 Actual TLC verification result
+
+```text
+TLC result for PhysarumNegativeLogModel
+Command:           java -XX:+UseParallelGC -jar tla2tools.jar PhysarumNegativeLogModel.tla -config PhysarumNegativeLogModel.cfg
+Result:            Model checking completed. No error has been found.
+Invariants:        TypeOK, Safety, HopPenaltyBounds, CrossoverCorrectness
+SCALE:             10  (Q_FLOOR=1, HOP_FACTOR=9)
+States generated:  1,339,894
+Distinct states:   148,877  (upper bound 11^6 = 1,771,561)
+Search depth:      31
+Finished in:       09s
+TLC version:       TLC2 2026.05.04.141011
+```
+
+### 9.7 What this model does NOT cover
+
+- Product-of-conductivities scoring (covered by `PhysarumMultiAgentModel.tla`)
+- Paths with more than 2 hops (the Gate K.1 topology used B→D vs B→C→D→E;
+  the 3-hop invariant is equivalent by induction on hop count but not verified here)
+- physarum-maze multiplier scoring (×1.5/×0.05/×0.8/×1.2) — different model family
+- Concurrent agent scheduling or observation windows
