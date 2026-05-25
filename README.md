@@ -211,53 +211,27 @@ The TLA+ model in `formal/tla/` formally verifies that `q_ema` and `D_ij` stay i
 
 ## Repository layout
 
-> Legend: `✔` implemented · `◌` planned
+This is a high-level map of the repository. It is intentionally not exhaustive; the GitHub tree is the source of truth for exact files.
 
-```
-physarum-attack-paths/
-├── Cargo.toml                            # workspace root (resolver = "2", msrv 1.86)
-├── Cargo.lock                            # committed — binary project reproducibility
-├── README.md
-├── LICENSE                               # Apache 2.0
-├── NOTICE
-├── SECURITY.md
-├── Dockerfile                            # multi-stage: rust:1.86-slim → debian:bookworm-slim
-│
-├── crates/
-│   ├── physarum-protocol          ✔      # shared wire types across all crates
-│   ├── physarum-server            ✔      # HTTP coordinator
-│   ├── physarum-agent             ✔      # peer-probing agent
-│   ├── physarum-ebpf-observer     ✔      # eBPF userspace sidecar
-│   ├── physarum-ebpf-observer-ebpf ✔     # eBPF bytecode
-│   ├── physarum-packet-observer   ✔      # raw-socket stimulus capture
-│   ├── physarum-packet-observer-ebpf ✔   # eBPF bytecode for packet observer
-│   ├── physarum-scanner           ✔      # async port scanner — RustScan feature parity
-│   ├── physarum-probe             ✔      # probe execution library
-│   ├── physarum-node              ✔      # node runtime
-│   ├── physarum-node-runtime      ✔      # node runtime library
-│   └── physarum-maze              ✔      # self-propagating maze agent
-│
-├── examples/
-│   ├── local-lab/                 ✔      # manual A/B/C lab
-│   ├── docker-lab/                ✔      # Docker Compose A/B/C lab
-│   └── aws-lab/                   ✔      # AWS EC2/VPC labs through PF-2
-│
-├── formal/
-│   └── tla/                       ✔      # TLA+ formal models — three verified specs
-│
-├── General-Docs/
-│   ├── ARCHITECTURE.md
-│   ├── QUALITY_GATE.md
-│   ├── EBPF_FLOW_OBSERVATION_DESIGN.md
-│   ├── ROLE_FLUID_AGENT_ARCHITECTURE.md
-│   ├── INSIGHTS_AND_BRAINSTORM.md
-│   └── README.md
-│
-├── Utilities/                           # developer tooling — never shipped in binaries
-└── .github/
-    └── workflows/
-        ├── ci.yml                        # build + clippy (-D warnings) + test
-        └── release.yml                   # Linux binary release (x86_64, aarch64)
+```text
+crates/
+  Rust workspace crates for protocol types, coordinator APIs, agents, observers,
+  scanners, probe execution, node runtime, and the maze organism.
+
+examples/
+  Local, Docker, and AWS validation labs, including the PF-1/PF-2 organism labs.
+
+formal/
+  TLA+ models for adaptive edge scoring and path-safety properties.
+
+General-Docs/
+  Canonical architecture, quality gates, design notes, and research/backlog ideas.
+
+Utilities/
+  Developer build, validation, distribution, and release helper scripts.
+
+.github/
+  CI and release automation.
 ```
 
 ---
