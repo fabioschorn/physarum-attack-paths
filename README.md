@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired autonomous attack-path organism.** A self-propagating Rust agent (`physarum-maze`) traverses real AWS VPC topologies without pre-provisioned targets — it discovers hosts via raw TCP/ICMP stimulus and `/24` port scanning (`physarum-scanner`), propagates itself via SCP over empty-password SSH, and records a cryptographic lineage at each hop. The underlying adaptive edge model (Q_ij → q_ema → D_ij) has been formally verified (TLA+) and validated through Gates A–PF-2: from local A/B/C probing to 9-node autonomous re-routing labs. eBPF passive flow observation (`physarum-ebpf-observer`, `physarum-packet-observer`) is AWS EC2 validated on kernel 6.18. The next frontier — the *Causal Continuity Paradox of Origin and Destination*, where the organism is confined to hosts reachable only via SSH — is being explored through planned LLM-aware adaptive propagation (`physarum-llm`, Issue #106).
+> **Bio-inspired autonomous attack-path organism.** `physarum-attack-paths` is a Rust research prototype for building a living, evidence-driven attack-path graph. It combines adaptive edge scoring (`Q_ij → q_ema → D_ij`), active probing, eBPF/packet stimulus observation, RustScan-compatible discovery, and controlled lab propagation. PF-1 and PF-2 validated the current organism model in real AWS VPC labs: a single seed expanded through a maze, re-sensed new structure, detected an already-colonized node, and preserved a secondary conduit.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
@@ -8,45 +8,56 @@
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](https://github.com/fabioschorn/physarum-attack-paths/releases)
 [![CI](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml/badge.svg)](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml)
 
-`physarum-attack-paths` is a distributed system for discovering, validating, and continuously refining cybersecurity attack paths across heterogeneous computing environments. It abstracts away from the static, scanner-centric view of the network and replaces it with a **living topology**: each host runs a lightweight Rust agent, and the system as a whole behaves like the slime mold *Physarum polycephalum* — strengthening the routes that carry real flow and pruning the routes that don't.
+`physarum-attack-paths` is a distributed system for discovering, validating, and continuously refining cybersecurity attack paths across heterogeneous environments. It replaces a static, scanner-centric view of the network with a **living topology**: local observations and validation outcomes reinforce useful paths while unused or blocked paths decay.
 
-The result is an attack-path graph that is **observed**, not declared. Layer assignments emerge from behavior. Drift is detected as a derivative of edge conductivity over time. The autonomous validation agents from the upstream patented system consume a graph that reflects *what attackers can actually do*, not *what the scanner thinks they might do*.
+The project is inspired by *Physarum polycephalum*, a slime mold that forms efficient transport networks without central control. In this project, the network graph is **observed**, not declared. Layer assignment, path preference, and drift emerge from behavior.
+
+---
+
+## Safety and scope
+
+This repository is a **controlled research prototype**. The propagation labs are designed for owned, isolated, authorized environments only.
+
+```text
+Allowed scope: local labs, Docker labs, and owned AWS lab VPCs.
+Not allowed: public targets, Internet scanning, production deployment, or unbounded propagation.
+```
+
+PF-1/PF-2 use intentionally weak lab conditions, including empty-password SSH, to validate organism behavior in a closed environment. That is not a production deployment pattern. Secure identity, mTLS, signed lineage, and stronger trust controls are planned for Gate N after Issue #106.
 
 ---
 
 ## Current status
 
-**Research prototype** — the core adaptive edge pipeline is implemented and running.
+**Research prototype** — the adaptive graph, sensing, discovery, and PF organism labs are implemented and validated.
 
-| What | State |
+| Area | State |
 |---|---|
-| `physarum-protocol` shared wire types | ✔ implemented |
-| `physarum-server` HTTP coordinator | ✔ implemented |
-| `physarum-agent` peer-probing agent | ✔ implemented |
-| `physarum-ebpf-observer` crate | ✔ implemented — AWS EC2 validated, kernel 6.18, Gate J/J.1 |
-| `physarum-packet-observer` crate | ✔ implemented — raw TCP/ICMP stimulus capture, Gate L.3 |
-| `physarum-scanner` crate | ✔ implemented — full RustScan feature parity, Gate L |
-| `physarum-node` crate | ✔ implemented — supervised runtime (agent + observer), Gate M |
-| `physarum-maze` crate | ✔ implemented — self-propagating maze agent, PF-1/PF-2 |
-| `POST /flow-observations` · `GET /flow-observations` | ✔ implemented — Gate I |
-| `GET /paths` endpoint (negative-log adaptive scoring) | ✔ implemented — Gate K.1 |
-| TLA+ formal models (`formal/tla`) | ✔ implemented — 3 specs: single-edge, multi-agent, negative-log |
-| A/B/C local lab (`examples/local-lab`) | ✔ implemented |
-| A/B/C Docker lab (`examples/docker-lab`) | ✔ implemented |
-| A/B/C/D Docker lab (Agent D) | ✔ implemented |
-| AWS lab — Mode 1, Mode 2, tc/netem weighted paths | ✔ validated — Gates C, E, H |
-| AWS lab — Gate K/K.1 (segmented adaptive + path selection) | ✔ validated |
-| AWS lab — PF-1 (organic expansion maze, 7-node) | ✔ validated — autonomous SCP+SSH propagation |
-| AWS lab — PF-2 (adaptive re-routing, 9-node) | ✔ validated — lateral discovery, TCP stimulus, secondary conduits |
-| `physarum-llm` crate | planned — Issue #106 (Causal Continuity Paradox resolution) |
-| Gate N — mTLS + Ed25519 lineage signatures | planned after Issue #106 |
+| Shared protocol types (`physarum-protocol`) | ✔ implemented |
+| Coordinator and peer-probing agent (`physarum-server`, `physarum-agent`) | ✔ implemented |
+| Flow and packet observation (`physarum-ebpf-observer`, `physarum-packet-observer`) | ✔ implemented — AWS EC2 validated, kernel 6.18 |
+| RustScan-compatible discovery (`physarum-scanner`) | ✔ implemented — Gate L |
+| Probe execution library (`physarum-probe`) | ✔ implemented |
+| Role-fluid runtime (`physarum-node`, `physarum-node-runtime`) | ✔ implemented — Gate M/M.4 |
+| Self-propagating maze organism (`physarum-maze`) | ✔ implemented — PF-1/PF-2 |
+| Flow observations API (`POST/GET /flow-observations`) | ✔ implemented — Gate I |
+| Adaptive path scoring (`GET /paths`) | ✔ implemented — Gate K.1 |
+| TLA+ formal models (`formal/tla`) | ✔ implemented — single-edge, multi-agent, negative-log |
+| Local and Docker labs | ✔ implemented |
+| AWS Mode 1 / Mode 2 / Gate K/K.1 labs | ✔ validated |
+| AWS PF-1 organic expansion maze | ✔ validated — 7-node autonomous propagation lab |
+| AWS PF-2 adaptive re-routing | ✔ validated — 9-node lateral discovery + TCP stimulus + secondary conduit lab |
+| `physarum-llm` | planned — Issue #106 |
+| Gate N secure organism identity | planned after Issue #106 |
 
-See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the full system architecture and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria. Longer-term research ideas are tracked in [General-Docs/INSIGHTS_AND_BRAINSTORM.md](./General-Docs/INSIGHTS_AND_BRAINSTORM.md).
+See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the canonical architecture and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria. Longer-term research ideas live in [General-Docs/INSIGHTS_AND_BRAINSTORM.md](./General-Docs/INSIGHTS_AND_BRAINSTORM.md).
 
 ---
 
 ## Table of contents
 
+- [Safety and scope](#safety-and-scope)
+- [Current status](#current-status)
 - [Motivation](#motivation)
 - [Conceptual model](#conceptual-model)
 - [Architecture](#architecture)
@@ -56,7 +67,7 @@ See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the full 
 - [Quick start](#quick-start)
 - [Development workflow](#development-workflow)
 - [Roadmap](#roadmap)
-- [Future architecture](#future-architecture)
+- [Planned evolution](#planned-evolution)
 - [Relationship to upstream IP](#relationship-to-upstream-ip)
 - [References](#references)
 
@@ -64,43 +75,41 @@ See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the full 
 
 ## Motivation
 
-Traditional attack-path analysis suffers from three failures that compound at scale:
+Traditional attack-path analysis often fails in three ways.
 
-The **single-vantage-point problem.** Tools that scan a network from one location (the legacy `Visio 2000` Enterprise Network Tools approach, modern external scanners) get a distorted view distorted by NAT, micro-segmentation, ephemeral cloud workloads, and zero-trust mesh policies. They see what they can reach, not what exists.
+The **single-vantage-point problem**: scanners see what they can reach from one location, not necessarily what exists across NAT, cloud segmentation, Kubernetes policies, on-prem firewalls, and zero-trust boundaries.
 
-The **declarative-topology problem.** Tools that ask each asset to declare its layer, zone, or security tier accumulate technical debt fast. A misconfigured `NetworkPolicy` in Kubernetes, an over-permissive `SecurityGroup` in AWS, a forgotten firewall rule on-prem — none of these change what the asset *says* it is, but all of them change what an attacker can do.
+The **declarative-topology problem**: assets may claim to belong to a layer or zone, but real reachability can drift because of security group changes, permissive firewall rules, forgotten routes, or broken network policies.
 
-The **stale-snapshot problem.** Even probabilistic attack-graph systems compute edge probabilities once from scanner output and freeze them. By the time the autonomous pentest agents run validation workflows, the graph reflects last week's configuration, not today's reality.
+The **stale-snapshot problem**: many attack graphs are computed once from scanner output and then treated as truth, even though the environment changes before validation or remediation happens.
 
-`Physarum` addresses all three by treating attack-path topology as an emergent property of agent activity. There is no central authority declaring layers. There is no static `P(e)`. There is a continuous reinforcement-decay process running across agents, and the structure that survives is — by construction — the structure that matters.
+`Physarum` addresses these problems by treating attack-path topology as an emergent property of distributed agent activity. There is no single declared layer map and no permanently frozen `P(e)`. There is a reinforcement-decay process across observed edges, and the graph that survives is the graph supported by evidence.
 
 ---
 
 ## Conceptual model
 
-The biological *Physarum polycephalum* is an acellular slime mold that solves shortest-path problems by growing tubes between food sources. Tubes carrying more cytoplasm thicken; tubes carrying less atrophy. After hours of adaptation, the surviving network is provably close to the optimal transport solution (Tero, Kobayashi & Nakagaki, 2007).
+The biological *Physarum polycephalum* forms efficient transport networks by reinforcing tubes that carry flow and weakening tubes that do not. This project maps that idea onto security-path discovery.
 
-We map this dynamic onto a security graph:
-
-| Biological | Security |
+| Biological concept | Security interpretation |
 |---|---|
-| Inoculation point | Externally reachable asset / known compromised host |
-| Food source (oatmeal) | Crown jewel / high-`CRIT` asset / Layer-1 protected core |
-| Tube between nodes | Candidate attack edge between two agents |
-| Tube thickness `D_ij` | Edge conductivity (dynamic; replaces static `P(e)`) |
-| Cytoplasm flow `Q_ij` | Combined evidence: probes + local observation window |
-| Reinforcement | Successful probe + low latency |
-| Decay | Absence of evidence over time |
+| Inoculation point | Externally reachable asset or known starting host |
+| Food source | Crown jewel, high-criticality asset, or protected core |
+| Tube between nodes | Candidate attack edge between hosts or agents |
+| Tube thickness `D_ij` | Edge conductivity; dynamic replacement for static edge probability |
+| Cytoplasm flow `Q_ij` | Evidence from probes, observations, and validation outcomes |
+| Reinforcement | Successful, stable, low-cost reachability |
+| Decay | Lack of evidence, blocked reachability, or weak path quality |
 
-The system does **not** simulate slime mold. It borrows the *form* of the differential equation because that form has provably good convergence properties on path-finding problems and naturally accommodates real-time adaptation.
+The system does **not** simulate slime mold. It borrows the mathematical shape of reinforcement and decay because that shape is useful for adaptive path-finding.
 
 ---
 
 ## Architecture
 
-### Current prototype (implemented)
+### Current prototype
 
-The implemented prototype now has three cooperating layers:
+The implemented prototype has three cooperating layers.
 
 ```text
 1. Adaptive graph layer
@@ -118,94 +127,97 @@ The implemented prototype now has three cooperating layers:
    physarum-node
    physarum-node-runtime
    physarum-maze
-   -> role-fluid runtime consolidation, autonomous maze propagation, lineage memory
+   -> runtime consolidation, autonomous maze propagation, lineage memory
 ```
 
-At the graph layer, the original coordinator model remains implemented and useful:
+At the graph layer, agents produce evidence and the coordinator turns that evidence into adaptive edge conductivity:
 
 ```text
 agents register -> agents probe -> reports arrive -> Q_ij -> q_ema -> D_ij -> /paths
 ```
 
-At the sensing layer, nodes can observe and discover candidate corridors instead of relying only on a predeclared peer list:
+At the sensing layer, nodes can discover candidate corridors instead of relying only on a predeclared peer list:
 
 ```text
-TCP state / packet stimulus -> candidate host -> scanner/probe -> edge evidence
+TCP/ICMP stimulus -> candidate host -> scanner/probe -> edge evidence
 ```
 
-At the organism layer, `physarum-maze` has validated the full pre-final behavior in AWS:
+At the organism layer, `physarum-maze` validated the current pre-final behavior in AWS:
 
 ```text
 PF-1: one seed expands through a 7-node maze and records lineage.
-PF-2: the organism re-senses new structure, handles TCP stimulus, avoids duplicate propagation into already-colonized G, and records a secondary conduit.
+PF-2: the organism re-senses new structure, handles TCP stimulus, avoids duplicate propagation into an already-colonized node, and records a secondary conduit.
 ```
 
-The current architecture is therefore no longer just a server with fixed clients. It is a research organism composed of graph memory, local senses, bounded discovery, propagation, and lineage.
+The current architecture is therefore no longer only a fixed server/client prototype. It is a research organism composed of graph memory, local senses, bounded discovery, propagation, and lineage.
 
-### Next architecture tracks *(planned)*
+### Current limitations
 
-The immediate planned tracks are intentionally narrow:
+The current organism is intentionally constrained:
 
 ```text
-Issue #106
-  physarum-llm research/design for the Causal Continuity Paradox.
-
-Issue #89 / Gate N.0
-  secure organism identity, mTLS, and lineage threat model after Issue #106.
+propagation is lab-only
+SSH-based propagation is the only validated propagation path
+lineage is structured but not yet cryptographically signed
+node identity is not yet mTLS-backed
+LLM-assisted propagation is not implemented
 ```
 
-No broader production runtime is claimed yet. Secure identity, signed lineage, and mTLS are planned design/implementation gates, not current guarantees.
+These limitations are deliberate and tracked in the roadmap.
 
 ---
 
 ## Mathematical core
 
-The following pipeline is **currently implemented** in `physarum-agent` and `physarum-server`.
+The adaptive edge pipeline is implemented in `physarum-agent` and `physarum-server` and is used as the foundation for path scoring.
 
 ### Stimulus signal (`Q_ij`)
 
 Each probe report contains `success_rate ∈ [0, 1]` and `avg_rtt_ms`.
 
-```
+```text
 latency_score = 1 / (1 + avg_rtt_ms / 100)
 
-Q_ij = 0                                                    if success_rate = 0
-Q_ij = clamp(0.7 · success_rate + 0.3 · latency_score, 0, 1)  otherwise
+Q_ij = 0                                                      if success_rate = 0
+Q_ij = clamp(0.7 · success_rate + 0.3 · latency_score, 0, 1)   otherwise
 ```
 
 ### EMA-smoothed signal (`q_ema`)
 
-```
+```text
 q_ema(t+1) = 0.3 · Q_ij + 0.7 · q_ema(t)
 ```
 
-α = 0.3 gives a fast response to improvement and a slower decay on failure.
+`α = 0.3` gives quick response to improvement while smoothing short-term noise.
 
 ### Sigmoid growth drive (`f`)
 
-```
+```text
 f(x) = x² / (1 + x²)
 ```
 
-Saturates at 0.5 for x = 1.0 (maximum stimulus). Prevents runaway reinforcement.
+This saturates growth and prevents runaway reinforcement.
 
 ### Edge conductivity (`D_ij`)
 
-```
-D_ij(t+1) = clamp( D_ij(t) + f(q_ema) · (1 - D_ij) - 0.1 · D_ij,  0, 1 )
+```text
+D_ij(t+1) = clamp(D_ij(t) + f(q_ema) · (1 - D_ij) - 0.1 · D_ij, 0, 1)
 ```
 
 Where:
-- `f(q_ema) · (1 - D_ij)` — growth term (sigmoid-gated, saturates near 1)
-- `0.1 · D_ij` — decay term (10% per interval, prunes unused edges)
 
-Equilibrium under sustained successful probes:
-
+```text
+f(q_ema) · (1 - D_ij)  -> growth term
+0.1 · D_ij             -> decay term
 ```
+
+Under sustained successful probes:
+
+```text
 D* = f(1) / (f(1) + 0.1) = 0.5 / 0.6 ≈ 0.833
 ```
 
-The TLA+ model in `formal/tla/` formally verifies that `q_ema` and `D_ij` stay in `[0, 1]` for all reachable states and all possible probe sequences.
+The TLA+ models in `formal/tla/` verify that `q_ema` and `D_ij` remain in `[0, 1]` and that the negative-log path model preserves expected scoring properties.
 
 ---
 
@@ -238,14 +250,14 @@ Utilities/
 
 ## Labs
 
-| Lab | What it runs | Status |
+| Lab | What it validates | Status |
 |---|---|---|
-| `examples/local-lab` | A/B/C agents + server on localhost | ✔ implemented |
-| `examples/docker-lab` | A/B/C/D agents + server in Docker Compose | ✔ implemented |
-| `examples/aws-lab/terraform` | EC2/VPC — Mode 1, Mode 2, tc/netem, Gates K/K.1 | ✔ validated |
-| `examples/aws-lab/terraform-pf1` | 7-node autonomous expansion maze (PF-1) | ✔ validated — A→C→E→F→G in 55s |
-| `examples/aws-lab/terraform-pf2` | 9-node adaptive re-routing (PF-2) | ✔ validated — lateral discovery + TCP stimulus + secondary conduits |
-| `formal/tla` | TLA+ formal models — 3 specs verified by TLC | ✔ implemented |
+| `examples/local-lab` | A/B/C coordinator and agents on localhost | ✔ implemented |
+| `examples/docker-lab` | A/B/C/D agent graph in Docker Compose | ✔ implemented |
+| `examples/aws-lab/terraform` | EC2/VPC Mode 1, Mode 2, tc/netem, Gate K/K.1 | ✔ validated |
+| `examples/aws-lab/terraform-pf1` | 7-node autonomous expansion maze | ✔ validated |
+| `examples/aws-lab/terraform-pf2` | 9-node adaptive re-routing with TCP stimulus and secondary conduits | ✔ validated |
+| `formal/tla` | Formal models checked with TLC | ✔ implemented |
 
 ---
 
@@ -255,27 +267,23 @@ Utilities/
 
 ### Prerequisites
 
-- Rust 1.86 or later (stable channel via `rustup`)
-- Docker Desktop ≥ 4.25 or Docker Engine ≥ 24 with Compose v2 (for the Docker lab)
-- `curl` and `jq` on the host (for the validation scripts)
-- macOS or Linux x86_64 / ARM64
+- Rust 1.86 or later
+- Docker Desktop ≥ 4.25 or Docker Engine ≥ 24 with Compose v2
+- `curl` and `jq`
+- macOS or Linux on x86_64 / ARM64
 
-### Option A — Docker lab (recommended)
-
-Builds and runs the full A/B/C stack in isolated containers:
+### Docker lab
 
 ```bash
 cd examples/docker-lab
 docker compose up --build
 ```
 
-Wait for both agents to register (watch for `registered with coordinator` in the logs), then validate:
+Wait for the agents to register, then validate:
 
 ```bash
 bash check-docker-lab.sh
 ```
-
-Expected: `Results: 34 passed, 0 failed`.
 
 Stop and clean up:
 
@@ -283,7 +291,7 @@ Stop and clean up:
 docker compose down
 ```
 
-### Option B — Local lab (manual)
+### Local lab
 
 Run each process in a separate terminal:
 
@@ -308,209 +316,113 @@ cargo run -p physarum-agent -- \
     --probe-interval-seconds 5
 ```
 
-Wait one probe interval, then validate:
+Inspect the graph:
 
 ```bash
-bash examples/local-lab/check-local-lab.sh
-```
-
-### Inspect the live graph
-
-```bash
-# Health
 curl -s http://127.0.0.1:8080/health
-
-# Registered agents
 curl -s http://127.0.0.1:8080/agents | jq
-
-# Peers of agent-b
-curl -s http://127.0.0.1:8080/peers/agent-b | jq
-
-# Full graph with conductivity (D_ij, q_ema, sample_count)
 curl -s http://127.0.0.1:8080/graph | jq
-
-# Adaptive path scoring: all simple paths from agent-b to agent-d,
-# sorted by score = product(d_ij) descending.
-# In a full-mesh lab the direct hop agent-b -> agent-d may outscore the
-# two-hop agent-b -> agent-c -> agent-d if its conductivity is higher.
-# Ranking depends on live d_ij values, not hop count.
 curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d' | jq
 ```
 
 ### Verify and build
 
 ```bash
-./Utilities/check-env.sh        # 12-point environment validation
-./Utilities/build.sh            # debug build + all workspace tests
-./Utilities/build.sh --release  # optimised release build
+./Utilities/check-env.sh
+./Utilities/build.sh
+./Utilities/build.sh --release
 ```
 
 ---
 
 ## Development workflow
 
-The `Utilities/` directory contains shell scripts that standardize every step of the
-development lifecycle — from setting up a new machine to publishing a production release.
-
-### Verify your environment
+The `Utilities/` directory standardizes environment checks, builds, tests, and releases.
 
 ```bash
 ./Utilities/check-env.sh
+./Utilities/build.sh
+./Utilities/build.sh --check
+./Utilities/build.sh --clippy
 ```
 
-Checks: OS compatibility, Xcode CLT (macOS), C linker, curl, rustup, rustc ≥ 1.86, cargo, PATH, active toolchain, git, project structure, and workspace integrity.
+Every pull request runs:
 
-### Build
-
-```bash
-./Utilities/build.sh              # debug build + all workspace tests
-./Utilities/build.sh --release    # optimised release build + tests
-./Utilities/build.sh --check      # compile check only — no binary output
-./Utilities/build.sh --clippy     # full lint pass (warnings as errors)
-```
-
-### Git workflow
-
-| Script | When to use |
-|---|---|
-| `git-scripts/commit.sh` | Any code change — enforces Conventional Commits format |
-| `git-scripts/checkpoint.sh` | Development milestone — version bump + push, no tag |
-| `git-scripts/release.sh` | Official release — bump + tag + push → CI publishes binaries |
-
-### Continuous integration
-
-Every push and pull request triggers:
-
-```
+```text
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace
 cargo test --workspace
 ```
 
+Git helper scripts live under `git-scripts/`:
+
+| Script | Purpose |
+|---|---|
+| `git-scripts/commit.sh` | Conventional Commit helper |
+| `git-scripts/checkpoint.sh` | Development checkpoint without tag |
+| `git-scripts/release.sh` | Version bump, tag, push, and release pipeline |
+
 ---
 
 ## Roadmap
 
-The current prototype implements the adaptive edge pipeline end-to-end for an A/B/C agent cluster through autonomous maze propagation (PF-1, PF-2). The full architecture is in [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md).
-
-Summary:
+The current prototype has completed the component gates through Gate M and the pre-final organism labs PF-1/PF-2.
 
 | Phase | Focus | State |
 |---|---|---|
 | 0 | Protocol + coordinator scaffold + CI | ✔ done |
 | 1 | Agent probing + A/B/C local/Docker lab + TLA+ edge model | ✔ done |
-| 2 | Agent D + `/paths` endpoint + AWS Mode 1, Mode 2, tc/netem weighted paths | ✔ done |
-| Gate I | FlowObservation model + POST/GET `/flow-observations` | ✔ done |
-| Gate J/J.1 | `physarum-ebpf-observer` — TCP state tracepoint, AWS EC2 kernel 6.18 | ✔ done — Issue #69/72 |
-| Gate K/K.1 | Segmented 5-node lab + negative-log scoring + autonomous path selection | ✔ done — Issue #76/80 |
-| Gate L/L.1/L.2/L.3 | `physarum-scanner` (RustScan) + eBPF-triggered discovery + ICMP stimulus | ✔ done — Issue #87 |
-| Gate M/M.4 | `physarum-node` runtime + per-edge multiplier scoring adapter | ✔ done |
-| PF-1 | Organic expansion maze — 7-node autonomous SCP+SSH propagation | ✔ done |
-| PF-2 | Adaptive re-routing — 9-node, lateral discovery, TCP stimulus, secondary conduits | ✔ done |
-| `physarum-llm` | LLM-aware adaptive propagation — Causal Continuity Paradox resolution | planned — Issue #106 |
-| Gate N | mTLS + Ed25519 lineage signatures | planned after Issue #106 |
+| 2 | Agent D + `/paths` endpoint + AWS Mode 1/2 validation | ✔ done |
+| Gate I | FlowObservation model and API | ✔ done |
+| Gate J/J.1 | eBPF TCP state observation on AWS EC2 | ✔ done |
+| Gate K/K.1 | Segmented adaptive path selection and negative-log scoring | ✔ done |
+| Gate L/L.1/L.2/L.3 | RustScan-backed discovery and TCP/ICMP stimulus sensing | ✔ done |
+| Gate M/M.4 | `physarum-node` runtime convergence and probe consolidation | ✔ done |
+| PF-1 | Organic expansion maze | ✔ done |
+| PF-2 | Adaptive re-routing and secondary conduits | ✔ done |
+| Issue #106 | LLM-aware propagation design for the Causal Continuity Paradox | planned |
+| Gate N.0 / Issue #89 | Secure organism identity, mTLS, and lineage threat model | planned after #106 |
 
 ---
 
-## Future architecture
+## Planned evolution
 
-> The sections below describe the planned secure/strategic evolution of the prototype. Items marked ✔ are already implemented.
+### Issue #106 — Causal Continuity Paradox
 
-### Autonomous propagation organism *(✔ implemented — PF-1, PF-2)*
+The organism is currently confined to hosts reachable through the validated SSH/SCP lab propagation path. If a host is reachable only through a non-SSH service, the organism may observe the host but cannot yet cross it.
 
-`physarum-maze` is the current embodiment of the role-fluid agent concept. A single self-contained binary:
-- Discovers hosts in the local `/24` via `physarum-scanner` (TCP/ICMP/UDP)
-- Scores candidates using raw TCP SYN and ICMP stimulus from `physarum-packet-observer`
-- Propagates itself via SCP + empty-password SSH + `systemd-run`
-- Detects already-colonized nodes and records secondary conduits (score ×0.8 ×1.2)
-- Records full lineage JSON at each hop (origin, path, hops, visited, scores, secondary_conduits)
+Issue #106 explores whether a lab-only, safety-gated `physarum-llm` component can select context-specific propagation strategies from observed ports, banners, and OS hints. This is not implemented and remains blocked on design and safety review.
 
-**RustScan-backed service discovery** (✔ implemented — `physarum-scanner`, Gate L) feeds port discovery into the physarum graph as candidate edges.
+### Gate N — secure organism identity
 
-> *Agents are not only observers of paths; agents are the computational substance that occupies and reinforces paths.*
+After Issue #106 clarifies the future propagation surface, Gate N will define and implement the secure identity model:
 
-The role-fluid design intent is documented in [General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md](./General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md).
-The eBPF Stage 0 design is documented in [General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md](./General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md).
-
-### Causal Continuity Paradox — `physarum-llm` *(planned — Issue #106)*
-
-The organism is currently confined to hosts reachable via SSH. If a host has SSH closed but port 80 open (e.g., Apache 2.4.49 with CVE-2021-41773), the organism observes the host via eBPF but cannot propagate.
-
-`physarum-llm` is planned to resolve this by querying an LLM oracle that generates context-specific propagation strategies given the target's observed open ports, banners, and OS hints. The design is lab-only, safety-gated, and blocked on the threat-model review in Issue #106. API keys are never stored in lineage.
-
----
-
-### Full agent lifecycle *(planned)*
-
-1. Boot — load Ed25519 identity; generate and attest if absent.
-2. Attach eBPF — load kernel program, verify flow map is writable.
-3. Discover neighbors — coordinator returns initial neighbor set + public keys.
-4. Run main loop — probes, pressure gossip, signed report batches, incoming probe handler.
-
-### Full coordinator *(planned)*
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/v1/enroll` | Agent enrollment (attestation in body) |
-| POST | `/v1/reports` | Batch ingestion (signed reports over QUIC) |
-| GET  | `/v1/neighbors/{agent_id}` | Discovery |
-| GET  | `/v1/graph` | Full graph dump |
-| GET  | `/v1/paths/topk` | K most attractive paths to target |
-| WS   | `/v1/stream` | Live drift + validation event stream |
-
-### eBPF program *(planned)*
-
-Compiled as a `no_std` Rust binary with `aya`, attached to kernel tracepoints (`sock:inet_sock_set_state`). Maintains a hash map of active flows in kernel memory; user-space drains it every 60 seconds.
-
-### Combined flow signal *(planned)*
-
-When eBPF and signed validations are available, `Q_ij` will incorporate three independent sources:
-
-```
-Q_ij = w₁ · Probe(i,j) + w₂ · Validation(i,j) + w₃ · Observe(i,j)
+```text
+mTLS node identity
+signed lineage / hop records
+anti-replay controls
+capability-aware authorization
+clear lab mode vs secure mode separation
 ```
 
-Default weights: `w₁=0.3, w₂=0.5, w₃=0.2`.
-
-### Emergent pressure and layers *(planned)*
-
-Each agent will compute a local scalar pressure via gossip:
-
-```
-p_i(t+1) = Σⱼ (D_ij / L_ij) · p_j(t) / Σⱼ (D_ij / L_ij)
-```
-
-Anchored at `p=1.0` for entry points and `p=0.0` for crown jewels. Emergent layer classification:
-
-```
-p_i ∈ [0.75, 1.00]  →  Layer 4 (External Perimeter)
-p_i ∈ [0.50, 0.75]  →  Layer 3 (Gateways)
-p_i ∈ [0.25, 0.50]  →  Layer 2 (Application Services)
-p_i ∈ [0.00, 0.25]  →  Layer 1 (Protected Core)
-```
-
-### Security model *(planned)*
-
-- Monotonic nonces + Ed25519 signatures — replay and forgery prevention
-- QUIC + mutual TLS — transport encryption and identity pinning
-- TPM / Nitro / Azure CVM / GCP Confidential VM attestation — boot-time identity
+No production security guarantees are claimed before Gate N.
 
 ---
 
 ## Relationship to upstream IP
 
-`Physarum` is designed as a complementary system to the upstream patented framework for *Attack-Path Probability Modeling*. It does not replace any component of that framework; it augments it by replacing the static, scanner-derived edge probability `P(e)` with a live, observation-driven conductivity `D_ij`.
+`Physarum` is designed as a complementary system to the upstream patented framework for *Attack-Path Probability Modeling*. It does not replace that framework; it augments it by replacing static, scanner-derived edge probability `P(e)` with live, observation-driven conductivity `D_ij`.
 
 Specifically:
 
 - **§8.4** (`P(e)` from `W(e)`) becomes the `t=0` initial condition of the Physarum dynamics.
-- **§8.5** (Yen K-shortest path enumeration) operates unchanged on the live `D/L` cost function *(planned)*.
+- **§8.5** (Yen K-shortest path enumeration) can operate on the live `D/L` cost function.
 
-Two distinct contributions are candidates for independent IP claims:
+Potential independent contribution areas:
 
-1. **Reconciliation across heterogeneous segmentation primitives** (AWS Security Groups vs Azure NSGs vs Kubernetes NetworkPolicies vs on-prem firewalls), producing a unified Layer model consumable by attack-path engines.
-2. **Closed-loop refinement of the attack graph during agent execution**, where validation outcomes from upstream pentest agents feed back into edge conductivities in real time.
+1. **Reconciliation across heterogeneous segmentation primitives** such as AWS Security Groups, Azure NSGs, Kubernetes NetworkPolicies, and on-prem firewalls.
+2. **Closed-loop refinement of the attack graph during agent execution**, where validation outcomes feed back into edge conductivities in real time.
 
 ---
 
@@ -523,11 +435,11 @@ Two distinct contributions are candidates for independent IP claims:
 
 For Rust-side dependencies of architectural significance:
 
-- `axum` — HTTP framework (coordinator)
+- `axum` — HTTP framework for the coordinator
 - `tokio` — async runtime
-- `petgraph` — graph data structures (coordinator graph)
-- `aya` — pure-Rust eBPF library ✔ (physarum-ebpf-observer, physarum-packet-observer)
-- `clap` — CLI argument parsing (physarum-maze, physarum-scan)
+- `petgraph` — graph data structures
+- `aya` — pure-Rust eBPF library
+- `clap` — CLI argument parsing
 - `async-openai` — OpenAI-compatible API client *(planned — physarum-llm)*
 - `quinn` — QUIC transport *(planned)*
 - `ed25519-dalek` — signature scheme *(planned — Gate N)*
@@ -536,26 +448,15 @@ For Rust-side dependencies of architectural significance:
 
 ## License
 
-Licensed under the Apache License, Version 2.0 (the "License").
-You may obtain a copy of the License at:
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the [LICENSE](./LICENSE) file and [NOTICE](./NOTICE) for full terms.
+Licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE) for full terms.
 
 ---
 
 ## Contributing
 
-Contributions require signing the Contributor License Agreement (CLA).
-The CLA bot will guide you through the process on your first pull request.
+Contributions require signing the Contributor License Agreement (CLA). The CLA bot will guide you through the process on your first pull request.
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow,
-code style, and test requirements. Security issues should be reported
-according to [SECURITY.md](./SECURITY.md).
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, code style, and test requirements. Security issues should be reported according to [SECURITY.md](./SECURITY.md).
 
 ---
 
