@@ -29,14 +29,17 @@ Each file has a single responsibility. Do not duplicate content across files —
 | File | Owns |
 |---|---|
 | `README.md` | Short project front door: what it is, how to run it, where to find more |
-| `General-Docs/PROTOTYPE_ROADMAP.md` | Current status, next steps, and recommended implementation order |
+| `General-Docs/ARCHITECTURE.md` | Full system architecture across all generations — crates, gates, math, labs |
+| `General-Docs/QUALITY_GATE.md` | Gate definitions, acceptance criteria, and evidence links |
 | `General-Docs/INSIGHTS_AND_BRAINSTORM.md` | Research ideas, future concepts, speculative notes |
+| `General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md` | Role-fluid agent design intent and eBPF stage sequence |
+| `General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md` | eBPF Stage 0 design decisions — historical reference |
 | `General-Docs/DOCUMENTATION_GUIDELINES.md` | This file — documentation workflow and ownership rules |
 | `examples/local-lab/README.md` | Local lab runbook only |
 | `examples/docker-lab/README.md` | Docker lab runbook only |
-| `examples/aws-lab/README.md` | AWS lab test plan only |
+| `examples/aws-lab/README.md` | AWS lab overview and evidence index |
 | `examples/wasm-lab/README.md` | WASM visual simulator plan only |
-| `formal/tla/README.md` | TLA+ model usage and formal-method notes only |
+| `formal/tla/README.md` | TLA+ model usage, invariants, and formal-method notes |
 
 ---
 

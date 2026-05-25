@@ -42,7 +42,7 @@ The result is an attack-path graph that is **observed**, not declared. Layer ass
 | Persistence / ClickHouse | planned |
 | TOON export | planned |
 
-See [General-Docs/PROTOTYPE_ROADMAP.md](./General-Docs/PROTOTYPE_ROADMAP.md) for the full phased plan and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria.
+See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the full system architecture and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria.
 
 ---
 
@@ -236,7 +236,7 @@ physarum-attack-paths/
 │       └── README.md                    # how to run TLC, invariants, artefacts
 │
 ├── General-Docs/
-│   ├── PROTOTYPE_ROADMAP.md             # full phased implementation plan
+│   ├── ARCHITECTURE.md                  # full system architecture — all four generations
 │   ├── QUALITY_GATE.md                  # gate definitions and acceptance criteria
 │   ├── EBPF_FLOW_OBSERVATION_DESIGN.md  # eBPF Stage 0 design — sidecar, Aya, TCP state tracepoint
 │   ├── ROLE_FLUID_AGENT_ARCHITECTURE.md # role-fluid unified agent roadmap
@@ -416,7 +416,7 @@ cargo test --workspace
 
 ## Roadmap
 
-The current prototype implements the adaptive edge pipeline end-to-end for an A/B/C agent cluster. The full phased plan is in [General-Docs/PROTOTYPE_ROADMAP.md](./General-Docs/PROTOTYPE_ROADMAP.md).
+The current prototype implements the adaptive edge pipeline end-to-end for an A/B/C agent cluster through autonomous maze propagation (PF-1, PF-2). The full architecture is in [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md).
 
 Summary:
 
