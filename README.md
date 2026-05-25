@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired autonomous attack-path organism.** A self-propagating Rust agent (`physarum-maze`) traverses real AWS VPC topologies without pre-provisioned targets — it discovers hosts via raw TCP/ICMP stimulus and `/24` port scanning (`physarum-scanner`), propagates itself via SCP over empty-password SSH, and records a cryptographic lineage at each hop. The underlying adaptive edge model (Q_ij → q_ema → D_ij) has been formally verified (TLA+) and validated through Gates A–PF-2: from local A/B/C probing to 9-node autonomous re-routing labs. eBPF passive flow observation (`physarum-ebpf-observer`, `physarum-packet-observer`) is AWS EC2 validated on kernel 6.18. The next frontier — the *Causal Continuity Paradox of Origin and Destination*, where the organism is confined to hosts reachable only via SSH — is resolved through LLM-aware adaptive propagation (`physarum-llm`, Issue #106).
+> **Bio-inspired autonomous attack-path organism.** A self-propagating Rust agent (`physarum-maze`) traverses real AWS VPC topologies without pre-provisioned targets — it discovers hosts via raw TCP/ICMP stimulus and `/24` port scanning (`physarum-scanner`), propagates itself via SCP over empty-password SSH, and records a cryptographic lineage at each hop. The underlying adaptive edge model (Q_ij → q_ema → D_ij) has been formally verified (TLA+) and validated through Gates A–PF-2: from local A/B/C probing to 9-node autonomous re-routing labs. eBPF passive flow observation (`physarum-ebpf-observer`, `physarum-packet-observer`) is AWS EC2 validated on kernel 6.18. The next frontier — the *Causal Continuity Paradox of Origin and Destination*, where the organism is confined to hosts reachable only via SSH — is being explored through planned LLM-aware adaptive propagation (`physarum-llm`, Issue #106).
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
@@ -473,14 +473,7 @@ The eBPF Stage 0 design is documented in [General-Docs/EBPF_FLOW_OBSERVATION_DES
 
 The organism is currently confined to hosts reachable via SSH. If a host has SSH closed but port 80 open (e.g., Apache 2.4.49 with CVE-2021-41773), the organism observes the host via eBPF but cannot propagate.
 
-`physarum-llm` resolves this via an LLM oracle that generates context-specific propagation strategies:
-
-```
-Input:  DiscoveryQuery { target_ip, open_ports, banner, os_hint }
-Output: PropagationStrategy { method: Exploit { cve, port }, confidence, bootstrap }
-```
-
-The `LlmClient` trait works with any OpenAI-compatible backend (OpenAI, Ollama, Groq, vLLM) via `async-openai` and a configurable `base_url`. API keys are never stored in lineage.
+`physarum-llm` is planned to resolve this by querying an LLM oracle that generates context-specific propagation strategies given the target's observed open ports, banners, and OS hints. The design is lab-only, safety-gated, and blocked on the threat-model review in Issue #106. API keys are never stored in lineage.
 
 ---
 

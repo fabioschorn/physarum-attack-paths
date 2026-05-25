@@ -1,6 +1,6 @@
 # General Documentation
 
-This directory contains general project documentation that supports the main `physarum-attack-paths` README.
+This directory contains the current general project documentation that supports the main `physarum-attack-paths` README (6 documents).
 
 ## Available documents
 

