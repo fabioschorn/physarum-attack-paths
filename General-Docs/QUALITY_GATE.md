@@ -23,7 +23,7 @@
 | AWS lab design | GREEN | A/B/C/D Terraform skeleton designed | PR #29 |
 | AWS Terraform skeleton | GREEN | Skeleton implemented under `examples/aws-lab/terraform/` | PR #31 |
 | AWS v0 smoke test | GREEN | 32 resources created/destroyed; `terraform destroy` clean | PR #33 |
-| AWS default cost/security posture | GREEN | `t3.micro`/`x86_64` default; `187.101.126.140/32` documented | PR #35 |
+| AWS default cost/security posture | GREEN | `t3.micro`/`x86_64` default; `<OPERATOR_IP>/32` documented | PR #35 |
 | AWS S3 artifact delivery + IAM role | GREEN | S3 bucket + least-privilege IAM role + Instance Profile provisioned | PR #38 |
 | AWS SSH + Ansible validation model | GREEN | Port 8080 removed from public SG; Ansible replaces curl for runtime validation | PR #42 |
 | AWS Mode 1 Runtime Validation | GREEN | failed=0 on all nodes; /health /agents /graph /paths confirmed; 39 resources destroyed | PR #43 |
@@ -61,7 +61,7 @@
 Default instance_type : t3.micro
 Default architecture  : x86_64
 AMI                   : Amazon Linux 2023 (SSM dynamic lookup — no hard-coded AMI ID)
-Operator CIDR         : 187.101.126.140/32  (Dev Lead workstation)
+Operator CIDR         : <OPERATOR_IP>/32  (Dev Lead workstation)
 Inbound 0.0.0.0/0     : NOT PRESENT — validation enforced in variables.tf
 NAT Gateway           : NOT provisioned
 ALB / NLB             : NOT provisioned

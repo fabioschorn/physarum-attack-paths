@@ -30,3 +30,11 @@ base64 = "0.22"
 
 # Interface IP lookup
 if-addrs = "0.7"
+
+# /24 subnet and targeted port discovery (internal TCP-connect scanner)
+physarum-scanner = { path = "../physarum-scanner" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# eBPF ring buffer reader — same version as physarum-ebpf-observer
+aya     = { version = "0.13", features = ["async_tokio"] }
+aya-log = "0.2"

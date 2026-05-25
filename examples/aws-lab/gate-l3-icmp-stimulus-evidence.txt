@@ -90,7 +90,7 @@ Section 2 — terraform apply (lab_phase=gate-l3, enable_discovery=false)
 Command:
   terraform apply \
     -var="lab_phase=gate-l3" \
-    -var="operator_cidr=187.101.126.140/32" \
+    -var="operator_cidr=<OPERATOR_IP>/32" \
     -var="ami_id_override=ami-0c0717dff8dafd4ca" \
     -var="enable_artifact_download=true" \
     -var="artifact_bucket=physarum-artifacts-168740128169" \
@@ -329,7 +329,7 @@ Section 9 — terraform destroy
 Command:
   terraform destroy \
     -var="lab_phase=gate-l3" \
-    -var="operator_cidr=187.101.126.140/32" \
+    -var="operator_cidr=<OPERATOR_IP>/32" \
     -var="ami_id_override=ami-0c0717dff8dafd4ca" \
     -var="enable_artifact_download=true" \
     -var="artifact_bucket=physarum-artifacts-168740128169" \

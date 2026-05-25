@@ -21,6 +21,10 @@ pub struct Lineage {
     pub visited: HashSet<String>,
     /// IPs where propagation was rejected (sshd or SCP failure)
     pub dead_ends: HashSet<String>,
+    /// IPs found to already run physarum-maze (secondary conduit endpoints)
+    pub colonized: HashSet<String>,
+    /// Secondary conduits: ["from_ip", "to_ip"] pairs discovered after primary path
+    pub secondary_conduits: Vec<[String; 2]>,
     /// D_ij edge weights keyed as "src_ip->dst_ip"
     pub scores: HashMap<String, f64>,
     /// UTC timestamp of each successful hop, keyed as "src_ip->dst_ip"
@@ -42,6 +46,8 @@ impl Lineage {
             path: vec![my_ip.to_string()],
             visited,
             dead_ends: HashSet::new(),
+            colonized: HashSet::new(),
+            secondary_conduits: Vec::new(),
             scores: HashMap::new(),
             transitions: HashMap::new(),
             hops: 0,
@@ -80,12 +86,45 @@ impl Lineage {
         self.updated_at = Utc::now().to_rfc3339();
     }
 
+    /// Remove a dead end mark and reset the edge score to neutral (1.0).
+    /// Called when the host sends an active stimulus — the environment changed.
+    pub fn unmark_dead_end(&mut self, target_ip: &str) {
+        self.dead_ends.remove(target_ip);
+        let edge = self.edge_key(target_ip);
+        self.scores.entry(edge).and_modify(|s| *s = 1.0);
+        self.updated_at = Utc::now().to_rfc3339();
+    }
+
+    /// Record a host already running physarum-maze; mild score reduction since
+    /// the corridor is valid but the endpoint is occupied.
+    pub fn mark_colonized(&mut self, target_ip: &str) {
+        self.colonized.insert(target_ip.to_string());
+        let edge = self.edge_key(target_ip);
+        *self.scores.entry(edge).or_insert(1.0) *= 0.8;
+        self.updated_at = Utc::now().to_rfc3339();
+    }
+
+    /// Record a secondary conduit (from_ip → to_ip) discovered after the
+    /// primary lineage path was already established.  Mildly reinforces the
+    /// edge to preserve it as an alternative route.
+    pub fn add_secondary_conduit(&mut self, from_ip: &str, to_ip: &str) {
+        self.secondary_conduits
+            .push([from_ip.to_string(), to_ip.to_string()]);
+        let edge = format!("{}->{}", from_ip, to_ip);
+        *self.scores.entry(edge).or_insert(1.0) *= 1.2;
+        self.updated_at = Utc::now().to_rfc3339();
+    }
+
     pub fn is_visited(&self, ip: &str) -> bool {
         self.visited.contains(ip)
     }
 
     pub fn is_dead_end(&self, ip: &str) -> bool {
         self.dead_ends.contains(ip)
+    }
+
+    pub fn is_colonized(&self, ip: &str) -> bool {
+        self.colonized.contains(ip)
     }
 
     pub fn save(&self) -> Result<()> {
