@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired attack-path organism for adaptive security graph discovery.** `physarum-attack-paths` is a Rust research prototype that turns distributed network evidence into a living attack-path graph. It combines adaptive edge scoring (`Q_ij → q_ema → D_ij`), active probing, eBPF/packet-level stimulus observation, RustScan-compatible discovery, and controlled lab propagation. PF-1 and PF-2 validated the current organism model in real AWS VPC labs: one seed expanded through an unknown maze, re-sensed new structure, recognized an already-colonized node, and preserved a secondary conduit.
+> **Bio-inspired attack-path organism for adaptive security graph discovery.** `physarum-attack-paths` is a Rust research prototype that turns distributed network evidence into a living attack-path graph. It combines adaptive edge scoring (`Q_ij → q_ema → D_ij`), active probing, eBPF/packet-level stimulus observation, native discovery through `physarum-scanner`, and controlled lab propagation. PF-1 and PF-2 validated the current organism model in real AWS VPC labs: one seed expanded through an unknown maze, re-sensed new structure, recognized an already-colonized node, and preserved a secondary conduit.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
@@ -36,7 +36,7 @@ PF-1/PF-2 use intentionally weak lab conditions, including empty-password SSH, t
 | Shared protocol types (`physarum-protocol`) | ✔ implemented |
 | Coordinator and peer-probing agent (`physarum-server`, `physarum-agent`) | ✔ implemented |
 | Flow and packet observation (`physarum-ebpf-observer`, `physarum-packet-observer`) | ✔ implemented — AWS EC2 validated, kernel 6.18 |
-| RustScan-compatible discovery (`physarum-scanner`) | ✔ implemented — Gate L |
+| Native discovery engine (`physarum-scanner`) | ✔ implemented — Gate L |
 | Probe execution library (`physarum-probe`) | ✔ implemented |
 | Role-fluid runtime (`physarum-node`, `physarum-node-runtime`) | ✔ implemented — Gate M/M.4 |
 | Self-propagating maze organism (`physarum-maze`) | ✔ implemented — PF-1/PF-2 |
@@ -121,7 +121,7 @@ The implemented prototype has three cooperating layers.
    physarum-packet-observer
    physarum-scanner
    physarum-probe
-   -> TCP/ICMP stimulus capture, RustScan-compatible discovery, probe execution
+   -> TCP/ICMP stimulus capture, physarum-scanner discovery, probe execution
 
 3. Organism runtime layer
    physarum-node
@@ -377,7 +377,7 @@ The current prototype has completed the component gates through Gate M and the p
 | Gate I | FlowObservation model and API | ✔ done |
 | Gate J/J.1 | eBPF TCP state observation on AWS EC2 | ✔ done |
 | Gate K/K.1 | Segmented adaptive path selection and negative-log scoring | ✔ done |
-| Gate L/L.1/L.2/L.3 | RustScan-backed discovery and TCP/ICMP stimulus sensing | ✔ done |
+| Gate L/L.1/L.2/L.3 | `physarum-scanner` discovery and TCP/ICMP stimulus sensing | ✔ done |
 | Gate M/M.4 | `physarum-node` runtime convergence and probe consolidation | ✔ done |
 | PF-1 | Organic expansion maze | ✔ done |
 | PF-2 | Adaptive re-routing and secondary conduits | ✔ done |
