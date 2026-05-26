@@ -1208,6 +1208,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "physarum-llm"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "physarum-maze"
 version = "0.0.1"
 dependencies = [
