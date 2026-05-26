@@ -298,3 +298,26 @@ the crate implementation, and by making Phase 1 a pure design artifact (no Rust 
 | 7 | Lineage extension schema: define in Phase 1 or Phase 4? | Phase 4 scope |
 
 No implementation code will be written until these decisions are recorded.
+
+---
+
+## 6. Manager decisions — recorded 2026-05-26 (PR #109 comment)
+
+All 7 gaps resolved. Dev Lead approved to proceed to Phase 1 contracts.
+
+| # | Decision |
+|---|---|
+| 1 | **YES** — add `rejected_strategies: Vec<RejectedStrategy>` to `DiscoveryQuery`; every policy rejection fed back into next LLM query |
+| 2 | **Revised order approved**: Phase 1 contracts → Phase 2 scanner enrichment → Phase 3 llm crate → Phase 4 maze integration → Phase 5 lab |
+| 3 | **`os_hint: Option<OsHint>` — best-effort only**; derived from banners/handshakes; no raw sockets; no new CAP_NET_RAW/root requirement |
+| 4 | **Typed enum**: `AgentBinary`, `Script`, `HttpRequest`, `None` — free-form strings not acceptable for policy enforcement |
+| 5 | **Option A — typed steps**: `BootstrapPlan { steps: Vec<BootstrapStep> }`; `BootstrapAction` enum; free-form shell not the default |
+| 6 | **Define prompt template in Phase 1** — it is part of the contract; must be deterministic for mock tests |
+| 7 | **Define lineage schema in Phase 1; implement in Phase 4** — `LlmAttemptEvidence` struct defined now, wired in Phase 4 |
+
+### Additional Manager constraints
+
+- `Exploit` variant must be policy-disabled by default; requires explicit lab mode + CIDR + confidence + attempt rules
+- Contracts should describe method classes and typed steps — not normalize the repo around raw exploit payload content
+- Without `--llm-endpoint`: current physarum-maze behavior must remain **identical**
+- With `--llm-endpoint`: LLM reasoning enabled only under explicit lab policy
