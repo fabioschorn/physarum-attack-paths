@@ -23,7 +23,7 @@ paste check-docker-lab.sh or curl output here
 Check all that apply. Per the [documentation guidelines](../General-Docs/DOCUMENTATION_GUIDELINES.md), update **at most one primary documentation file** unless explicitly justified.
 
 - [ ] `README.md`
-- [ ] `General-Docs/PROTOTYPE_ROADMAP.md`
+- [ ] `General-Docs/ARCHITECTURE.md` or `General-Docs/QUALITY_GATE.md`
 - [ ] Lab README (`examples/*/README.md`)
 - [ ] `General-Docs/DOCUMENTATION_GUIDELINES.md`
 - [ ] No documentation changes needed

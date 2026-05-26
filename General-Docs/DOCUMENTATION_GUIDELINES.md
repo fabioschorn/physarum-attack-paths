@@ -50,11 +50,6 @@ Each file has a single responsibility. Do not duplicate content across files —
 - Step-by-step lab runbooks (those belong in `examples/*/README.md`)
 - Long implementation notes (those belong in `General-Docs/`)
 
-**`General-Docs/PROTOTYPE_ROADMAP.md`** must not contain:
-- Detailed per-issue history that mirrors GitHub Issues
-- Content already covered in lab READMEs
-- Speculative research notes (those belong in `INSIGHTS_AND_BRAINSTORM.md`)
-
 **Lab READMEs** must not contain:
 - Cross-lab content (each lab README covers only its own lab)
 - Architecture explanations (those belong in `README.md`)
@@ -67,7 +62,7 @@ Documentation must describe what is currently implemented, not what we hope will
 
 - Future or planned items must be clearly labeled as `planned` or `future`.
 - Do not update the status table in `README.md` until the corresponding PR is merged.
-- Do not mark an issue as completed in `PROTOTYPE_ROADMAP.md` until the corresponding PR is merged.
+- Do not mark a gate as completed in `QUALITY_GATE.md` until the corresponding PR is merged.
 
 ---
 
@@ -78,29 +73,29 @@ When two documents need to reference the same content, the secondary document li
 **Example:**
 - `README.md` mentions the Docker lab with a one-line description and a link to `examples/docker-lab/README.md`.
 - `examples/docker-lab/README.md` contains the full runbook.
-- `PROTOTYPE_ROADMAP.md` references the Docker lab milestone with a one-line status entry and a link.
+- `General-Docs/QUALITY_GATE.md` references the gate milestone with a one-line status entry and evidence link.
 
 ---
 
-## PROTOTYPE_ROADMAP.md scope
+## ARCHITECTURE.md and QUALITY_GATE.md scope
 
-The roadmap file covers:
-
-```text
-Current project status (completed / in progress / planned)
-Recommended next implementation order
-Key design decisions that are not obvious from the code
-```
-
-The roadmap file does **not** cover:
+`ARCHITECTURE.md` covers:
 
 ```text
-Detailed per-issue history — GitHub Issues and PRs are the authoritative record
-Long validation output — that belongs in PR comments
-Lab runbook steps — those belong in examples/*/README.md
+Full system architecture across all generations
+Crate layout, mathematical model, gate progression summary
+Causal Continuity Paradox and planned physarum-llm design
 ```
 
-When an issue is closed and a PR is merged, the roadmap entry for that milestone is a one-line status update, not a detailed delivery log.
+`QUALITY_GATE.md` covers:
+
+```text
+Current gate status (completed / in progress / planned)
+Acceptance criteria and evidence links per gate
+Known risks and gate advancement rules
+```
+
+Neither file covers detailed per-issue history — GitHub Issues and PRs are the authoritative record.
 
 ---
 
@@ -120,4 +115,4 @@ Every PR that touches documentation should verify:
 
 Detailed milestone tracking — who did what, when, what was validated, what the output was — lives in GitHub Issues and PR bodies and comments. This is the authoritative, searchable, permanent record.
 
-`PROTOTYPE_ROADMAP.md` is a living status document, not an archive.
+`QUALITY_GATE.md` is a living gate status document, not an archive. `ARCHITECTURE.md` is the authoritative design reference.
