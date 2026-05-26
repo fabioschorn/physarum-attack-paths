@@ -102,7 +102,31 @@ impl PolicyGate {
             };
         }
 
+        if let Some(plan) = &strategy.bootstrap_plan {
+            if self.contains_secret_material(plan) {
+                return PolicyDecision::Rejected {
+                    reason: PolicyRejectionReason::SecretMaterialDetected,
+                    rule: "ephemeral_private_key_pem must not appear in lineage".to_string(),
+                };
+            }
+        }
+
         PolicyDecision::Accepted
+    }
+
+    /// Returns true if the plan would persist secret material where it should not.
+    ///
+    /// The ephemeral private key in ScpPullFromSource is allowed in the
+    /// bootstrap plan (it is injected at runtime into the RCE script) but
+    /// must never be recorded in lineage. This check is a defence-in-depth
+    /// guard; the maze executor is responsible for stripping key material
+    /// before writing LlmAttemptEvidence.
+    fn contains_secret_material(&self, plan: &crate::types::BootstrapPlan) -> bool {
+        use crate::types::BootstrapAction;
+        plan.steps.iter().any(|step| {
+            matches!(&step.action, BootstrapAction::ScpPullFromSource { ephemeral_private_key_pem, .. }
+                if ephemeral_private_key_pem.is_empty())
+        })
     }
 
     /// Build a `RejectedStrategy` record to feed back into the next LLM query.

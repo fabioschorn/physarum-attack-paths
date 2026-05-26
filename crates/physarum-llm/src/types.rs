@@ -179,7 +179,33 @@ pub struct BootstrapStep {
 pub enum BootstrapAction {
     HttpPost { path: String, body: String },
     HttpGet { path: String },
+    /// A → B push (current SSH/SCP propagation path).
     ScpUpload { local_path: String, remote_path: String },
+    /// B → A reverse-pull propagation pattern.
+    ///
+    /// Used when Host B's inbound SSH blocks Host A but outbound is open.
+    /// The RCE delivers a small bootstrap script to Host B containing an
+    /// ephemeral private key. Host B connects OUT to Host A and pulls the
+    /// physarum-maze binary via SCP.
+    ///
+    /// Key lifecycle (Host A):
+    ///   1. Generate ephemeral ed25519 key pair before RCE fires.
+    ///   2. Add public key to Host A's authorized_keys (temporary).
+    ///   3. Embed private key in the bootstrap script delivered via RCE.
+    ///   4. After propagation succeeds or times out — remove public key.
+    ///
+    /// The private key MUST NOT be stored in lineage. Only the key_id
+    /// (a short hash of the public key) is recorded for audit.
+    ScpPullFromSource {
+        source_ip:    String,
+        source_path:  String,
+        dest_path:    String,
+        /// Ephemeral ed25519 private key (PEM) for this propagation session.
+        /// Injected into the RCE script at runtime; never written to lineage.
+        ephemeral_private_key_pem: String,
+        /// Short identifier recorded in lineage instead of the full key.
+        key_id: String,
+    },
     SshCommand { command: String },
     /// Must be explicitly permitted by lab policy before execution.
     Custom { description: String },
