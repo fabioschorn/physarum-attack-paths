@@ -185,6 +185,7 @@ lineage is structured but not yet cryptographically signed
 
 ```text
 AWS work may introduce infrastructure complexity if started before scope is agreed
+documentation can drift if QUALITY_GATE.md or ARCHITECTURE.md start accumulating issue history (that belongs in GitHub Issues/PRs)
 operator_cidr must remain a narrow /32 until coordinator API authentication is added
 arm64 binary cross-compilation requires additional CI/toolchain setup if Graviton is revisited
 latency-based quality discrimination requires real network or tc/netem; Docker localhost RTTs are too similar

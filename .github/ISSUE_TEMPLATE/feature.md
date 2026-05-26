@@ -26,7 +26,7 @@ labels: feature
      See General-Docs/DOCUMENTATION_GUIDELINES.md for ownership rules. -->
 
 - [ ] `README.md`
-- [ ] `General-Docs/PROTOTYPE_ROADMAP.md`
+- [ ] `General-Docs/ARCHITECTURE.md` or `General-Docs/QUALITY_GATE.md`
 - [ ] `examples/docker-lab/README.md`
 - [ ] `examples/local-lab/README.md`
 - [ ] Other: ___
