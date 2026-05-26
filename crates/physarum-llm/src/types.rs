@@ -1,5 +1,5 @@
-use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 
 // ── Scanner fingerprint ───────────────────────────────────────────────────────
 
@@ -177,10 +177,18 @@ pub struct BootstrapStep {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BootstrapAction {
-    HttpPost { path: String, body: String },
-    HttpGet { path: String },
+    HttpPost {
+        path: String,
+        body: String,
+    },
+    HttpGet {
+        path: String,
+    },
     /// A → B push (current SSH/SCP propagation path).
-    ScpUpload { local_path: String, remote_path: String },
+    ScpUpload {
+        local_path: String,
+        remote_path: String,
+    },
     /// B → A reverse-pull propagation pattern.
     ///
     /// Used when Host B's inbound SSH blocks Host A but outbound is open.
@@ -197,18 +205,22 @@ pub enum BootstrapAction {
     /// The private key MUST NOT be stored in lineage. Only the key_id
     /// (a short hash of the public key) is recorded for audit.
     ScpPullFromSource {
-        source_ip:    String,
-        source_path:  String,
-        dest_path:    String,
+        source_ip: String,
+        source_path: String,
+        dest_path: String,
         /// Ephemeral ed25519 private key (PEM) for this propagation session.
         /// Injected into the RCE script at runtime; never written to lineage.
         ephemeral_private_key_pem: String,
         /// Short identifier recorded in lineage instead of the full key.
         key_id: String,
     },
-    SshCommand { command: String },
+    SshCommand {
+        command: String,
+    },
     /// Must be explicitly permitted by lab policy before execution.
-    Custom { description: String },
+    Custom {
+        description: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

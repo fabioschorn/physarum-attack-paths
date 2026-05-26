@@ -1,8 +1,8 @@
 use std::net::Ipv4Addr;
 
 use crate::types::{
-    ArtifactType, PolicyDecision, PolicyRejectionReason, PropagationMethod,
-    PropagationMethodClass, PropagationStrategy, RejectedStrategy,
+    ArtifactType, PolicyDecision, PolicyRejectionReason, PropagationMethod, PropagationMethodClass,
+    PropagationStrategy, RejectedStrategy,
 };
 
 pub const MAX_ATTEMPTS: u8 = 6;
@@ -95,7 +95,10 @@ impl PolicyGate {
             };
         }
 
-        if !self.allowed_artifact_types.contains(&strategy.artifact_type) {
+        if !self
+            .allowed_artifact_types
+            .contains(&strategy.artifact_type)
+        {
             return PolicyDecision::Rejected {
                 reason: PolicyRejectionReason::ArtifactTypeNotAllowed,
                 rule: format!("allowed_artifact_types={:?}", self.allowed_artifact_types),
@@ -223,7 +226,9 @@ mod tests {
     fn rejects_exploit_when_disabled() {
         let gate = gate_with_cidr("10.0.0.0/8");
         let s = strategy(
-            PropagationMethod::Exploit { cve: "CVE-2021-41773".into() },
+            PropagationMethod::Exploit {
+                cve: "CVE-2021-41773".into(),
+            },
             0.95,
         );
         assert!(matches!(

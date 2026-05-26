@@ -8,8 +8,7 @@ use crate::types::{DiscoveryQuery, PropagationStrategy};
 /// Boxed future returned by `LlmClient::query_propagation`.
 /// Using an explicit return type keeps the trait object-safe (dyn LlmClient)
 /// without requiring a third-party async-trait crate.
-pub type QueryFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<PropagationStrategy>> + Send + 'a>>;
+pub type QueryFuture<'a> = Pin<Box<dyn Future<Output = Result<PropagationStrategy>> + Send + 'a>>;
 
 /// The agnostic LLM contract.
 ///
