@@ -209,7 +209,7 @@ pub enum PortState {
 }
 
 /// How this evidence was obtained.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EvidenceSource {
     /// Periodic /24 TCP-connect subnet discovery.
     ScheduledScan,

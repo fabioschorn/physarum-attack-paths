@@ -44,13 +44,15 @@ pub enum LlmOutcome {
 /// `gate` must have `allowed_cidrs` populated before calling.
 pub async fn run(
     target: Ipv4Addr,
+    stimulus: &str,
     lineage: &mut Lineage,
     client: &dyn LlmClient,
     gate: &PolicyGate,
 ) -> Result<LlmOutcome> {
-    tracing::info!(%target, "LLM reasoning loop started");
+    tracing::info!(%target, stimulus, "LLM reasoning loop started");
 
-    let sensing_results = fingerprint(target).await;
+    let evidence_source = stimulus_to_evidence_source(stimulus);
+    let sensing_results = fingerprint(target, evidence_source).await;
     let port_scans: Vec<PortScan> = sensing_results
         .iter()
         .map(sensing_result_to_port_scan)
@@ -203,7 +205,19 @@ pub async fn run(
 /// `DiscoveryQuery` via [`sensing_result_to_port_scan`].  Profile params
 /// (batch_size, timeout_ms, tries, port_subset) come from the profile, not
 /// from hardcoded values, so tuning the profile tunes the fingerprint.
-async fn fingerprint(target: Ipv4Addr) -> Vec<physarum_scanner::SensingResult> {
+fn stimulus_to_evidence_source(stimulus: &str) -> ScanEvidenceSource {
+    match stimulus {
+        "icmp" => ScanEvidenceSource::IcmpStimulus,
+        "tcp-syn" => ScanEvidenceSource::TcpStimulus,
+        "ebpf" => ScanEvidenceSource::EbpfObservation,
+        _ => ScanEvidenceSource::ScheduledScan,
+    }
+}
+
+async fn fingerprint(
+    target: Ipv4Addr,
+    evidence_source: ScanEvidenceSource,
+) -> Vec<physarum_scanner::SensingResult> {
     let params = SensingProfile::StimulusTargeted.params();
     let port_list = PortList::explicit(
         params
@@ -225,7 +239,7 @@ async fn fingerprint(target: Ipv4Addr) -> Vec<physarum_scanner::SensingResult> {
                     IpAddr::V4(target),
                     sa.port(),
                     SensingProfile::StimulusTargeted,
-                    ScanEvidenceSource::IcmpStimulus,
+                    evidence_source,
                 )
             })
             .collect(),

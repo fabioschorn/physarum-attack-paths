@@ -267,7 +267,7 @@ async fn handle_candidate(
         // before giving up. Without LLM, fall through to dead-end scoring.
         if let Some(cfg) = llm {
             tracing::info!(%src_ip, stimulus, "port 22 closed — handing off to LLM reasoning loop");
-            match llm_loop::run(src_ip, lineage, cfg.client.as_ref(), &cfg.gate).await? {
+            match llm_loop::run(src_ip, stimulus, lineage, cfg.client.as_ref(), &cfg.gate).await? {
                 LlmOutcome::Propagated => {
                     tracing::info!(%src_ip, "LLM propagation succeeded");
                     lineage.save()?;
