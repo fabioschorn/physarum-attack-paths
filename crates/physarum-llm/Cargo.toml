@@ -1,6 +1,6 @@
 [package]
 name         = "physarum-llm"
-description  = "LLM-aware propagation reasoning — Phase 1 contracts (types, trait, policy, prompt)"
+description  = "LLM-aware propagation reasoning — contracts, MockLlmClient, OpenAI-compatible client"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
@@ -17,5 +17,5 @@ serde      = { workspace = true }
 serde_json = { workspace = true }
 anyhow     = { workspace = true }
 tracing    = { workspace = true }
-
-# Phase 3 will add: async-openai, tokio
+tokio      = { workspace = true }
+reqwest    = { workspace = true }
