@@ -51,7 +51,10 @@ pub async fn run(
     tracing::info!(%target, "LLM reasoning loop started");
 
     let sensing_results = fingerprint(target).await;
-    let port_scans: Vec<PortScan> = sensing_results.iter().map(sensing_result_to_port_scan).collect();
+    let port_scans: Vec<PortScan> = sensing_results
+        .iter()
+        .map(sensing_result_to_port_scan)
+        .collect();
     let os_hint = infer_os_hint_from_results(&sensing_results);
     let mut rejected: Vec<RejectedStrategy> = Vec::new();
 
@@ -253,16 +256,19 @@ fn sensing_result_to_port_scan(r: &physarum_scanner::SensingResult) -> PortScan 
 /// Uses the first `SensingResult` that carries an `os_hint`, converting
 /// `physarum_scanner::OsHintSource` → `physarum_llm::OsHintSource`.
 fn infer_os_hint_from_results(results: &[physarum_scanner::SensingResult]) -> Option<OsHint> {
-    results.iter().find_map(|r| r.os_hint.as_ref()).map(|h| OsHint {
-        guess: h.guess.clone(),
-        confidence: h.confidence,
-        source: match h.source {
-            ScanOsHintSource::SshBanner => OsHintSource::SshBanner,
-            ScanOsHintSource::HttpHeader => OsHintSource::HttpHeader,
-            ScanOsHintSource::ServiceBanner => OsHintSource::ServiceBanner,
-            ScanOsHintSource::Convention => OsHintSource::Convention,
-        },
-    })
+    results
+        .iter()
+        .find_map(|r| r.os_hint.as_ref())
+        .map(|h| OsHint {
+            guess: h.guess.clone(),
+            confidence: h.confidence,
+            source: match h.source {
+                ScanOsHintSource::SshBanner => OsHintSource::SshBanner,
+                ScanOsHintSource::HttpHeader => OsHintSource::HttpHeader,
+                ScanOsHintSource::ServiceBanner => OsHintSource::ServiceBanner,
+                ScanOsHintSource::Convention => OsHintSource::Convention,
+            },
+        })
 }
 
 // ── Lineage summary bridge ────────────────────────────────────────────────────

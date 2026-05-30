@@ -461,10 +461,15 @@ mod tests {
     #[test]
     fn top_ports_profile_uses_top_ports_subset() {
         let params = SensingProfile::TopPorts.params();
-        let subset = params.port_subset.expect("TopPorts must have a port subset");
+        let subset = params
+            .port_subset
+            .expect("TopPorts must have a port subset");
         assert!(subset.contains(&22), "port 22 must be in TopPorts subset");
         assert!(subset.contains(&80), "port 80 must be in TopPorts subset");
-        assert!(!params.skip_host_discovery, "TopPorts must not skip host discovery");
+        assert!(
+            !params.skip_host_discovery,
+            "TopPorts must not skip host discovery"
+        );
         // TopPorts: slower than Fast (lower batch_size) but same port coverage
         assert!(params.batch_size < SensingProfile::Fast.params().batch_size);
         assert!(params.timeout_ms > SensingProfile::Fast.params().timeout_ms);
