@@ -76,7 +76,7 @@ pub async fn list_candidate_discoveries(
             params
                 .agent_id
                 .as_deref()
-                .map_or(true, |id| c.discovered_by == id)
+                .is_none_or(|id| c.discovered_by == id)
         })
         .take(limit)
         .cloned()

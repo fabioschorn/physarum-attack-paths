@@ -60,14 +60,14 @@ pub async fn list_packet_observations(
             params
                 .agent_id
                 .as_deref()
-                .map_or(true, |id| obs.agent_id == id)
-                && params.protocol.as_deref().map_or(true, |proto| {
+                .is_none_or(|id| obs.agent_id == id)
+                && params.protocol.as_deref().is_none_or(|proto| {
                     serde_json::to_value(obs.protocol)
                         .ok()
                         .and_then(|v| v.as_str().map(|s| s.to_string()))
                         .is_some_and(|s| s.eq_ignore_ascii_case(proto))
                 })
-                && params.since.map_or(true, |since| obs.observed_at > since)
+                && params.since.is_none_or(|since| obs.observed_at > since)
         })
         .take(limit)
         .cloned()

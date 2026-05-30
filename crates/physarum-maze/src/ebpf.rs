@@ -1,9 +1,5 @@
 // eBPF stimulus module — Linux only.
-//
-// Attaches physarum_observer to tracepoint/sock/inet_sock_set_state and emits
-// the source IP of every inbound TCP connection from the 10.60/16 maze subnet.
-// The returned Receiver feeds the 5th arm of the agent's tokio::select! loop.
-#![cfg(target_os = "linux")]
+// cfg(target_os = "linux") is set on the `mod ebpf` declaration in main.rs.
 
 use anyhow::{Context, Result};
 use aya::{maps::RingBuf, programs::TracePoint, Ebpf};
