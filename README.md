@@ -490,7 +490,7 @@ For Rust-side dependencies of architectural significance:
 - `aya` — pure-Rust eBPF library
 - `clap` — CLI argument parsing
 - `reqwest` — HTTP client used by OpenAI-compatible client paths
-- `quinn` — QUIC transport *(planned)*/
+- `quinn` — QUIC transport *(planned)*
 - `ed25519-dalek` — signature scheme *(planned — Gate N)*
 
 ---
