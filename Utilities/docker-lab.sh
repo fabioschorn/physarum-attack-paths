@@ -3,12 +3,13 @@
 # docker-lab.sh — physarum-llm Docker Lab runner (Issue #106 Phase 5)
 #
 # What this script does:
-#   1. Compiles physarum-maze locally (cargo build --release)
-#   2. Builds the Docker image via Docker Cloud (cloud-expertsonline-physarum-attack-paths)
-#   3. Creates the lineage output directory
-#   4. Starts the two-container lab (docker compose up)
-#   5. Streams host-a logs in real time
-#   6. On exit (Ctrl-C or timeout) prints the lineage evidence
+#   1. Verifies local Rust toolchain is >= 1.86
+#   2. Compiles physarum-maze locally (cargo build --release)
+#   3. Builds the Docker image via Docker Cloud (cloud-expertsonline-physarum-attack-paths)
+#   4. Creates the lineage output directory
+#   5. Starts the two-container lab (docker compose up)
+#   6. Streams host-a logs in real time
+#   7. On exit (Ctrl-C or timeout) prints the lineage evidence
 #
 # Usage:
 #   ./Utilities/docker-lab.sh            # run the lab
@@ -30,6 +31,32 @@ DOCKERFILE="$DOCKER_DIR/physarum-maze.Dockerfile"
 LINEAGE_DIR="$DOCKER_DIR/lineage"
 IMAGE_TAG="physarum-maze:lab"
 CLOUD_BUILDER="cloud-expertsonline-physarum-attack-paths"
+MIN_RUST_VERSION="1.86.0"
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+version_ge() {
+    # Returns true when $1 >= $2 for dotted numeric versions such as 1.86.0.
+    [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
+
+check_rust_toolchain() {
+    if ! command -v rustc >/dev/null 2>&1; then
+        echo -e "  [${FAIL}] rustc not found. Install Rust ${MIN_RUST_VERSION} via rustup."
+        exit 1
+    fi
+
+    local version
+    version="$(rustc --version | awk '{print $2}')"
+
+    if ! version_ge "$version" "$MIN_RUST_VERSION"; then
+        echo -e "  [${FAIL}] Rust ${MIN_RUST_VERSION}+ required; found ${version}."
+        echo -e "        Run: rustup toolchain install ${MIN_RUST_VERSION}"
+        echo -e "        The repository also pins this via rust-toolchain.toml."
+        exit 1
+    fi
+
+    echo -e "  [${PASS}] rustc ${version}"
+}
 
 # ─── Argument handling ────────────────────────────────────────────────────────
 case "${1:-}" in
@@ -50,6 +77,11 @@ case "${1:-}" in
         exit 0
         ;;
 esac
+
+# ─── Step 0: Verify Rust toolchain ────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}── Step 0: verify Rust toolchain${NC}"
+check_rust_toolchain
 
 # ─── Step 1: Compile physarum-maze locally ─────────────────────────────────
 echo ""
@@ -79,7 +111,7 @@ echo -e "  [${PASS}] lineage dir: $LINEAGE_DIR"
 
 # ─── Step 4: Start lab ─────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}── Step 3: docker compose up${NC}"
+echo -e "${BOLD}── Step 4: docker compose up${NC}"
 echo -e "  [${INFO}] host-b: nginx:alpine (172.20.0.3, port 80 only)"
 echo -e "  [${INFO}] host-a: physarum-maze (172.20.0.2, --llm-endpoint mock-http)"
 echo -e "  [${INFO}] Press Ctrl-C to stop and view lineage evidence"
