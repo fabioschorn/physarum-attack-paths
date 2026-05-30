@@ -59,8 +59,8 @@ pub async fn list_flow_observations(
             params
                 .agent_id
                 .as_deref()
-                .map_or(true, |id| obs.agent_id == id)
-                && params.since.map_or(true, |since| obs.observed_at > since)
+                .is_none_or(|id| obs.agent_id == id)
+                && params.since.is_none_or(|since| obs.observed_at > since)
         })
         .take(limit)
         .cloned()
