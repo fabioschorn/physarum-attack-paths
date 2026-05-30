@@ -11,6 +11,7 @@ members = [
     "crates/physarum-ebpf-observer",    # Gate J   — userspace TCP flow observer
     "crates/physarum-packet-observer",  # Gate L.3 — userspace ICMP packet observer (tc ingress)
     "crates/physarum-maze",             # PF-1     — self-propagating maze agent (raw ICMP + keyless SSH)
+    "crates/physarum-llm",              # Issue #106 — LLM-aware propagation reasoning (Phase 1: contracts)
     # Future members (uncomment as crates are scaffolded):
     # "crates/physarum-graph",
     # "crates/physarum-coordinator",
