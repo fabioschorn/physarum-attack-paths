@@ -48,6 +48,11 @@ pub enum SensingProfile {
     /// Port subset: see [`TOP_PORTS`].
     Fast,
 
+    /// Same port subset as `Fast` but at moderate concurrency and longer timeout.
+    /// Inspired by `-F` — top-service coverage without aggressive timing.
+    /// Use when completeness of the `TOP_PORTS` set matters more than raw speed.
+    TopPorts,
+
     /// Richer service characterization: banner collection, larger port set.
     /// Slower but produces better evidence for LLM reasoning.
     Deep,
@@ -97,6 +102,13 @@ impl SensingProfile {
             Self::Fast => ProfileParams {
                 batch_size: 2_000,
                 timeout_ms: 1_000,
+                tries: 1,
+                port_subset: Some(TOP_PORTS),
+                skip_host_discovery: false,
+            },
+            Self::TopPorts => ProfileParams {
+                batch_size: 1_000,
+                timeout_ms: 2_000,
                 tries: 1,
                 port_subset: Some(TOP_PORTS),
                 skip_host_discovery: false,
@@ -447,11 +459,24 @@ mod tests {
     }
 
     #[test]
+    fn top_ports_profile_uses_top_ports_subset() {
+        let params = SensingProfile::TopPorts.params();
+        let subset = params.port_subset.expect("TopPorts must have a port subset");
+        assert!(subset.contains(&22), "port 22 must be in TopPorts subset");
+        assert!(subset.contains(&80), "port 80 must be in TopPorts subset");
+        assert!(!params.skip_host_discovery, "TopPorts must not skip host discovery");
+        // TopPorts: slower than Fast (lower batch_size) but same port coverage
+        assert!(params.batch_size < SensingProfile::Fast.params().batch_size);
+        assert!(params.timeout_ms > SensingProfile::Fast.params().timeout_ms);
+    }
+
+    #[test]
     fn all_profiles_have_nonzero_batch_size_and_timeout() {
         for profile in [
             SensingProfile::LowNoise,
             SensingProfile::Balanced,
             SensingProfile::Fast,
+            SensingProfile::TopPorts,
             SensingProfile::Deep,
             SensingProfile::StimulusTargeted,
             SensingProfile::NoDiscovery,

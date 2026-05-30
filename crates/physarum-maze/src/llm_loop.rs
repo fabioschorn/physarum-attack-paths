@@ -21,7 +21,10 @@ use physarum_llm::{
     PortScan, PortState, PropagationMethod, PropagationMethodClass, RejectedStrategy,
     TransportProtocol, MAX_ATTEMPTS,
 };
-use physarum_scanner::{PortList, Scanner};
+use physarum_scanner::{
+    result_from_open_port, EvidenceSource as ScanEvidenceSource, OsHintSource as ScanOsHintSource,
+    PortList, Scanner, SensingProfile,
+};
 
 use crate::lineage::Lineage;
 
@@ -47,14 +50,16 @@ pub async fn run(
 ) -> Result<LlmOutcome> {
     tracing::info!(%target, "LLM reasoning loop started");
 
-    let scan_results = fingerprint(target).await;
+    let sensing_results = fingerprint(target).await;
+    let port_scans: Vec<PortScan> = sensing_results.iter().map(sensing_result_to_port_scan).collect();
+    let os_hint = infer_os_hint_from_results(&sensing_results);
     let mut rejected: Vec<RejectedStrategy> = Vec::new();
 
     for attempt_number in 1..=MAX_ATTEMPTS {
         let query = DiscoveryQuery {
             target: IpAddr::V4(target),
-            ports: scan_results.clone(),
-            os_hint: infer_os_hint(&scan_results),
+            ports: port_scans.clone(),
+            os_hint: os_hint.clone(),
             lineage_summary: build_lineage_summary(lineage),
             methods_tried: lineage
                 .llm_attempts
@@ -189,23 +194,36 @@ pub async fn run(
 
 // ── Scanner fingerprint ───────────────────────────────────────────────────────
 
-async fn fingerprint(target: Ipv4Addr) -> Vec<PortScan> {
-    let ports = PortList::explicit(vec![22, 80, 443, 8080, 8443, 3000, 5000, 9000]);
-    match Scanner::new(vec![IpAddr::V4(target)], ports)
-        .batch_size(50)
-        .timeout_ms(2_000)
+/// Fingerprint `target` using `SensingProfile::StimulusTargeted`.
+///
+/// Returns `SensingResult` — structured evidence that feeds directly into
+/// `DiscoveryQuery` via [`sensing_result_to_port_scan`].  Profile params
+/// (batch_size, timeout_ms, tries, port_subset) come from the profile, not
+/// from hardcoded values, so tuning the profile tunes the fingerprint.
+async fn fingerprint(target: Ipv4Addr) -> Vec<physarum_scanner::SensingResult> {
+    let params = SensingProfile::StimulusTargeted.params();
+    let port_list = PortList::explicit(
+        params
+            .port_subset
+            .unwrap_or(physarum_scanner::STIMULUS_PORTS)
+            .to_vec(),
+    );
+    match Scanner::new(vec![IpAddr::V4(target)], port_list)
+        .batch_size(params.batch_size)
+        .timeout_ms(params.timeout_ms)
+        .tries(params.tries)
         .run()
         .await
     {
         Ok(open) => open
             .iter()
-            .map(|sa| PortScan {
-                port: sa.port(),
-                protocol: TransportProtocol::Tcp,
-                state: PortState::Open,
-                service_guess: guess_service(sa.port()),
-                banner: None,
-                version_hint: None,
+            .map(|sa| {
+                result_from_open_port(
+                    IpAddr::V4(target),
+                    sa.port(),
+                    SensingProfile::StimulusTargeted,
+                    ScanEvidenceSource::IcmpStimulus,
+                )
             })
             .collect(),
         Err(e) => {
@@ -215,27 +233,36 @@ async fn fingerprint(target: Ipv4Addr) -> Vec<PortScan> {
     }
 }
 
-fn guess_service(port: u16) -> Option<String> {
-    match port {
-        22 => Some("ssh".into()),
-        80 => Some("http".into()),
-        443 => Some("https".into()),
-        8080 | 8443 => Some("http-alt".into()),
-        3000 | 5000 | 9000 => Some("http-app".into()),
-        _ => None,
+/// Convert a `physarum_scanner::SensingResult` to a `physarum_llm::PortScan`.
+///
+/// `banner_or_handshake_summary` maps to `PortScan::banner`.
+/// Only TCP open ports are expected here (produced by `result_from_open_port`).
+fn sensing_result_to_port_scan(r: &physarum_scanner::SensingResult) -> PortScan {
+    PortScan {
+        port: r.port,
+        protocol: TransportProtocol::Tcp,
+        state: PortState::Open,
+        service_guess: r.service_guess.clone(),
+        banner: r.banner_or_handshake_summary.clone(),
+        version_hint: r.version_hint.clone(),
     }
 }
 
-fn infer_os_hint(ports: &[PortScan]) -> Option<OsHint> {
-    if ports.iter().any(|p| p.port == 22) {
-        Some(OsHint {
-            guess: "Linux".into(),
-            confidence: 0.6,
-            source: OsHintSource::Convention,
-        })
-    } else {
-        None
-    }
+/// Derive an `OsHint` from the sensing layer's structured evidence.
+///
+/// Uses the first `SensingResult` that carries an `os_hint`, converting
+/// `physarum_scanner::OsHintSource` → `physarum_llm::OsHintSource`.
+fn infer_os_hint_from_results(results: &[physarum_scanner::SensingResult]) -> Option<OsHint> {
+    results.iter().find_map(|r| r.os_hint.as_ref()).map(|h| OsHint {
+        guess: h.guess.clone(),
+        confidence: h.confidence,
+        source: match h.source {
+            ScanOsHintSource::SshBanner => OsHintSource::SshBanner,
+            ScanOsHintSource::HttpHeader => OsHintSource::HttpHeader,
+            ScanOsHintSource::ServiceBanner => OsHintSource::ServiceBanner,
+            ScanOsHintSource::Convention => OsHintSource::Convention,
+        },
+    })
 }
 
 // ── Lineage summary bridge ────────────────────────────────────────────────────
