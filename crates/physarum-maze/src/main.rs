@@ -7,6 +7,7 @@ mod discovery;
 mod ebpf;
 mod icmp;
 mod lineage;
+mod llm_loop;
 mod propagation;
 mod tcp;
 
@@ -59,6 +60,32 @@ pub struct Cli {
     /// Interval in seconds between periodic /24 TCP-connect subnet discovery runs
     #[arg(long, default_value_t = 60, env = "PHYSARUM_DISCOVERY_INTERVAL")]
     pub discovery_interval_secs: u64,
+
+    // ── LLM reasoning flags (all optional — disabled by default) ───────────
+    /// OpenAI-compatible LLM endpoint (e.g. http://localhost:11434 for Ollama).
+    /// When absent, LLM reasoning is disabled and the organism falls back to
+    /// the standard dead-end scoring for targets without port 22.
+    #[arg(long, env = "PHYSARUM_LLM_ENDPOINT")]
+    pub llm_endpoint: Option<String>,
+
+    /// LLM model name passed to the endpoint (e.g. "gpt-4o", "llama3").
+    #[arg(long, default_value = "gpt-4o-mini", env = "PHYSARUM_LLM_MODEL")]
+    pub llm_model: String,
+
+    /// LLM API key — read from environment only, never from CLI positional args.
+    /// Set via LLM_API_KEY in the environment; do not pass on the command line.
+    #[arg(long, env = "LLM_API_KEY", hide = true)]
+    pub llm_api_key: Option<String>,
+
+    /// LLM request timeout in milliseconds.
+    #[arg(long, default_value_t = 30_000, env = "PHYSARUM_LLM_TIMEOUT_MS")]
+    pub llm_timeout_ms: u64,
+
+    /// CIDR allowed for LLM-assisted propagation attempts (e.g. 10.0.0.0/8).
+    /// Must be set when --llm-endpoint is active; targets outside this CIDR
+    /// are rejected by the policy gate regardless of LLM recommendation.
+    #[arg(long, env = "PHYSARUM_LLM_ALLOWED_CIDR")]
+    pub llm_allowed_cidr: Option<String>,
 }
 
 #[tokio::main]

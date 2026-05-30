@@ -34,6 +34,12 @@ if-addrs = "0.7"
 # /24 subnet and targeted port discovery (internal TCP-connect scanner)
 physarum-scanner = { path = "../physarum-scanner" }
 
+# LLM-aware propagation reasoning — disabled by default unless --llm-endpoint is set
+physarum-llm = { path = "../physarum-llm" }
+
+# HTTP execution in LLM bootstrap steps (HttpGet / HttpPost actions)
+reqwest = { workspace = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # eBPF ring buffer reader — same version as physarum-ebpf-observer
 aya     = { version = "0.13", features = ["async_tokio"] }
