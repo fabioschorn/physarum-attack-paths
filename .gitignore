@@ -64,3 +64,6 @@ examples/aws-lab/terraform/*.tfvars
 
 # ── TLA+ toolchain binaries (download locally to run TLC) ────────────────────
 formal/tla/tla2tools.jar
+
+# ── Docker Lab runtime output (not source) ────────────────────────────────────
+docker/lineage/
