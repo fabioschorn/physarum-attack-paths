@@ -28,7 +28,9 @@ All 7 design gaps from the pre-implementation review were resolved before any co
 - **Without `--llm-endpoint`**: current physarum-maze propagation behavior must remain **identical** (no behavioral change)
 - **With `--llm-endpoint`**: LLM reasoning is enabled only under explicit lab policy configuration (`PolicyGate::lab_default()` with CIDRs populated)
 - `--llm-api-key` is **never stored in lineage JSON** — injected locally via `$LLM_API_KEY` at runtime
-- `ephemeral_private_key_pem` in `BootstrapAction::ScpPullFromSource` travels in the bootstrap plan at **runtime only** — never written to lineage; only `key_id` (a hash of the public key) is recorded in `LlmAttemptEvidence` for audit
+- **Secret reference model** (Manager review, 2026-05-29): raw key material (`ephemeral_private_key_pem`) was removed from `BootstrapAction::ScpPullFromSource`. Replaced with `secret_ref: SecretRef { key_id, source }`. The LLM requests a capability class; the executor resolves the secret locally at runtime. Raw PEM, credentials, or API tokens must not appear in any strategy contract or lineage record.
+- **`Custom` disabled by default**: `PropagationMethodClass::Custom` is excluded from `PolicyGate::lab_default().allowed_methods`. Free-form shell is not the default; must be explicitly enabled in lab configuration.
+- **Attempt numbering is one-based**: `attempt_number` in `DiscoveryQuery`, `RejectedStrategy`, and `LlmAttemptEvidence` counts from 1. `PolicyGate::evaluate()` rejects when `attempt_number > max_attempts` (attempt 6 is valid; attempt 7 is not).
 
 ---
 

@@ -1,6 +1,30 @@
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
+// ── Secret reference ──────────────────────────────────────────────────────────
+
+/// A reference to a secret held by the local executor.
+///
+/// The LLM may request a capability class (e.g. an ephemeral SSH key for
+/// reverse-pull propagation) but must never emit, carry, or store the secret
+/// material itself. The executor resolves this reference locally at runtime.
+/// Raw PEM, credentials, or API tokens must not appear in any strategy contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretRef {
+    /// Short identifier for the audit trail — typically a hash of the public key.
+    /// Safe to record in lineage; not the secret itself.
+    pub key_id: String,
+    pub source: SecretSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SecretSource {
+    /// Executor generates the key pair locally before the RCE fires.
+    RuntimeGenerated,
+    /// Key exists in the local agent's secret store (reserved for future use).
+    LocalAgentSecretStore,
+}
+
 // ── Scanner fingerprint ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +79,8 @@ pub struct DiscoveryQuery {
     /// Strategies rejected by the policy gate on previous attempts.
     /// Fed back to the LLM so it does not re-propose blocked methods (Gap 1).
     pub rejected_strategies: Vec<RejectedStrategy>,
+    /// One-based: first attempt is 1, last valid attempt is `max_attempts`.
+    /// Values above `max_attempts` are rejected by `PolicyGate::evaluate()`.
     pub attempt_number: u8,
 }
 
@@ -71,6 +97,7 @@ pub struct LineageSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RejectedStrategy {
+    /// One-based attempt number at which this strategy was rejected.
     pub attempt_number: u8,
     pub method_class: PropagationMethodClass,
     pub rejection_reason: PolicyRejectionReason,
@@ -93,7 +120,7 @@ pub enum PolicyRejectionReason {
     ConfidenceBelowThreshold,
     TargetOutsideAllowedCidr,
     MaxAttemptsExceeded,
-    SecretMaterialDetected,
+    InvalidSecretReference,
     ArtifactTypeNotAllowed,
     ExploitNotEnabledForLabMode,
     Custom(String),
@@ -128,6 +155,8 @@ pub enum PropagationMethod {
     Exploit {
         cve: String,
     },
+    /// Disabled by default in `PolicyGate::lab_default()`.
+    /// Must be explicitly enabled by lab policy configuration.
     Custom {
         description: String,
     },
@@ -192,27 +221,24 @@ pub enum BootstrapAction {
     /// B → A reverse-pull propagation pattern.
     ///
     /// Used when Host B's inbound SSH blocks Host A but outbound is open.
-    /// The RCE delivers a small bootstrap script to Host B containing an
-    /// ephemeral private key. Host B connects OUT to Host A and pulls the
-    /// physarum-maze binary via SCP.
+    /// The RCE delivers a small bootstrap script to Host B. Host B connects
+    /// OUT to Host A and pulls the physarum-maze binary via SCP.
     ///
-    /// Key lifecycle (Host A):
+    /// Key lifecycle (resolved by the executor, not the LLM):
     ///   1. Generate ephemeral ed25519 key pair before RCE fires.
     ///   2. Add public key to Host A's authorized_keys (temporary).
-    ///   3. Embed private key in the bootstrap script delivered via RCE.
-    ///   4. After propagation succeeds or times out — remove public key.
+    ///   3. Inject private key into the bootstrap script at runtime.
+    ///   4. Remove public key after propagation succeeds or times out.
     ///
-    /// The private key MUST NOT be stored in lineage. Only the key_id
-    /// (a short hash of the public key) is recorded for audit.
+    /// The LLM specifies capability class via `secret_ref`.
+    /// Raw key material never travels through the strategy contract or lineage.
     ScpPullFromSource {
         source_ip: String,
         source_path: String,
         dest_path: String,
-        /// Ephemeral ed25519 private key (PEM) for this propagation session.
-        /// Injected into the RCE script at runtime; never written to lineage.
-        ephemeral_private_key_pem: String,
-        /// Short identifier recorded in lineage instead of the full key.
-        key_id: String,
+        /// Reference to the ephemeral key — not the key itself.
+        /// The executor generates and injects the actual key material locally.
+        secret_ref: SecretRef,
     },
     SshCommand {
         command: String,
@@ -234,6 +260,7 @@ pub struct ExpectedResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmAttemptEvidence {
     pub target: String,
+    /// One-based attempt number matching `DiscoveryQuery::attempt_number`.
     pub attempt_number: u8,
     pub method_class: PropagationMethodClass,
     pub artifact_type: ArtifactType,

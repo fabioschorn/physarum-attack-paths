@@ -15,6 +15,6 @@ pub use types::{
     ArtifactType, BootstrapAction, BootstrapPlan, BootstrapStep, DiscoveryQuery,
     ExecutionResultSummary, ExpectedResult, HttpMethod, LineageSummary, LlmAttemptEvidence,
     NextAction, OsHint, OsHintSource, PolicyDecision, PolicyRejectionReason, PortScan, PortState,
-    PropagationMethod, PropagationMethodClass, PropagationStrategy, RejectedStrategy, SshAuth,
-    TransportProtocol,
+    PropagationMethod, PropagationMethodClass, PropagationStrategy, RejectedStrategy, SecretRef,
+    SecretSource, SshAuth, TransportProtocol,
 };
