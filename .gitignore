@@ -10,6 +10,9 @@ Desktop.ini
 
 # ── Rust build output (generated — never commit) ──────────────────────────────
 target/
+# Sub-workspace Cargo.lock files (eBPF and xtask use separate compilation targets)
+crates/physarum-ebpf-observer-ebpf/Cargo.lock
+xtask/Cargo.lock
 
 # rustfmt backup files (created with --backup flag)
 **/*.rs.bk
@@ -66,6 +69,10 @@ examples/aws-lab/terraform/terraform.tfstate
 examples/aws-lab/terraform/terraform.tfstate.backup
 examples/aws-lab/terraform/.terraform/
 examples/aws-lab/terraform/*.tfvars
+examples/aws-lab/terraform-pf2/terraform.tfstate
+examples/aws-lab/terraform-pf2/terraform.tfstate.backup
+examples/aws-lab/terraform-pf2/.terraform/
+examples/aws-lab/terraform-pf2/*.tfvars
 
 # ── TLA+ toolchain binaries (download locally to run TLC) ────────────────────
 formal/tla/tla2tools.jar
