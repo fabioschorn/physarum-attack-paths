@@ -44,6 +44,11 @@ dist/
 # ── Temporários locais (gerados por scripts internos, nunca commitados) ────────
 tmp/
 
+# ── Upstream source clones for local analysis only (never commit) ──────────────
+nuclei/
+Nuclei/
+projectdiscovery-nuclei/
+
 # ── AWS lab SSH keys (never commit private or public key material) ─────────────
 examples/aws-lab/.keys/
 examples/aws-lab/*.pem
