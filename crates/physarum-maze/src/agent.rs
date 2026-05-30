@@ -57,6 +57,9 @@ impl LlmConfig {
 
         let client: Arc<dyn physarum_llm::LlmClient> = if endpoint == "mock" {
             Arc::new(MockLlmClient::no_path("mock mode — no real LLM"))
+        } else if endpoint == "mock-http" {
+            // Docker Lab: real HTTP GET executed against target — proves full pipeline
+            Arc::new(MockLlmClient::http_probe_with_plan("/", 0.9))
         } else {
             let api_key = cli.llm_api_key.clone().unwrap_or_default();
             match OpenAiCompatibleClient::new(

@@ -1,0 +1,60 @@
+# physarum-llm Docker Lab — Issue #106 Phase 5
+#
+# Two-container lab that proves the full reasoning cycle:
+#
+#   host-a (physarum-maze + LLM enabled)
+#     │  senses host-b via /24 periodic discovery
+#     │  port 22 closed on host-b → Causal Continuity Paradox
+#     │  LLM reasoning loop fires (mock-http → HTTP GET strategy)
+#     │  PolicyGate accepts (172.20.0.0/24 CIDR, confidence 0.9)
+#     │  bootstrap: HTTP GET http://172.20.0.3/ → 200 OK
+#     └→ LlmAttemptEvidence recorded in /tmp/physarum-lineage.json
+#
+#   host-b (nginx — port 80 open, port 22 closed)
+#
+# Run with: ./Utilities/docker-lab.sh
+#
+# To inspect lineage after the run:
+#   cat lineage/physarum-lineage.json | python3 -m json.tool
+
+networks:
+  physarum-lab:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+services:
+
+  # ── Host B — HTTP-only target ────────────────────────────────────────────────
+  host-b:
+    image: nginx:alpine
+    container_name: physarum-host-b
+    networks:
+      physarum-lab:
+        ipv4_address: 172.20.0.3
+    # Port 22 deliberately NOT exposed — triggers LLM reasoning on host-a
+
+  # ── Host A — physarum-maze agent with LLM enabled ────────────────────────────
+  host-a:
+    image: physarum-maze:lab
+    container_name: physarum-host-a
+    depends_on:
+      - host-b
+    networks:
+      physarum-lab:
+        ipv4_address: 172.20.0.2
+    cap_add:
+      - NET_RAW    # raw ICMP socket
+      - NET_ADMIN  # interface binding
+    environment:
+      RUST_LOG: "physarum_maze=info,physarum_llm=info"
+    command: >
+      --mode seed
+      --interface eth0
+      --llm-endpoint mock-http
+      --llm-allowed-cidr 172.20.0.0/24
+      --discovery-interval-secs 5
+      --stimulus-timeout-secs 90
+    volumes:
+      - ./lineage:/tmp   # lineage JSON written here for inspection
