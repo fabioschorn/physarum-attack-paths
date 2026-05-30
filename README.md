@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired attack-path organism for adaptive security graph discovery.** `physarum-attack-paths` is a Rust research prototype that turns distributed network evidence into a living attack-path graph. It combines adaptive edge scoring (`Q_ij → q_ema → D_ij`), active probing, eBPF/packet-level stimulus observation, native discovery through `physarum-scanner`, and controlled lab propagation. PF-1 and PF-2 validated the current organism model in real AWS VPC labs: one seed expanded through an unknown maze, re-sensed new structure, recognized an already-colonized node, and preserved a secondary conduit.
+> **Bio-inspired attack-path organism for adaptive security graph discovery.** `physarum-attack-paths` is a Rust research prototype that turns distributed network evidence into a living attack-path graph. It combines adaptive edge scoring (`Q_ij → q_ema → D_ij`), active probing, eBPF/packet-level stimulus observation, native discovery through `physarum-scanner`, structured sensing profiles, LLM-assisted lab reasoning, and controlled lab propagation. PF-1 and PF-2 validated the current organism model in real AWS VPC labs: one seed expanded through an unknown maze, re-sensed new structure, recognized an already-colonized node, and preserved a secondary conduit.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](https://github.com/fabioschorn/physarum-attack-paths/releases)
 [![CI](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml/badge.svg)](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml)
 
-`physarum-attack-paths` is a distributed system for discovering, validating, and continuously refining cybersecurity attack paths across heterogeneous environments. It replaces a static, scanner-centric view of the network with a **living topology**: local observations and validation outcomes reinforce useful paths while unused or blocked paths decay.
+`physarum-attack-paths` is a distributed system for discovering, validating, and continuously refining cybersecurity attack paths across heterogeneous environments. It replaces a static, scanner-centric view of the network with a **living topology**: local observations, bounded discovery, validation outcomes, and structured evidence reinforce useful paths while unused or blocked paths decay.
 
 The project is inspired by *Physarum polycephalum*, a slime mold that forms efficient transport networks without central control. In this project, the network graph is **observed**, not declared. Layer assignment, path preference, and drift emerge from behavior.
 
@@ -23,13 +23,13 @@ Allowed scope: local labs, Docker labs, and owned AWS lab VPCs.
 Not allowed: public targets, Internet scanning, production deployment, or unbounded propagation.
 ```
 
-PF-1/PF-2 use intentionally weak lab conditions, including empty-password SSH, to validate organism behavior in a closed environment. That is not a production deployment pattern. Secure identity, mTLS, signed lineage, and stronger trust controls are planned for Gate N after Issue #106.
+PF-1/PF-2 use intentionally weak lab conditions, including empty-password SSH, to validate organism behavior in a closed environment. That is not a production deployment pattern. `physarum-llm` and the Docker LLM lab are disabled unless explicitly configured. Secure identity, mTLS, signed lineage, and stronger trust controls remain planned for Gate N after the LLM/evidence loop stabilizes.
 
 ---
 
 ## Current status
 
-**Research prototype** — the adaptive graph, sensing, discovery, and PF organism labs are implemented and validated.
+**Research prototype** — the adaptive graph, sensing, discovery, PF organism labs, structured scanner evidence, and initial LLM Docker Lab loop are implemented and validated in controlled environments.
 
 | Area | State |
 |---|---|
@@ -37,9 +37,12 @@ PF-1/PF-2 use intentionally weak lab conditions, including empty-password SSH, t
 | Coordinator and peer-probing agent (`physarum-server`, `physarum-agent`) | ✔ implemented |
 | Flow and packet observation (`physarum-ebpf-observer`, `physarum-packet-observer`) | ✔ implemented — AWS EC2 validated, kernel 6.18 |
 | Native discovery engine (`physarum-scanner`) | ✔ implemented — Gate L |
+| Structured scanner sensing (`SensingProfile`, `SensingResult`) | ✔ implemented — Issue #114 |
 | Probe execution library (`physarum-probe`) | ✔ implemented |
 | Role-fluid runtime (`physarum-node`, `physarum-node-runtime`) | ✔ implemented — Gate M/M.4 |
 | Self-propagating maze organism (`physarum-maze`) | ✔ implemented — PF-1/PF-2 |
+| `physarum-llm` contracts, mock/client, and maze hook | ✔ implemented — Issue #106 phases 1–3/initial integration |
+| Two-container LLM Docker Lab | ✔ implemented — lab-only, mock-first validation |
 | Flow observations API (`POST/GET /flow-observations`) | ✔ implemented — Gate I |
 | Adaptive path scoring (`GET /paths`) | ✔ implemented — Gate K.1 |
 | TLA+ formal models (`formal/tla`) | ✔ implemented — single-edge, multi-agent, negative-log |
@@ -47,8 +50,8 @@ PF-1/PF-2 use intentionally weak lab conditions, including empty-password SSH, t
 | AWS Mode 1 / Mode 2 / Gate K/K.1 labs | ✔ validated |
 | AWS PF-1 organic expansion maze | ✔ validated — 7-node autonomous propagation lab |
 | AWS PF-2 adaptive re-routing | ✔ validated — 9-node lateral discovery + TCP stimulus + secondary conduit lab |
-| `physarum-llm` | planned — Issue #106 |
-| Gate N secure organism identity | planned after Issue #106 |
+| `physarum-sporangium` native Nuclei-inspired evidence engine | next — Issue #115 |
+| Gate N secure organism identity | planned after Issue #106 stabilizes |
 
 See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the canonical architecture and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria. Longer-term research ideas live in [General-Docs/INSIGHTS_AND_BRAINSTORM.md](./General-Docs/INSIGHTS_AND_BRAINSTORM.md).
 
@@ -108,7 +111,7 @@ The system does **not** simulate slime mold. It borrows the mathematical shape o
 
 ### Current prototype
 
-The implemented prototype has three cooperating layers.
+The implemented prototype now has four cooperating layers.
 
 ```text
 1. Adaptive graph layer
@@ -120,13 +123,18 @@ The implemented prototype has three cooperating layers.
    physarum-packet-observer
    physarum-scanner
    physarum-probe
-   -> TCP/ICMP stimulus capture, physarum-scanner discovery, probe execution
+   -> TCP/ICMP stimulus capture, structured scanner evidence, probe execution
 
 3. Organism runtime layer
    physarum-node
    physarum-node-runtime
    physarum-maze
    -> runtime consolidation, autonomous maze propagation, lineage memory
+
+4. Reasoning and evidence layer
+   physarum-llm
+   physarum-sporangium (next)
+   -> policy-gated reasoning over structured sensing and vulnerability-pattern evidence
 ```
 
 At the graph layer, agents produce evidence and the coordinator turns that evidence into adaptive edge conductivity:
@@ -138,7 +146,7 @@ agents register -> agents probe -> reports arrive -> Q_ij -> q_ema -> D_ij -> /p
 At the sensing layer, nodes can discover candidate corridors instead of relying only on a predeclared peer list:
 
 ```text
-TCP/ICMP stimulus -> candidate host -> scanner/probe -> edge evidence
+TCP/ICMP/eBPF stimulus -> candidate host -> SensingProfile -> SensingResult -> edge evidence
 ```
 
 At the organism layer, `physarum-maze` validated the current pre-final behavior in AWS:
@@ -148,7 +156,9 @@ PF-1: one seed expands through a 7-node maze and records lineage.
 PF-2: the organism re-senses new structure, handles TCP stimulus, avoids duplicate propagation into an already-colonized node, and records a secondary conduit.
 ```
 
-The current architecture is therefore no longer only a fixed server/client prototype. It is a research organism composed of graph memory, local senses, bounded discovery, propagation, and lineage.
+At the reasoning layer, `physarum-llm` now provides lab-only contracts, a mock/client path, and a Docker Lab hook for the Causal Continuity Paradox: what should the organism do when it can sense a host but cannot cross it through the validated SSH/SCP path?
+
+The current architecture is therefore no longer only a fixed server/client prototype. It is a research organism composed of graph memory, local senses, bounded discovery, structured evidence, lab-only reasoning, propagation, and lineage.
 
 ### Current limitations
 
@@ -156,10 +166,11 @@ The current organism is intentionally constrained:
 
 ```text
 propagation is lab-only
-SSH-based propagation is the only validated propagation path
+SSH-based propagation remains the only AWS-validated propagation path
+LLM-assisted behavior is lab-only and disabled by default
+Nuclei-inspired evidence enrichment is next, not yet integrated
 lineage is structured but not yet cryptographically signed
 node identity is not yet mTLS-backed
-LLM-assisted propagation is not implemented
 ```
 
 These limitations are deliberate and tracked in the roadmap.
@@ -227,7 +238,9 @@ This is a high-level map of the repository. It is intentionally not exhaustive; 
 ```text
 crates/
   Rust workspace crates for protocol types, coordinator APIs, agents, observers,
-  scanners, probe execution, node runtime, and the maze organism.
+  scanners, structured sensing, probe execution, node runtime, LLM contracts,
+  and the maze organism. The next native evidence-pattern crate is planned as
+  crates/physarum-sporangium.
 
 examples/
   Local, Docker, and AWS validation labs, including the PF-1/PF-2 organism labs.
@@ -239,11 +252,13 @@ General-Docs/
   Canonical architecture, quality gates, design notes, and research/backlog ideas.
 
 Utilities/
-  Developer build, validation, distribution, and release helper scripts.
+  Developer build, validation, distribution, Docker Lab, and release helper scripts.
 
 .github/
   CI and release automation.
 ```
+
+Local upstream source clones used for analysis, such as `nuclei/`, are ignored by `.gitignore` and must not be committed. Native behavior should be ported into Rust workspace crates instead of vendoring external projects.
 
 ---
 
@@ -253,6 +268,7 @@ Utilities/
 |---|---|---|
 | `examples/local-lab` | A/B/C coordinator and agents on localhost | ✔ implemented |
 | `examples/docker-lab` | A/B/C/D agent graph in Docker Compose | ✔ implemented |
+| `docker/docker-compose-lab.yml` + `Utilities/docker-lab.sh` | Two-container `physarum-maze` + mock LLM Docker Lab | ✔ implemented |
 | `examples/aws-lab/terraform` | EC2/VPC Mode 1, Mode 2, tc/netem, Gate K/K.1 | ✔ validated |
 | `examples/aws-lab/terraform-pf1` | 7-node autonomous expansion maze | ✔ validated |
 | `examples/aws-lab/terraform-pf2` | 9-node adaptive re-routing with TCP stimulus and secondary conduits | ✔ validated |
@@ -266,12 +282,14 @@ Utilities/
 
 ### Prerequisites
 
-- Rust 1.86 or later
+- Rust 1.86 or later; the repository pins Rust 1.86.0 through `rust-toolchain.toml`
 - Docker Desktop ≥ 4.25 or Docker Engine ≥ 24 with Compose v2
 - `curl` and `jq`
 - macOS or Linux on x86_64 / ARM64
 
 ### Docker lab
+
+Classic A/B/C/D graph lab:
 
 ```bash
 cd examples/docker-lab
@@ -289,6 +307,17 @@ Stop and clean up:
 ```bash
 docker compose down
 ```
+
+### LLM Docker lab
+
+Two-container lab for the `physarum-maze` + mock LLM reasoning path:
+
+```bash
+./Utilities/docker-lab.sh --clean
+./Utilities/docker-lab.sh
+```
+
+This lab is controlled and mock-first. It validates the policy-gated reasoning loop without enabling production behavior.
 
 ### Local lab
 
@@ -336,7 +365,7 @@ curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d' | jq
 
 ## Development workflow
 
-The `Utilities/` directory standardizes environment checks, builds, tests, and releases.
+The `Utilities/` directory standardizes environment checks, builds, tests, Docker Lab execution, and releases.
 
 ```bash
 ./Utilities/check-env.sh
@@ -366,7 +395,7 @@ Git helper scripts live under `git-scripts/`:
 
 ## Roadmap
 
-The current prototype has completed the component gates through Gate M and the pre-final organism labs PF-1/PF-2.
+The current prototype has completed the component gates through Gate M, the PF-1/PF-2 organism labs, the initial `physarum-llm` Docker Lab path, and Issue #114 structured scanner sensing.
 
 | Phase | Focus | State |
 |---|---|---|
@@ -380,18 +409,55 @@ The current prototype has completed the component gates through Gate M and the p
 | Gate M/M.4 | `physarum-node` runtime convergence and probe consolidation | ✔ done |
 | PF-1 | Organic expansion maze | ✔ done |
 | PF-2 | Adaptive re-routing and secondary conduits | ✔ done |
-| Issue #106 | LLM-aware propagation design for the Causal Continuity Paradox | planned |
-| Gate N.0 / Issue #89 | Secure organism identity, mTLS, and lineage threat model | planned after #106 |
+| Issue #106 | LLM-aware reasoning for the Causal Continuity Paradox | active — contracts, mock/client, maze hook, Docker Lab |
+| Issue #114 | Organism-native scanner sensing layer | ✔ done |
+| Issue #115 | `physarum-sporangium`: native Nuclei-inspired evidence engine | next |
+| Gate N.0 / Issue #89 | Secure organism identity, mTLS, and lineage threat model | planned after #106 stabilizes |
 
 ---
 
 ## Planned evolution
 
+### Issue #115 — physarum-sporangium
+
+After Issue #114, the next sensing layer is a native Nuclei-inspired evidence engine named `physarum-sporangium`.
+
+The goal is to study useful Nuclei concepts and port the relevant behavior into native Rust, not to vendor or permanently shell out to an upstream clone.
+
+```text
+Nuclei-inspired capability -> physarum-sporangium native Rust evidence patterns
+```
+
+The local upstream Nuclei clone, if present, is analysis material only and must not be committed. The expected path is:
+
+```text
+analyze Nuclei architecture -> port concepts to Rust -> emit PatternFinding -> feed DiscoveryQuery -> remove local clone
+```
+
+Initial focus:
+
+```text
+template model
+matcher model
+extractor model
+severity hints
+structured PatternFinding output
+bounded runner interfaces
+Docker Lab / mock evidence first
+```
+
 ### Issue #106 — Causal Continuity Paradox
 
-The organism is currently confined to hosts reachable through the validated SSH/SCP lab propagation path. If a host is reachable only through a non-SSH service, the organism may observe the host but cannot yet cross it.
+The organism is currently AWS-validated through the SSH/SCP lab propagation path. If a host is reachable only through a non-SSH service, the organism may observe the host but needs a policy-gated reasoning loop to decide what kind of controlled lab action is allowed.
 
-Issue #106 explores whether a lab-only, safety-gated `physarum-llm` component can select context-specific propagation strategies from observed ports, banners, and OS hints. This is not implemented and remains pending design and safety review.
+Issue #106 now has implemented contracts, a mock/client path, schema tests, an initial `physarum-maze` hook, and a two-container Docker Lab. The next step is to make `physarum-llm` consume richer evidence:
+
+```text
+SensingResult from physarum-scanner
+PatternFinding from physarum-sporangium
+```
+
+All LLM-driven behavior remains lab-only, bounded, policy-gated, and disabled by default.
 
 ### Gate N — secure organism identity
 
@@ -423,8 +489,8 @@ For Rust-side dependencies of architectural significance:
 - `petgraph` — graph data structures
 - `aya` — pure-Rust eBPF library
 - `clap` — CLI argument parsing
-- `async-openai` — OpenAI-compatible API client *(planned — physarum-llm)*
-- `quinn` — QUIC transport *(planned)*
+- `reqwest` — HTTP client used by OpenAI-compatible client paths
+- `quinn` — QUIC transport *(planned)*/
 - `ed25519-dalek` — signature scheme *(planned — Gate N)*
 
 ---
