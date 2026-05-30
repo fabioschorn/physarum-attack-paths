@@ -13,14 +13,17 @@ env:
   RUST_BACKTRACE: 1
   BINARY_NAME: physarum-server
 
+# Necessário para criar releases e fazer upload de assets.
+permissions:
+  contents: write
+
 jobs:
   # ── Etapa 1: cria o rascunho da Release no GitHub ──────────────────────────
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      version:    ${{ steps.get_version.outputs.version }}
+      version: ${{ steps.get_version.outputs.version }}
 
     steps:
       - name: Checkout
@@ -31,31 +34,31 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Create Release (draft)
-        id: create_release
-        uses: actions/create-release@v1
+        run: |
+          cat > /tmp/release-notes.md << EOF
+          ## physarum-attack-paths ${GITHUB_REF_NAME}
+
+          ### Download
+
+          | Plataforma   | Arquivo |
+          |--------------|---------|
+          | Linux x86_64 | \`physarum-server-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
+          | Linux ARM64  | \`physarum-server-${GITHUB_REF_NAME}-aarch64-unknown-linux-gnu.tar.gz\` |
+
+          ### Instalação
+
+          \`\`\`bash
+          tar -xzf physarum-server-${GITHUB_REF_NAME}-<target>.tar.gz
+          ./physarum-server --listen 0.0.0.0:8080
+          \`\`\`
+          EOF
+
+          gh release create "$GITHUB_REF_NAME" \
+            --title "physarum-attack-paths $GITHUB_REF_NAME" \
+            --notes-file /tmp/release-notes.md \
+            --draft
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name:    ${{ github.ref_name }}
-          release_name: "physarum-attack-paths ${{ github.ref_name }}"
-          draft:        true
-          prerelease:   false
-          body: |
-            ## physarum-attack-paths ${{ github.ref_name }}
-
-            ### Download
-
-            | Plataforma    | Arquivo                                                              |
-            |---------------|----------------------------------------------------------------------|
-            | Linux x86_64  | `physarum-server-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz`  |
-            | Linux ARM64   | `physarum-server-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz` |
-
-            ### Instalação
-
-            ```bash
-            tar -xzf physarum-server-${{ github.ref_name }}-<target>.tar.gz
-            ./physarum-server --listen 0.0.0.0:8080
-            ```
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── Etapa 2: build para cada plataforma em paralelo ───────────────────────
   build-release:
@@ -105,7 +108,7 @@ jobs:
         if: matrix.use_cross == true
         run: cross build --release --locked --target ${{ matrix.target }} -p physarum-server
 
-      # ── Empacotamento (.tar.gz) ───────────────────────────────────────────────
+      # ── Empacotamento (.tar.gz) ────────────────────────────────────────────
       - name: Package
         shell: bash
         run: |
@@ -122,16 +125,13 @@ jobs:
           echo "ASSET_PATH=${STAGING}.tar.gz" >> "$GITHUB_ENV"
           echo "ASSET_NAME=${STAGING}.tar.gz" >> "$GITHUB_ENV"
 
-      # ── Upload do asset para a Release ───────────────────────────────────
+      # ── Upload do asset para a Release ────────────────────────────────────
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
+        run: |
+          gh release upload "${{ needs.create-release.outputs.version }}" \
+            "$ASSET_PATH" --clobber
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url:         ${{ needs.create-release.outputs.upload_url }}
-          asset_path:         ${{ env.ASSET_PATH }}
-          asset_name:         ${{ env.ASSET_NAME }}
-          asset_content_type: application/octet-stream
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── Etapa 3: publica a Release (tira do modo draft) ───────────────────────
   publish-release:
@@ -141,8 +141,9 @@ jobs:
 
     steps:
       - name: Publish Release
-        uses: eregon/publish-release@v1
+        run: |
+          gh release edit "${{ needs.create-release.outputs.version }}" \
+            --draft=false \
+            --repo "${{ github.repository }}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          release_id: ${{ needs.create-release.outputs.upload_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
