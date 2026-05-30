@@ -64,12 +64,18 @@ pub mod port_strategy;
 pub mod rlimit;
 pub mod scanner;
 pub mod scripts;
+pub mod sensing;
 
 pub(crate) mod range_iterator;
 pub(crate) mod socket_iterator;
 
 pub use error::ScanError;
 pub use scanner::{ScanResult, Scanner};
+pub use sensing::{
+    result_from_open_port, service_guess_from_port, EvidenceSource, OsHint, OsHintSource,
+    PortState, ProfileParams, SensingProfile, SensingResult, TransportProtocol, DEEP_PORTS,
+    STIMULUS_PORTS, TOP_PORTS,
+};
 
 /// Explicit list of ports to scan.
 ///

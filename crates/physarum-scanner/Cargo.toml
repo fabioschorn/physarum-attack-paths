@@ -35,4 +35,5 @@ toml             = "1"
 dirs             = "6"
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "net", "time", "macros"] }
+tokio      = { workspace = true, features = ["rt", "net", "time", "macros"] }
+serde_json = { workspace = true }
