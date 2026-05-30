@@ -1,434 +1,149 @@
-# WASM Lab — Future Visual Simulation Lab
+# wasm-lab — Future Visualization and Simulation Idea
 
-This document captures a future idea for a Rust + WebAssembly visual laboratory for `physarum-attack-paths`.
+> **Status:** Research/backlog idea only. No active implementation gate. Not part of the current roadmap.
 
-The WASM lab is not intended to replace the Docker lab or the AWS lab.
+This document captures the idea of a browser-based visual simulator for the adaptive graph model at the core of `physarum-attack-paths`. The idea remains valid and worth preserving, but implementation has not been started and is not planned in the near term.
 
-Instead, it should become an interactive browser-based simulator for explaining, visualizing, and experimenting with the mathematical core of the project:
+---
+
+## Purpose
+
+The wasm-lab would make the organism's edge dynamics visible and interactive — for research demonstrations, architecture discussions, and onboarding.
+
+It does not replace the Docker lab or the AWS lab:
 
 ```text
-local observation window -> enriched ProbeReport -> Q_ij -> q_ema -> D_ij
+Docker lab = reproducible runtime test (complete)
+AWS lab    = realistic VPC network validation (PF-1 and PF-2 complete)
+wasm-lab   = visual model explanation and simulation (not yet implemented)
 ```
 
 ---
 
-## 1. Purpose
+## What has been validated so far
 
-The purpose of the WASM lab is to make the adaptive edge dynamics visible.
-
-The Docker lab proves that the real server and agents run together.
-The AWS lab will eventually prove behavior across realistic EC2/VPC network boundaries.
-The WASM lab should help humans understand the model.
-
-Recommended positioning:
+The following labs are complete and validate real behavior:
 
 ```text
-Docker lab = reproducible runtime test
-AWS lab    = realistic network test
-WASM lab   = visual model/simulation test
+PF-1 — organic expansion maze across real EC2/VPC topology
+PF-2 — adaptive re-routing when a secondary conduit appears
+physarum-llm — Phase 1 contracts for LLM-aware propagation reasoning
 ```
+
+The wasm-lab would visualize the same mathematical model that these labs validate at runtime. It is complementary, not a prerequisite.
 
 ---
 
-## 2. What the WASM lab should demonstrate
+## What a wasm-lab would demonstrate
 
-The first visual demo should focus on a single directed edge:
+### Single-edge simulator (first target)
+
+The core idea is a browser widget where a user adjusts input parameters and observes how a single directed edge evolves:
 
 ```text
-agent-b -> agent-c
-```
-
-The user should be able to adjust input parameters and observe how the edge changes over time.
-
 Inputs:
-
-```text
-success_rate
-avg_rtt_ms
-jitter_ms
-EMA alpha
-D_ij decay rate
-number of simulation steps
-```
+  success_rate
+  avg_rtt_ms
+  jitter_ms
+  EMA alpha
+  D_ij decay rate
+  number of simulation steps
 
 Computed values:
-
-```text
-latency_score
-Q_ij
-q_ema
-D_ij
-```
+  latency_score
+  Q_ij
+  q_ema
+  D_ij
 
 Visual output:
-
-```text
-line chart of Q_ij over time
-line chart of q_ema over time
-line chart of D_ij over time
-simple graph view showing agent-b -> agent-c
-current edge state label
+  line charts of Q_ij, q_ema, D_ij over time
+  simple graph view: agent-b -> agent-c
+  edge state label
 ```
 
----
+### Mathematical model to simulate
 
-## 3. Why this is useful
-
-This project is not only a networking tool. It is also a bio-inspired adaptive graph model.
-
-The WASM lab can help explain:
-
-```text
-why one successful probe should not dominate the graph
-why repeated successful probes reinforce an edge
-why sustained failures decay an edge
-why q_ema smooths noisy observations
-why D_ij behaves like long-term adaptive morphology
-why the agent is short-term sensing and the server is long-term memory
-```
-
-This is useful for:
-
-```text
-research demonstrations
-architecture discussions
-patent-style explanations
-onboarding contributors
-validating formulas before implementation
-comparing parameter choices
-future presentations
-```
-
----
-
-## 4. Initial model to simulate
-
-The first WASM version should implement the same equations used by the server.
-
-### Latency score
-
+**Latency score:**
 ```text
 latency_score = 1.0 / (1.0 + avg_rtt_ms / 100.0)
 ```
 
-### Normalized stimulus
-
-If `success_rate = 0.0`:
-
+**Normalized stimulus:**
 ```text
-Q_ij = 0.0
+if success_rate = 0.0: Q_ij = 0.0
+else: Q_ij = clamp(0.7 * success_rate + 0.3 * latency_score, 0.0, 1.0)
 ```
 
-Otherwise:
-
-```text
-Q_ij = clamp(0.7 * success_rate + 0.3 * latency_score, 0.0, 1.0)
-```
-
-### EMA update
-
+**EMA update:**
 ```text
 q_ema(t+1) = alpha * Q_ij + (1.0 - alpha) * q_ema(t)
-```
-
-Initial value:
-
-```text
 q_ema(0) = 0.0
 ```
 
-### Flux function
-
+**Conductivity update:**
 ```text
 f(x) = x² / (1 + x²)
-```
-
-### Conductivity update
-
-```text
 D_ij(t+1) = D_ij(t) + f(q_ema) * (1 - D_ij(t)) - decay_rate * D_ij(t)
-```
-
-Initial value:
-
-```text
-D_ij(0) = 0.0
-```
-
-Clamp:
-
-```text
-0.0 <= D_ij <= 1.0
+D_ij(0) = 0.0, clamped to [0.0, 1.0]
 ```
 
 ---
 
-## 5. Suggested UI concept
+## Staged implementation idea
 
-A minimal UI could have three panels.
+If this ever moves from backlog to an active issue, a staged approach is recommended:
 
-### Panel 1 — Inputs
+| Stage | Scope |
+|---|---|
+| v0 | Single-edge Q_ij / q_ema / D_ij simulator with sliders and line charts |
+| v1 | Small graph replay (3–4 nodes) with path scoring preview |
+| v2 | PF-1/PF-2 lineage JSON replay — animate the organism's actual expansion |
+| v3 | physarum-llm decision-loop visualization, only after that path is stable |
 
-Controls:
-
-```text
-success_rate slider: 0.0 to 1.0
-avg_rtt_ms slider: 0 to 1000
-jitter_ms slider: 0 to 500
-alpha slider: 0.0 to 1.0, default 0.3
-decay_rate slider: 0.0 to 1.0, default 0.1
-steps slider: 1 to 200
-reset button
-run simulation button
-```
-
-### Panel 2 — Edge state
-
-Display:
-
-```text
-Q_ij
-q_ema current value
-D_ij current value
-edge state label: weak / candidate / reinforced / decaying
-```
-
-Possible state labels:
-
-```text
-D_ij < 0.10         = weak
-0.10 <= D_ij < 0.40 = candidate
-0.40 <= D_ij < 0.75 = reinforced
-D_ij >= 0.75        = dominant
-```
-
-These labels are only for visualization and should not become production semantics yet.
-
-### Panel 3 — Charts
-
-Charts:
-
-```text
-Q_ij over time
-q_ema over time
-D_ij over time
-```
-
-A future version may show a tiny graph:
-
-```text
-agent-b --D_ij/q_ema--> agent-c
-```
+v3 is explicitly deferred until the physarum-llm integration (Issue #106, Phase 4+) is complete and stable.
 
 ---
 
-## 6. Possible Rust/WASM technology choices
+## Technology options (for reference)
 
-Recommended simple options:
-
-### Option A — Leptos
+If implemented, the simplest first approach would be:
 
 ```text
-Rust-first UI framework
-Good for interactive web apps
-More structure
+wasm-bindgen — expose Rust functions for Q_ij, q_ema, D_ij updates
+Plain HTML/CSS/JS — sliders and layout
+Chart.js or SVG — line charts
 ```
 
-### Option B — Yew
+More structured Rust-first options if the UI grows:
 
 ```text
-Mature Rust/WASM frontend framework
-Good component model
+Leptos or Yew — Rust component framework
+Trunk — simple WASM build workflow
 ```
 
-### Option C — wasm-bindgen + plain JavaScript
-
-```text
-Smallest initial implementation
-Rust exposes calculation functions
-JavaScript handles sliders and charts
-```
-
-### Option D — Trunk + vanilla Rust frontend
-
-```text
-Simple build workflow
-Good for small examples
-```
-
-Manager recommendation for the first version:
-
-```text
-Use the simplest implementation that demonstrates the math clearly.
-Do not over-engineer the frontend.
-```
-
-A good starting approach may be:
-
-```text
-wasm-bindgen for Rust calculations
-plain HTML/CSS/JS for UI
-Chart.js or SVG for charts
-```
+No decision has been made. This is captured for when the issue is opened.
 
 ---
 
-## 7. Suggested future structure
+## Relationship to other docs
 
-Possible future structure:
-
-```text
-examples/wasm-lab/
-├── README.md
-├── Cargo.toml
-├── src/
-│   └── lib.rs
-├── web/
-│   ├── index.html
-│   ├── main.js
-│   └── style.css
-└── pkg/
-```
-
-Alternative if using Trunk:
-
-```text
-examples/wasm-lab/
-├── README.md
-├── Cargo.toml
-├── Trunk.toml
-├── index.html
-└── src/
-    └── main.rs
-```
+- [`General-Docs/INSIGHTS_AND_BRAINSTORM.md §11`](../../General-Docs/INSIGHTS_AND_BRAINSTORM.md) — records this idea in the project's backlog
+- [`General-Docs/ARCHITECTURE.md`](../../General-Docs/ARCHITECTURE.md) — describes the Q_ij / q_ema / D_ij model as implemented
+- [`examples/aws-lab/`](../aws-lab/) — the active AWS/VPC lab (PF-1, PF-2 complete)
 
 ---
 
-## 8. Future extension ideas
-
-After the single-edge simulator works, the WASM lab could evolve to:
+## Out of scope for any wasm-lab version
 
 ```text
-bidirectional edge simulation: agent-b -> agent-c and agent-c -> agent-b
-three-node graph: agent-b -> agent-c -> agent-d
-manual failure injection
-asymmetric reachability simulation
-short-term observation window visualization
-path scoring preview
-MCPM-inspired stochastic traversal preview
-edge/path density animation
-```
-
-The most important future demo would be:
-
-```text
-A/B/C/D visual attack-path playground
-```
-
-Where:
-
-```text
-B = perimeter-like node
-C = application-like node
-D = crown-jewel-like node
-```
-
-The user could adjust reachability and stimulus values and see path scores change.
-
----
-
-## 9. Out of scope for the first WASM lab
-
-Do not include in the first WASM version:
-
-```text
-real networking
-Docker Compose
+real networking or live server connections
+Docker Compose or Terraform
 AWS infrastructure
-Terraform
-live server connection
 agent deployment
 eBPF
-mTLS
-Ed25519 signatures
-persistence
-TOON export
+mTLS or Ed25519
+persistence or lineage writing
 production UI
 ```
 
-The first WASM lab should be a pure simulation/demo of the model.
-
----
-
-## 10. Relationship to TLA+
-
-TLA+ and WASM serve different purposes.
-
-```text
-TLA+ = formal specification and invariant checking
-WASM = visual explanation and interactive simulation
-```
-
-Both are useful.
-
-A future ideal sequence:
-
-```text
-1. Docker lab proves runtime behavior.
-2. TLA+ models the edge dynamics invariants.
-3. WASM visualizes the same equations for humans.
-4. AWS lab validates behavior in real cloud networks.
-```
-
----
-
-## 11. Recommended future issue
-
-Possible future issue title:
-
-```text
-Add WASM visual simulator for Q_ij, q_ema, and D_ij edge dynamics
-```
-
-Suggested scope:
-
-```text
-create examples/wasm-lab Cargo project
-expose Rust functions for Q_ij, q_ema, and D_ij updates
-build a simple browser UI with sliders
-show line charts for q_ema and D_ij
-include README instructions to run locally
-avoid production UI complexity
-```
-
-Acceptance criteria:
-
-```text
-user can adjust success_rate and avg_rtt_ms
-simulator recomputes Q_ij
-simulator shows q_ema over time
-simulator shows D_ij over time
-D_ij remains clamped to [0.0, 1.0]
-README explains that this is a visual simulation, not a deployment lab
-```
-
----
-
-## 12. Manager recommendation
-
-Do not implement this before the Docker lab is complete.
-
-Recommended order:
-
-```text
-1. Complete Docker A/B/C lab.
-2. Add initial TLA+ edge model.
-3. Add WASM visual simulator.
-4. Continue toward AWS lab and A/B/C/D path scoring.
-```
-
-The WASM lab is valuable because it can make the project's core idea visible:
-
-```text
-short-term local stimuli become smoothed graph memory, and graph memory becomes adaptive attack-path morphology.
-```
+The wasm-lab is and will remain a pure simulation and visualization tool.
