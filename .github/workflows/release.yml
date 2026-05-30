@@ -1,7 +1,7 @@
 name: Release
 
 # Disparado quando você faz:
-#   git tag v0.1.0
+#   git tag v0.2.0
 #   git push --tags
 on:
   push:
@@ -11,7 +11,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  BINARY_NAME: physarum-server
 
 # Necessário para criar releases e fazer upload de assets.
 permissions:
@@ -38,19 +37,44 @@ jobs:
           cat > /tmp/release-notes.md << EOF
           ## physarum-attack-paths ${GITHUB_REF_NAME}
 
+          Research milestone release for the current Physarum organism stack.
+
+          ### Highlights
+
+          - \`physarum-maze\` is the canonical organism binary.
+          - \`physarum-scan\` is the native scanner binary from \`physarum-scanner\`.
+          - \`physarum-sporangium\` is included as a source/API crate package, because it is currently a library crate, not a standalone binary.
+          - \`physarum-llm\` contracts, mock/client path, policy gate, and maze hook are present.
+          - Two-container Docker Lab validates the controlled LLM reasoning path.
+          - \`physarum-scanner\` exposes organism-native \`SensingProfile\` / \`SensingResult\` evidence.
+          - \`physarum-sporangium\` introduces native Rust Nuclei-inspired pattern evidence.
+          - Rust 1.86.0 is the pinned project toolchain.
+
           ### Download
 
-          | Plataforma   | Arquivo |
-          |--------------|---------|
-          | Linux x86_64 | \`physarum-server-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
-          | Linux ARM64  | \`physarum-server-${GITHUB_REF_NAME}-aarch64-unknown-linux-gnu.tar.gz\` |
+          | Platform     | Artifact |
+          |--------------|----------|
+          | Linux x86_64 | \`physarum-maze-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
+          | Linux x86_64 | \`physarum-scan-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
+          | Linux ARM64  | \`physarum-maze-${GITHUB_REF_NAME}-aarch64-unknown-linux-gnu.tar.gz\` |
+          | Linux ARM64  | \`physarum-scan-${GITHUB_REF_NAME}-aarch64-unknown-linux-gnu.tar.gz\` |
+          | Source/API   | \`physarum-sporangium-${GITHUB_REF_NAME}-source.tar.gz\` |
 
-          ### Instalação
+          ### Installation
 
           \`\`\`bash
-          tar -xzf physarum-server-${GITHUB_REF_NAME}-<target>.tar.gz
-          ./physarum-server --listen 0.0.0.0:8080
+          tar -xzf physarum-maze-${GITHUB_REF_NAME}-<target>.tar.gz
+          ./physarum-maze --help
+
+          tar -xzf physarum-scan-${GITHUB_REF_NAME}-<target>.tar.gz
+          ./physarum-scan --help
           \`\`\`
+
+          ### Scope
+
+          This is a controlled research prototype release.
+          Use only in owned local, Docker, or AWS lab environments.
+          LLM-assisted behavior remains lab-only, bounded, policy-gated, and disabled unless explicitly configured.
           EOF
 
           gh release create "$GITHUB_REF_NAME" \
@@ -83,8 +107,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust 1.86.0
+        uses: dtolnay/rust-toolchain@1.86.0
         with:
           targets: ${{ matrix.target }}
 
@@ -93,50 +117,81 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Validate workspace
+        run: |
+          cargo build --workspace --locked
+          cargo test --workspace --locked
+
       # Instala `cross` para targets de cross-compilation (ex: Linux ARM64)
       - name: Install cross
         if: matrix.use_cross == true
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       # Build com cargo (nativo)
-      - name: Build (cargo)
+      - name: Build release binaries (cargo)
         if: matrix.use_cross != true
-        run: cargo build --release --locked --target ${{ matrix.target }} -p physarum-server
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }} -p physarum-maze
+          cargo build --release --locked --target ${{ matrix.target }} -p physarum-scanner --bin physarum-scan
 
       # Build com cross (cross-compilation)
-      - name: Build (cross)
+      - name: Build release binaries (cross)
         if: matrix.use_cross == true
-        run: cross build --release --locked --target ${{ matrix.target }} -p physarum-server
+        run: |
+          cross build --release --locked --target ${{ matrix.target }} -p physarum-maze
+          cross build --release --locked --target ${{ matrix.target }} -p physarum-scanner --bin physarum-scan
 
       # ── Empacotamento (.tar.gz) ────────────────────────────────────────────
-      - name: Package
+      - name: Package binaries
         shell: bash
         run: |
           VERSION=${{ needs.create-release.outputs.version }}
           TARGET=${{ matrix.target }}
-          ASSET_NAME="${{ env.BINARY_NAME }}-${VERSION}-${TARGET}"
-          STAGING="${ASSET_NAME}"
 
-          mkdir -p "$STAGING"
-          cp "target/${TARGET}/release/${{ env.BINARY_NAME }}" "$STAGING/"
-          cp README.md LICENSE NOTICE "$STAGING/"
+          for BINARY in physarum-maze physarum-scan; do
+            ASSET_NAME="${BINARY}-${VERSION}-${TARGET}"
+            STAGING="${ASSET_NAME}"
 
-          tar -czf "${STAGING}.tar.gz" "$STAGING"
-          echo "ASSET_PATH=${STAGING}.tar.gz" >> "$GITHUB_ENV"
-          echo "ASSET_NAME=${STAGING}.tar.gz" >> "$GITHUB_ENV"
+            mkdir -p "$STAGING"
+            cp "target/${TARGET}/release/${BINARY}" "$STAGING/"
+            cp README.md LICENSE NOTICE "$STAGING/"
 
-      # ── Upload do asset para a Release ────────────────────────────────────
-      - name: Upload Release Asset
-        run: |
-          gh release upload "${{ needs.create-release.outputs.version }}" \
-            "$ASSET_PATH" --clobber
+            tar -czf "${STAGING}.tar.gz" "$STAGING"
+            gh release upload "$VERSION" "${STAGING}.tar.gz" --clobber
+          done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── Etapa 3: publica a Release (tira do modo draft) ───────────────────────
+  # ── Etapa 3: publica o pacote fonte/API do physarum-sporangium ─────────────
+  package-sporangium:
+    name: Package physarum-sporangium source/API crate
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package physarum-sporangium source
+        shell: bash
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          ASSET_NAME="physarum-sporangium-${VERSION}-source"
+          STAGING="$ASSET_NAME"
+
+          mkdir -p "$STAGING/crates"
+          cp -R crates/physarum-sporangium "$STAGING/crates/"
+          cp Cargo.toml Cargo.lock README.md LICENSE NOTICE "$STAGING/"
+
+          tar -czf "${STAGING}.tar.gz" "$STAGING"
+          gh release upload "$VERSION" "${STAGING}.tar.gz" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Etapa 4: publica a Release (tira do modo draft) ───────────────────────
   publish-release:
     name: Publish Release
-    needs: [create-release, build-release]
+    needs: [create-release, build-release, package-sporangium]
     runs-on: ubuntu-latest
 
     steps:
