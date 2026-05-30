@@ -2,15 +2,15 @@
 
 This document captures exploratory ideas, research insights, and future directions for `physarum-attack-paths`.
 
-It is intentionally separate from the operational prototype roadmap. The roadmap defines what we are building next. This document preserves promising ideas that may influence future architecture, research positioning, or patent-style invention framing.
+It is intentionally separate from the operational prototype roadmap. The roadmap defines what we are building next. This document preserves promising ideas that may influence future architecture, research positioning, or invention framing.
 
-**Last reviewed:** 2026-05-29 — sections annotated with current status after Gates K.1, L, M, M.4, PF-1, PF-2, the `physarum-llm` Phase 1 contract work, and the sensing-profile/native-tool-refactor discussion.
+**Last reviewed:** 2026-05-30 — updated after `physarum-llm` contracts/client/Docker Lab work, Issue #114 structured sensing merge, and Issue #115 `physarum-sporangium` direction.
 
 ---
 
 ## 1. MCPM-inspired attack-path density
 
-> **Status (2026-05-24):** All prerequisites now met (stable `/paths`, Gate K.1, autonomous propagation). MCPM remains future work — deferred until `physarum-llm` (Issue #106) is validated.
+> **Status (2026-05-30):** All prerequisites through PF-2 and structured sensing are met. MCPM remains future work — deferred until the `physarum-llm` + evidence loop is validated with `physarum-sporangium`.
 
 ### Source of the insight
 
@@ -76,10 +76,10 @@ Example use: cosmic web / dark matter / gas filament inference
 ### Current physarum-attack-paths prototype
 
 ```text
-Input: real agents, peer probes, local observations, future vulnerability metadata
+Input: real agents, peer probes, local observations, structured sensing, future vulnerability-pattern evidence
 Method: distributed reports plus adaptive graph update
-Signal: Q_ij, q_ema, D_ij
-Output: explicit directed adaptive graph
+Signal: Q_ij, q_ema, D_ij, SensingResult, future PatternFinding
+Output: explicit directed adaptive graph and evidence-backed reasoning loop
 Example use: cyber attack-path inference and prioritization
 ```
 
@@ -169,9 +169,16 @@ sample_count
 last_seen
 ```
 
-Future graph fields that may improve traversal:
+Current and near-term evidence fields that may improve traversal:
 
 ```text
+SensingResult
+PatternFinding
+service_guess
+version_hint
+severity_hint
+confidence
+evidence_source
 asset_criticality
 vulnerability_pressure
 known_exploited_vulnerability_flag
@@ -189,21 +196,21 @@ credential_or_trust_signal
 
 A strong framing for the project:
 
-> The system does not merely compute a shortest attack path. It continuously remodels an adaptive attack-path morphology from distributed local stimuli, and may further use stochastic path-density exploration to reveal dominant and secondary attack conduits.
+> The system does not merely compute a shortest attack path. It continuously remodels an adaptive attack-path morphology from distributed local stimuli, structured sensing evidence, and bounded validation outcomes; it may later use stochastic path-density exploration to reveal dominant and secondary attack conduits.
 
 This helps distinguish the project from traditional approaches:
 
 ```text
 traditional scanner -> finding -> severity -> ticket
 traditional graph tool -> static graph -> shortest path
-this project -> distributed sensing -> adaptive morphology -> multi-path density and living graph memory
+this project -> distributed sensing -> adaptive morphology -> structured evidence -> living graph memory
 ```
 
 ---
 
 ## 6. Manager recommendation history
 
-> **Status (2026-05-24):** Steps 1–3 are complete. The project took a different direction for step 4 — autonomous propagation (`physarum-maze`, PF-1, PF-2) and LLM-aware adaptive propagation (`physarum-llm`, Issue #106) were prioritised over MCPM. MCPM remains valid as the next research layer after `physarum-llm` is validated.
+> **Status (2026-05-30):** Steps 1–3 are complete. The project took a different direction for step 4 — autonomous propagation (`physarum-maze`, PF-1, PF-2), LLM-aware adaptive reasoning (`physarum-llm`, Issue #106), and native sensing/evidence modules were prioritised over MCPM. MCPM remains valid as a later research layer after the evidence loop stabilizes.
 
 Original order, recorded for historical reference:
 
@@ -211,21 +218,23 @@ Original order, recorded for historical reference:
 1. Keep validating A/B/C with q_ema and enriched ProbeReport.        ✔ DONE — Gates A–H
 2. Add A/B/C/D lab with a fourth agent.                              ✔ DONE — Gate K.1
 3. Implement a basic /paths endpoint using existing D_ij/q_ema.      ✔ DONE — Gate K.1 negative-log scoring
-4. Only then consider MCPM-inspired stochastic path-density.         → DEFERRED — after physarum-llm
+4. Only then consider MCPM-inspired stochastic path-density.         → DEFERRED — after evidence loop
 ```
 
 Updated order:
 
 ```text
-4a. physarum-llm — LLM-aware adaptive propagation                   → ACTIVE DESIGN / CONTRACTS
-4b. MCPM-inspired path density                                      → FUTURE
+4a. physarum-llm — LLM-aware adaptive reasoning                    → ACTIVE
+4b. physarum-scanner SensingProfile / SensingResult                ✔ DONE — Issue #114
+4c. physarum-sporangium — native Nuclei-inspired evidence engine   → NEXT — Issue #115
+4d. MCPM-inspired path density                                     → FUTURE
 ```
 
 Reason:
 
 ```text
 The Causal Continuity Paradox is a more fundamental gap than path density.
-An organism that cannot cross a port-80-only host gains nothing from MCPM until it can reason about propagation across any accessible port.
+An organism that can sense a port-80-only host needs structured evidence and a policy-gated reasoning loop before path-density research can add value.
 ```
 
 ---
@@ -238,10 +247,10 @@ Possible future research scope:
 - Review MCPM papers and available code.
 - Compare continuous MCPM with graph-based stochastic traversal.
 - Prototype a small offline simulation using a saved /graph snapshot.
-- Evaluate whether trace density adds useful prioritization beyond D_ij and simple path scoring.
+- Evaluate whether trace density adds useful prioritization beyond D_ij, SensingResult, PatternFinding, and simple path scoring.
 ```
 
-This remains research-only until the LLM-aware propagation model is stable.
+This remains research-only until the LLM/evidence loop is stable.
 
 ---
 
@@ -249,7 +258,7 @@ This remains research-only until the LLM-aware propagation model is stable.
 
 > This is not part of the core architecture. The core remains Physarum polycephalum-inspired adaptive graph formation and path scoring; MCTS/self-play is recorded only as a possible future research layer for validation prioritization.
 
-> **Status (2026-05-24):** Prerequisites now met — Phase 1 full mesh and Phase 2 segmented B→C→D both validated. The active learned-prioritization role is currently being filled by `physarum-llm`, which uses an LLM oracle instead of RL. MCTS/self-play remains a valid long-term research direction and may complement `physarum-llm` once the LLM integration is stable.
+> **Status (2026-05-30):** Prerequisites through PF-2 and structured sensing are now met. The active learned-prioritization role is currently being filled by `physarum-llm`, which uses an LLM oracle instead of RL. MCTS/self-play remains a valid long-term research direction and may complement the evidence loop once stable.
 
 ### Source
 
@@ -259,16 +268,14 @@ Engineering Applications of Artificial Intelligence, 2021
 https://www.sciencedirect.com/science/article/abs/pii/S0952197621002700
 ```
 
-The paper proposes an OmegaZero-style framework (graph representation learning + trajectory memory + MCTS + reinforcement learning + self-play) to learn graph traversal and combinatorial optimization heuristics.
-
 ### Mapping to this project
 
 | Paper | This project |
 |---|---|
 | Graph = combinatorial optimization (TSP/VRP) | Graph = observed cyber reachability (`D_ij` / `q_ema`) |
 | Objective = learn efficient traversal/search policy | Objective = discover, rank, and validate attack paths |
-| Method = GAT/GRU + MCTS + RL + self-play | Method today = Physarum conductivity + adaptive path scoring |
-| Output = optimized tour/route | Output today = ranked paths via `/paths` |
+| Method = GAT/GRU + MCTS + RL + self-play | Method today = Physarum conductivity + adaptive path scoring + evidence loop |
+| Output = optimized tour/route | Output today = ranked paths via `/paths` and future evidence-informed choices |
 
 Possible future component:
 
@@ -281,6 +288,7 @@ Possible inputs:
 ```text
 GraphSnapshot
 EdgeSnapshot: source, target, d_ij, q_ema, sample_count
+SensingResult / PatternFinding evidence
 Agent metadata: layer, role, criticality, exposure, historical probe outcomes
 Target objective: crown jewel / protected node / target layer
 Recent validation outcomes
@@ -299,7 +307,7 @@ uncertainty-driven validation queue
 
 ## 9. Micromouse-inspired exploration and physarum-scanner candidate-path discovery
 
-> **Status (2026-05-24):** The Micromouse framing predicted the gate sequence K→L→M→N. Gates K, K.1, L, L.2, L.3, M, M.4 are complete. PF-1 and PF-2 labs validated autonomous propagation beyond the original scope of Gate M. The framing remains valid as a communication tool; the sensing model (`physarum-scanner` + active probes + eBPF/packet observation) is implemented in `physarum-maze`.
+> **Status (2026-05-30):** Gates K, K.1, L, L.2, L.3, M, M.4 are complete. PF-1 and PF-2 labs validated autonomous propagation beyond the original scope of Gate M. Issue #114 added structured sensing profiles and `SensingResult`, making the Micromouse analogy stronger at the sensory layer.
 
 Micromouse is a competitive robotics discipline in which an autonomous robot enters an unknown maze, explores it, builds an internal map, and then runs the fastest possible route to the centre.
 
@@ -316,7 +324,7 @@ Mapping to this project:
 |---|---|
 | Unknown maze | Unknown network / lab topology |
 | Walls / corridors | Blocked / reachable network channels |
-| IR sensors | `physarum-scanner` + active probes + eBPF/packet observation |
+| IR sensors | `physarum-scanner` + `SensingProfile` + eBPF/packet observation |
 | Maze memory | Adaptive graph / lineage memory |
 | Flood fill / route planning | Path scoring and reinforcement model (`/paths`) |
 | Fastest path, not shortest | Best path by latency, loss, jitter, stability, and flow evidence |
@@ -332,7 +340,7 @@ Physarum-attack-paths: a distributed agent organism occupies, senses, reinforces
 ### Sensing model
 
 ```text
-physarum-scanner   -> candidate-path discovery: find reachable hosts/services in bounded scope
+physarum-scanner   -> candidate-path discovery and SensingResult evidence
 active probes      -> viability testing: confirm reachability and measure quality
 eBPF/packet senses -> passive or stimulus-driven confirmation without relying only on scheduled probes
 ```
@@ -343,7 +351,7 @@ eBPF/packet senses -> passive or stimulus-driven confirmation without relying on
 
 ## 10. Future agent autonomy: from local reactions to strategic organism behavior
 
-> **Status (2026-05-24):** The strategic autonomy questions listed in this section are now the formal motivation for `physarum-llm` (Issue #106 — Causal Continuity Paradox of Origin and Destination). The LLM oracle answers: which propagation method should I use for this target?
+> **Status (2026-05-30):** The strategic autonomy questions listed in this section are now implemented in early form through `physarum-llm` contracts/mock/client and the Docker Lab reasoning hook. Issue #115 is the next evidence-enrichment step before deeper #106 integration.
 
 The current agent (`physarum-maze`) has moved beyond a fixed client role. It already performs bounded local autonomy:
 
@@ -353,14 +361,16 @@ filter by configured discovery scope
 apply cooldown/deduplication
 run exact-host discovery
 promote discovered candidates to active probe targets
-report validated evidence back to the graph
+record lineage evidence
+invoke lab-only reasoning when configured
 ```
 
 This is the transition:
 
 ```text
 old model: receive a peer list -> probe peers -> report results
-current model: sense -> discover candidates -> validate -> report graph evidence
+current model: sense -> discover candidates -> validate -> record graph/lineage evidence
+next model: sense -> enrich evidence -> reason -> policy gate -> controlled action -> lineage
 ```
 
 Future role-fluid organism questions:
@@ -382,7 +392,7 @@ The system is not only a coordinator that computes paths from reports.
 It is a distributed organism whose nodes can sense, validate, remember, choose, and eventually change role based on environmental conditions.
 ```
 
-The strategic autonomy questions remain the north star. `physarum-llm` is the first concrete gate that moves the organism from "react to known SSH targets" to "reason about any accessible port on any reachable host."
+The strategic autonomy questions remain the north star. `physarum-llm` is the first concrete gate that moves the organism from "react to known SSH targets" to "reason about structured evidence on any reachable host."
 
 ---
 
@@ -408,7 +418,7 @@ This should remain separate from the main README status table until there is an 
 
 ## 12. Sensing profiles and native Rust refactoring of external security tools
 
-> **Status (2026-05-29):** Brainstorm / architecture insight only. Do not open issues for this yet. This section records the desired direction for richer sensing inside the organism after the `physarum-llm` contracts stabilize.
+> **Status (2026-05-30):** Partly implemented and partly active. Issue #114 delivered `SensingProfile` and `SensingResult` in `physarum-scanner`. Issue #115 is now active for the native Nuclei-inspired Rust port, named `physarum-sporangium`. SSRFmap-inspired work remains future/backlog.
 
 The project should avoid treating external tools as permanent subprocess dependencies. The preferred direction is to study useful behavior from mature tools and refactor the relevant concepts into native Rust components that can be incorporated into the `physarum-maze` organism, similar to how `physarum-scanner` became a native project capability.
 
@@ -419,77 +429,72 @@ not: wrapper around external scanners
 but: distributed organism with native sensory organs
 ```
 
-### Sensing profile inspiration
+### Sensing profile implementation
 
-The following scan-style parameters are useful as operational inspiration, but should be modeled as internal `SensingProfile` / `ScanProfile` behavior rather than copied as raw CLI flags:
-
-```text
--T4  -> faster timing / higher concurrency profile
--F   -> top-ports / fast port subset profile
--Pn  -> no host-discovery dependency; treat host as alive when stimulus, lineage, TCP, or eBPF evidence already exists
-```
-
-Possible internal profiles:
+Issue #114 implemented the internal sensing profile layer.
 
 ```text
 LowNoise
 Balanced
 Fast
+TopPorts
 Deep
 StimulusTargeted
 NoDiscovery
 ```
 
-Suggested semantics:
+The operational inspiration was translated into project-native semantics:
 
 ```text
-LowNoise:
-  low concurrency
-  longer delay
-  small scoped probe set
-  suitable for cautious organism expansion
-
-Balanced:
-  default bounded discovery
-  moderate concurrency
-  service hints when cheap
-
-Fast:
-  -T4-inspired timing
-  higher bounded concurrency
-  top-port focus
-  reduced timeout
-
-Deep:
-  richer banner and protocol handshake collection
-  larger bounded port set
-  more complete fingerprint for LLM reasoning
-
-StimulusTargeted:
-  exact /32 host captured from TCP, ICMP, eBPF, or lineage stimulus
-  service/version style characterization
-  richer DiscoveryQuery evidence
-
-NoDiscovery:
-  -Pn-inspired behavior
-  skip ICMP/host discovery assumptions
-  use when ICMP is blocked or when the host is already evidenced by TCP/eBPF/lineage
+-T4  -> Fast: speed/concurrency axis
+-F   -> TopPorts: port-scope axis
+-Pn  -> NoDiscovery: host-already-evidenced mode
 ```
 
-### Native Nuclei-inspired capability
+`SensingResult` now gives the project a structured evidence envelope that can feed `physarum-llm` instead of passing only raw open ports.
 
-`nuclei` should be considered as inspiration for a future native Rust evidence engine, not as a permanent subprocess dependency.
+### Native Nuclei-inspired capability — physarum-sporangium
+
+`nuclei` should be considered source material for a native Rust evidence engine, not a permanent subprocess dependency.
+
+Working name:
+
+```text
+physarum-sporangium
+```
+
+Suggested crate:
+
+```text
+crates/physarum-sporangium
+```
+
+Biological framing:
+
+```text
+A sporangium produces spores.
+In this project, each template/check/finding can be treated as a controlled evidence spore released by the organism.
+```
 
 Desired direction:
 
 ```text
-study useful Nuclei concepts
-refactor relevant behavior into Rust
-integrate the result as a native physarum-maze sensory capability
-feed structured evidence into DiscoveryQuery
+study Nuclei architecture
+port relevant concepts into Rust
+emit structured PatternFinding evidence
+integrate with physarum-llm DiscoveryQuery
+remove local upstream clone after native module is viable
 ```
 
-Possible native outputs:
+Local upstream clones are analysis material only and are ignored by `.gitignore`:
+
+```text
+nuclei/
+Nuclei/
+projectdiscovery-nuclei/
+```
+
+Potential native outputs:
 
 ```text
 template_or_check_id
@@ -506,9 +511,9 @@ Role in the organism:
 
 ```text
 physarum-scanner discovers reachable services
-native nuclei-inspired module validates known patterns and vulnerability signals
+physarum-sporangium validates known patterns and vulnerability signals
 physarum-llm receives structured evidence rather than raw scanner noise
-policy gate decides whether any proposed propagation strategy is allowed
+policy gate decides whether any proposed action is allowed
 ```
 
 This should be evidence-first. It should not make the LLM blindly trust a finding. It should provide structured, bounded, auditable signals.
@@ -569,11 +574,11 @@ The organism should become more sensitive before it becomes more aggressive.
 Recommended posture:
 
 ```text
-1. Expand sensing and fingerprint richness first.
-2. Feed more precise evidence into physarum-llm.
-3. Keep exploitation and propagation behind explicit policy gates.
-4. Refactor external-tool ideas into native Rust components instead of building a wrapper chain.
-5. Do not open implementation issues for Nuclei/SSRFmap-inspired modules until the current physarum-llm path is stable.
+1. Expand sensing and fingerprint richness first.                  ✔ Issue #114
+2. Port vulnerability-pattern evidence into native Rust.           → Issue #115
+3. Feed more precise evidence into physarum-llm.                   → Issue #106 next integration
+4. Keep exploitation and propagation behind explicit policy gates.
+5. Refactor external-tool ideas into native Rust components instead of building a wrapper chain.
 ```
 
 This direction strengthens the project name: `Physarum Attack Paths` becomes an organism that senses, validates, reasons, reinforces, and propagates through attack paths — not merely a scanner or a static attack-graph generator.
