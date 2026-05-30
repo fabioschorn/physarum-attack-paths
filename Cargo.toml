@@ -25,7 +25,7 @@ members = [
 [workspace.package]
 version       = "0.0.1"
 edition       = "2021"
-rust-version  = "1.78"
+rust-version  = "1.86"
 license       = "Apache-2.0"
 authors       = ["Fábio Schorn <fabio.schorn@expertsonline.com.br>"]
 repository    = "https://github.com/fabioschorn/physarum-attack-paths"
@@ -88,12 +88,3 @@ opt-level     = 3
 lto           = "thin"
 codegen-units = 1
 strip         = true
-
-[profile.bench]
-opt-level     = 3
-lto           = "thin"
-debug         = true
-
-[profile.dev]
-opt-level = 0
-debug     = true
