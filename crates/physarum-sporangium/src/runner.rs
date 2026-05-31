@@ -46,11 +46,17 @@ impl PatternRunner {
     }
 
     /// Run a template against a target (ip, port). Returns findings (empty = no match).
+    ///
+    /// `scheme_hint` overrides port-based scheme detection when the caller has
+    /// stronger evidence (e.g. from a banner grab or `SensingResult.scheme_hint`).
+    /// Pass `Some("https")` or `Some("http")` to force a scheme; `None` falls
+    /// back to port-based detection (443/8443/9443 → https, else http).
     pub async fn run(
         &self,
         template: &PatternTemplate,
         target_ip: IpAddr,
         port: u16,
+        scheme_hint: Option<&str>,
     ) -> Result<Vec<PatternFinding>> {
         self.policy.check_allowed(&template.id)?;
 
@@ -66,7 +72,7 @@ impl PatternRunner {
         };
 
         let resp = self
-            .execute_http(check, target_ip, port)
+            .execute_http(check, target_ip, port, scheme_hint)
             .await
             .with_context(|| {
                 format!(
@@ -89,15 +95,21 @@ impl PatternRunner {
         check: &crate::template::HttpCheck,
         target_ip: IpAddr,
         port: u16,
+        scheme_hint: Option<&str>,
     ) -> Result<ResponseData> {
-        // Known HTTPS ports get TLS. Non-standard TLS ports (e.g. 10443, custom
-        // admin panels) are not yet detected here and will be probed as HTTP,
-        // which may produce silent misses. Future: accept a scheme_hint parameter
-        // derived from SensingResult.service_guess to handle arbitrary TLS ports.
-        let scheme = if matches!(port, 443 | 8443 | 9443) {
-            "https"
-        } else {
-            "http"
+        let scheme = match scheme_hint {
+            Some("https") => "https",
+            Some("http") => "http",
+            // Caller provided no scheme evidence — fall back to port convention.
+            // Non-standard TLS ports (e.g. 10443, custom admin panels) may produce
+            // silent misses here. Pass scheme_hint from SensingResult to avoid this.
+            _ => {
+                if matches!(port, 443 | 8443 | 9443) {
+                    "https"
+                } else {
+                    "http"
+                }
+            }
         };
         let url = format!("{}://{}:{}{}", scheme, target_ip, port, check.path);
 

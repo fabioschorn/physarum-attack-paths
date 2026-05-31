@@ -350,7 +350,7 @@ async fn main() -> Result<()> {
 
                 writer.print_probe_start(&task.template.id, task.ip, task.port);
 
-                match runner.run(&task.template, task.ip, task.port).await {
+                match runner.run(&task.template, task.ip, task.port, None).await {
                     Ok(findings) => {
                         for f in &findings {
                             matches.fetch_add(1, Ordering::Relaxed);

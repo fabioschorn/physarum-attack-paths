@@ -12,7 +12,7 @@
 ///   6. Record `LlmAttemptEvidence` in lineage on every outcome.
 ///   7. On rejection or failure → append to `rejected_strategies`, retry.
 ///   8. Stop at `MAX_ATTEMPTS` or on `PropagationMethod::NoPath`.
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
@@ -23,8 +23,8 @@ use physarum_llm::{
     RejectedStrategy, TransportProtocol, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
-    result_from_open_port, EvidenceSource as ScanEvidenceSource, OsHintSource as ScanOsHintSource,
-    PortList, Scanner, SensingProfile,
+    result_from_open_port, EvidenceSource as ScanEvidenceSource, NextProbeHint, OsHintSource as ScanOsHintSource,
+    PortList, Scanner, SchemeHint, SensingProfile,
 };
 use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
@@ -55,6 +55,10 @@ pub async fn run(
 
     let evidence_source = stimulus_to_evidence_source(stimulus);
     let sensing_results = fingerprint(target, evidence_source).await;
+    // Upgrade port-convention results with lightweight banner grabs.
+    // Raises confidence 0.5 → 0.65–0.85, sets scheme_hint from banner evidence,
+    // and clears recommended_next_probe when the protocol is resolved.
+    let sensing_results = banner_grab_all(target, sensing_results).await;
     let port_scans: Vec<PortScan> = sensing_results
         .iter()
         .map(sensing_result_to_port_scan)
@@ -305,6 +309,152 @@ fn infer_os_hint_from_results(results: &[physarum_scanner::SensingResult]) -> Op
         })
 }
 
+// ── Banner grab + sensing upgrade ────────────────────────────────────────────
+
+/// Maximum concurrent banner grabs per target host.
+const MAX_BANNER_CONCURRENCY: usize = 8;
+
+/// Lightweight TCP banner grab — reads the first ≤ 256 bytes a server sends.
+///
+/// For HTTP-like ports a minimal `GET /` probe is sent to elicit a response.
+/// Ports 443/8443/9443 are TLS — raw TCP would return binary TLS handshake bytes,
+/// so we skip the write probe and just read (the TLS ClientHello itself is binary
+/// and sanitised away, but the server may send an HTTP error after a bare read).
+/// Returns `None` if the port is silent, refuses, or times out.
+async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+    use tokio::time::{timeout, Duration};
+
+    const TIMEOUT_MS: u64 = 1_500;
+    const MAX_BYTES: usize = 256;
+
+    let addr = SocketAddr::new(IpAddr::V4(target), port);
+    let mut stream = timeout(Duration::from_millis(TIMEOUT_MS), TcpStream::connect(addr))
+        .await
+        .ok()?
+        .ok()?;
+
+    // Send a minimal HTTP probe for plain-HTTP ports to elicit a response header.
+    // TLS ports (443/8443/9443) are skipped — the TLS handshake would be binary.
+    if matches!(
+        port,
+        80 | 3000 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000 | 9090 | 9200 | 9999
+    ) {
+        let _ = timeout(
+            Duration::from_millis(TIMEOUT_MS),
+            stream.write_all(b"GET / HTTP/1.0\r\nHost: physarum\r\nConnection: close\r\n\r\n"),
+        )
+        .await;
+    }
+
+    let mut buf = vec![0u8; MAX_BYTES];
+    let n = timeout(Duration::from_millis(TIMEOUT_MS), stream.read(&mut buf))
+        .await
+        .ok()?
+        .ok()?;
+
+    if n == 0 {
+        return None;
+    }
+
+    let sanitized: String = buf[..n]
+        .iter()
+        .map(|&b| {
+            if b.is_ascii_graphic() || matches!(b, b' ' | b'\r' | b'\n') {
+                b as char
+            } else {
+                '.'
+            }
+        })
+        .collect();
+
+    let trimmed = sanitized.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+/// Upgrade a `SensingResult` with banner evidence.
+///
+/// - Raises confidence from 0.5 → 0.65–0.85 depending on evidence quality.
+/// - Sets `scheme_hint` to `Http` when response headers confirm HTTP.
+/// - Sets `version_hint` when a server version string is recognised.
+/// - Clears `recommended_next_probe` when the banner resolves the ambiguity.
+fn upgrade_with_banner(
+    mut r: physarum_scanner::SensingResult,
+    banner: Option<String>,
+) -> physarum_scanner::SensingResult {
+    let Some(raw) = banner else {
+        return r; // No banner — keep initial convention-based fields.
+    };
+
+    let b = raw.to_ascii_lowercase();
+
+    if b.starts_with("http/") || b.contains("content-type:") || b.contains("server:") {
+        r.scheme_hint = SchemeHint::Http;
+        r.confidence = 0.85;
+        r.recommended_next_probe = NextProbeHint::None;
+    } else if b.starts_with("ssh-")
+        || b.starts_with("220 ")
+        || b.starts_with("+ok ")
+        || b.starts_with("* ok ")
+    {
+        // Non-web protocol greeting confirmed — classification will mark ConfirmedNonWeb.
+        r.confidence = 0.85;
+        r.recommended_next_probe = NextProbeHint::None;
+    } else {
+        // Unrecognised banner — some evidence, but protocol still unclear.
+        // Keep recommended_next_probe so HTTP probe can try to resolve.
+        r.confidence = 0.65;
+    }
+
+    if let Some(v) = extract_version_hint(&raw) {
+        r.version_hint = Some(v);
+    }
+
+    r.banner_or_handshake_summary = Some(raw);
+    r
+}
+
+/// Scan `raw` for common server version strings (nginx, Apache, OpenSSH, …).
+fn extract_version_hint(raw: &str) -> Option<String> {
+    let b = raw.to_ascii_lowercase();
+    for pat in &[
+        "nginx/", "apache/", "openssh_", "openssl/", "tomcat/", "jetty/",
+        "lighttpd/", "gunicorn/",
+    ] {
+        if let Some(pos) = b.find(pat) {
+            let end = raw[pos..]
+                .find(|c: char| c.is_whitespace())
+                .map(|e| pos + e)
+                .unwrap_or_else(|| raw.len().min(pos + 32));
+            return Some(raw[pos..end].to_string());
+        }
+    }
+    None
+}
+
+/// Run banner grabs concurrently for all open ports, upgrading each result.
+async fn banner_grab_all(
+    target: Ipv4Addr,
+    results: Vec<physarum_scanner::SensingResult>,
+) -> Vec<physarum_scanner::SensingResult> {
+    stream::iter(results.into_iter().map(|r| async move {
+        let banner = grab_banner(target, r.port).await;
+        tracing::debug!(
+            %target, port = r.port, got_banner = banner.is_some(),
+            "banner grab complete"
+        );
+        upgrade_with_banner(r, banner)
+    }))
+    .buffer_unordered(MAX_BANNER_CONCURRENCY)
+    .collect()
+    .await
+}
+
 // ── Sporangium pattern enrichment ─────────────────────────────────────────────
 
 /// Maximum concurrent physarum-spore template probes per enrichment call.
@@ -380,6 +530,98 @@ enum ServiceClassification {
     /// Banner or service name definitively identifies a non-web protocol.
     /// physarum-spore is not run. The service is forwarded to the LLM normally.
     ConfirmedNonWeb,
+}
+
+/// Resolve the service classification, performing an HTTP probe when the initial
+/// evidence is ambiguous (`UnknownNeedsMoreSensing`) and the sensing result
+/// recommends one via `recommended_next_probe`.
+///
+/// This is the PF-3.1 adaptive fingerprint path: instead of skipping ambiguous
+/// services entirely, the organism attempts a targeted HTTP/HTTPS probe to decide
+/// whether the service is web-like before the LLM loop runs.
+async fn resolve_classification(
+    r: &physarum_scanner::SensingResult,
+    target: Ipv4Addr,
+) -> ServiceClassification {
+    let initial = classify_web_candidate(r);
+    if initial != ServiceClassification::UnknownNeedsMoreSensing {
+        return initial;
+    }
+
+    if let NextProbeHint::HttpProbe { scheme } = &r.recommended_next_probe {
+        if try_http_probe(target, r.port, scheme).await {
+            tracing::debug!(
+                %target, port = r.port,
+                "UnknownNeedsMoreSensing resolved to ConfirmedWeb via targeted HTTP probe"
+            );
+            return ServiceClassification::ConfirmedWeb;
+        }
+    }
+
+    ServiceClassification::UnknownNeedsMoreSensing
+}
+
+/// Attempt a quick HTTP (or HTTPS) probe against `target:port`.
+///
+/// Returns `true` if the server responds with any valid HTTP response (even 4xx/5xx),
+/// which confirms it is running an HTTP stack. Returns `false` on connection error,
+/// TLS failure, or timeout.
+///
+/// When `scheme = Unknown`, tries HTTP first; if that fails, retries with HTTPS.
+async fn try_http_probe(target: Ipv4Addr, port: u16, scheme: &SchemeHint) -> bool {
+    use tokio::time::Duration;
+
+    const TIMEOUT_MS: u64 = 2_000;
+
+    let client = match reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_millis(TIMEOUT_MS))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let probe = |url: String| {
+        let client = client.clone();
+        async move {
+            match client.get(&url).send().await {
+                Ok(resp) => {
+                    tracing::debug!(
+                        %target, port, %url, status = resp.status().as_u16(),
+                        "targeted HTTP probe response"
+                    );
+                    true
+                }
+                Err(e) => {
+                    tracing::debug!(%target, port, %url, err = %e, "targeted HTTP probe failed");
+                    false
+                }
+            }
+        }
+    };
+
+    match scheme {
+        SchemeHint::Https => probe(format!("https://{}:{}/", target, port)).await,
+        SchemeHint::Http => probe(format!("http://{}:{}/", target, port)).await,
+        SchemeHint::Unknown => {
+            // Try HTTP first; fall back to HTTPS if HTTP fails.
+            if probe(format!("http://{}:{}/", target, port)).await {
+                return true;
+            }
+            probe(format!("https://{}:{}/", target, port)).await
+        }
+    }
+}
+
+/// Map a `SchemeHint` to the string passed to `PatternRunner::run()`.
+/// `Unknown` maps to `None` — lets PatternRunner use its port-based fallback.
+fn scheme_str_for(hint: &SchemeHint) -> Option<String> {
+    match hint {
+        SchemeHint::Http => Some("http".to_string()),
+        SchemeHint::Https => Some("https".to_string()),
+        SchemeHint::Unknown => None,
+    }
 }
 
 /// Returns true if `r` carries definitive evidence of a non-web protocol.
@@ -473,72 +715,45 @@ fn classify_web_candidate(r: &physarum_scanner::SensingResult) -> ServiceClassif
 /// Run all built-in physarum-sporangium templates against every web-like service
 /// on `target`, returning the findings with bounded concurrency.
 ///
-/// Only `ConfirmedWeb` and `LikelyWeb` services are probed. `UnknownNeedsMoreSensing`
-/// services are skipped here but still forwarded to the LLM via `PortScan` entries —
-/// the LLM receives the full picture regardless of spore enrichment.
+/// Classification now uses [`resolve_classification`] which performs a targeted
+/// HTTP probe for `UnknownNeedsMoreSensing` services when `recommended_next_probe`
+/// suggests one. This resolves cases 3–5 that were deferred in PF-3 (PR #122).
 /// Template probe errors are logged at debug level and treated as no-match.
 async fn enrich_with_patterns(
     target: Ipv4Addr,
     sensing_results: &[physarum_scanner::SensingResult],
 ) -> Vec<PatternFinding> {
-    let mut web_results: Vec<&physarum_scanner::SensingResult> = Vec::new();
+    let mut web_results: Vec<(u16, Option<String>)> = Vec::new(); // (port, scheme_str)
+
     for r in sensing_results {
-        match classify_web_candidate(r) {
+        match resolve_classification(r, target).await {
             ServiceClassification::ConfirmedWeb => {
-                // Warn when service_guess suggests HTTPS on a port that PatternRunner
-                // does not auto-select TLS for (only 443/8443/9443 get https://).
-                // A custom TLS port will be probed as HTTP and may produce silent misses.
-                // Future: pass a scheme_hint into PatternRunner to resolve this.
-                let guess_is_https = r
-                    .service_guess
-                    .as_deref()
-                    .map(|g| g.to_ascii_lowercase().starts_with("https"))
-                    .unwrap_or(false);
-                if guess_is_https && !matches!(r.port, 443 | 8443 | 9443) {
-                    tracing::debug!(
-                        %target,
-                        port = r.port,
-                        service_guess = ?r.service_guess,
-                        "ConfirmedWeb (HTTPS hint on non-standard port) — \
-                         PatternRunner will probe as HTTP (scheme_hint not yet implemented)"
-                    );
-                } else {
-                    tracing::debug!(
-                        %target,
-                        port = r.port,
-                        service_guess = ?r.service_guess,
-                        "ConfirmedWeb — running all spore templates"
-                    );
-                }
-                web_results.push(r);
+                tracing::debug!(
+                    %target, port = r.port, scheme = ?r.scheme_hint,
+                    service_guess = ?r.service_guess,
+                    "ConfirmedWeb — running all spore templates"
+                );
+                web_results.push((r.port, scheme_str_for(&r.scheme_hint)));
             }
             ServiceClassification::LikelyWeb => {
                 tracing::debug!(
-                    %target,
-                    port = r.port,
+                    %target, port = r.port, scheme = ?r.scheme_hint,
                     service_guess = ?r.service_guess,
                     "LikelyWeb (conventional web port, no strong evidence) — \
                      running spore templates opportunistically"
                 );
-                web_results.push(r);
+                web_results.push((r.port, scheme_str_for(&r.scheme_hint)));
             }
             ServiceClassification::UnknownNeedsMoreSensing => {
-                // Service is ambiguous — cannot conclude from current sensing depth.
-                // Forwarded to the LLM as a SensingResult/PortScan entry (low confidence).
-                // Future: physarum-scan deeper fingerprint should resolve this before
-                // the LLM loop runs (PF-2 adaptive re-sensing).
                 tracing::debug!(
-                    %target,
-                    port = r.port,
-                    service_guess = ?r.service_guess,
-                    "UnknownNeedsMoreSensing — spore skipped, forwarded to LLM as unknown"
+                    %target, port = r.port, service_guess = ?r.service_guess,
+                    "UnknownNeedsMoreSensing — HTTP probe inconclusive, \
+                     spore skipped, forwarded to LLM as unknown"
                 );
             }
             ServiceClassification::ConfirmedNonWeb => {
                 tracing::debug!(
-                    %target,
-                    port = r.port,
-                    service_guess = ?r.service_guess,
+                    %target, port = r.port, service_guess = ?r.service_guess,
                     "ConfirmedNonWeb — spore skipped, forwarded to LLM via PortScan"
                 );
             }
@@ -570,15 +785,17 @@ async fn enrich_with_patterns(
 
     let tasks: Vec<_> = web_results
         .iter()
-        .flat_map(|r| {
-            let port = r.port;
+        .flat_map(|(port, scheme)| {
+            let port = *port;
+            let scheme = scheme.clone();
             let runner = runner.clone();
             templates.iter().map(move |t| {
                 let runner = runner.clone();
                 let template = t.clone();
+                let scheme = scheme.clone();
                 async move {
                     match runner
-                        .run(&template, std::net::IpAddr::V4(target), port)
+                        .run(&template, IpAddr::V4(target), port, scheme.as_deref())
                         .await
                     {
                         Ok(findings) => findings,
