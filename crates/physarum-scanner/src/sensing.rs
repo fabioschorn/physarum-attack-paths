@@ -294,8 +294,8 @@ pub enum OsHintSource {
 fn scheme_hint_from_port(port: u16) -> SchemeHint {
     match port {
         443 | 8443 | 9443 => SchemeHint::Https,
-        80 | 2375 | 2376 | 3000 | 4243 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000
-        | 9090 | 9200 | 9999 => SchemeHint::Http,
+        80 | 2375 | 2376 | 3000 | 4243 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000 | 9090
+        | 9200 | 9999 => SchemeHint::Http,
         _ => SchemeHint::Unknown,
     }
 }
@@ -312,10 +312,34 @@ fn initial_probe_hint(service_guess: &Option<String>, scheme_hint: &SchemeHint) 
         // Definitively non-web protocols — HTTP probe would be meaningless.
         if matches!(
             g_lower.as_str(),
-            "ssh" | "ftp" | "sftp" | "telnet" | "smtp" | "smtps" | "submission" | "pop3"
-                | "pop3s" | "imap" | "imaps" | "mysql" | "postgresql" | "redis" | "mssql"
-                | "oracle" | "ldap" | "ldaps" | "rdp" | "vnc" | "netbios-ssn"
-                | "microsoft-ds" | "syslog" | "dns" | "rpcbind" | "ipp" | "nfs" | "socks"
+            "ssh"
+                | "ftp"
+                | "sftp"
+                | "telnet"
+                | "smtp"
+                | "smtps"
+                | "submission"
+                | "pop3"
+                | "pop3s"
+                | "imap"
+                | "imaps"
+                | "mysql"
+                | "postgresql"
+                | "redis"
+                | "mssql"
+                | "oracle"
+                | "ldap"
+                | "ldaps"
+                | "rdp"
+                | "vnc"
+                | "netbios-ssn"
+                | "microsoft-ds"
+                | "syslog"
+                | "dns"
+                | "rpcbind"
+                | "ipp"
+                | "nfs"
+                | "socks"
                 | "pptp"
         ) {
             return NextProbeHint::None;
@@ -558,23 +582,34 @@ mod tests {
         use std::net::IpAddr;
         let ip: IpAddr = "10.0.0.1".parse().unwrap();
 
-        let r80 = result_from_open_port(ip, 80, SensingProfile::Fast, EvidenceSource::ScheduledScan);
+        let r80 =
+            result_from_open_port(ip, 80, SensingProfile::Fast, EvidenceSource::ScheduledScan);
         assert_eq!(r80.scheme_hint, SchemeHint::Http);
         assert_eq!(r80.recommended_next_probe, NextProbeHint::None);
 
-        let r443 = result_from_open_port(ip, 443, SensingProfile::Fast, EvidenceSource::ScheduledScan);
+        let r443 =
+            result_from_open_port(ip, 443, SensingProfile::Fast, EvidenceSource::ScheduledScan);
         assert_eq!(r443.scheme_hint, SchemeHint::Https);
         assert_eq!(r443.recommended_next_probe, NextProbeHint::None);
 
         // SSH — known non-web, no HTTP probe recommended
-        let r22 = result_from_open_port(ip, 22, SensingProfile::Fast, EvidenceSource::ScheduledScan);
+        let r22 =
+            result_from_open_port(ip, 22, SensingProfile::Fast, EvidenceSource::ScheduledScan);
         assert_eq!(r22.scheme_hint, SchemeHint::Unknown);
         assert_eq!(r22.recommended_next_probe, NextProbeHint::None);
 
         // Unknown port — HTTP probe recommended to resolve ambiguity
-        let r12345 = result_from_open_port(ip, 12345, SensingProfile::Fast, EvidenceSource::ScheduledScan);
+        let r12345 = result_from_open_port(
+            ip,
+            12345,
+            SensingProfile::Fast,
+            EvidenceSource::ScheduledScan,
+        );
         assert_eq!(r12345.scheme_hint, SchemeHint::Unknown);
-        assert!(matches!(r12345.recommended_next_probe, NextProbeHint::HttpProbe { .. }));
+        assert!(matches!(
+            r12345.recommended_next_probe,
+            NextProbeHint::HttpProbe { .. }
+        ));
     }
 
     #[test]

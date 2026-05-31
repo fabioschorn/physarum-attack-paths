@@ -23,8 +23,8 @@ use physarum_llm::{
     RejectedStrategy, TransportProtocol, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
-    result_from_open_port, EvidenceSource as ScanEvidenceSource, NextProbeHint, OsHintSource as ScanOsHintSource,
-    PortList, Scanner, SchemeHint, SensingProfile,
+    result_from_open_port, EvidenceSource as ScanEvidenceSource, NextProbeHint,
+    OsHintSource as ScanOsHintSource, PortList, Scanner, SchemeHint, SensingProfile,
 };
 use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
@@ -423,8 +423,14 @@ fn upgrade_with_banner(
 fn extract_version_hint(raw: &str) -> Option<String> {
     let b = raw.to_ascii_lowercase();
     for pat in &[
-        "nginx/", "apache/", "openssh_", "openssl/", "tomcat/", "jetty/",
-        "lighttpd/", "gunicorn/",
+        "nginx/",
+        "apache/",
+        "openssh_",
+        "openssl/",
+        "tomcat/",
+        "jetty/",
+        "lighttpd/",
+        "gunicorn/",
     ] {
         if let Some(pos) = b.find(pat) {
             let end = raw[pos..]
