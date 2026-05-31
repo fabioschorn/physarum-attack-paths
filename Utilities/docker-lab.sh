@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 #
-# docker-lab.sh — physarum-llm Docker Lab runner (Issue #106 Phase 5)
+# docker-lab.sh — physarum-maze Docker Lab runner (PF-3.1 adaptive fingerprint)
+#
+# Four-container lab validating the three-layer adaptive sensing pipeline:
+#   host-a (physarum-maze:lab)    — agent with mock LLM, senses the /24
+#   host-b (nginx:alpine :80)     — ConfirmedWeb via service_guess="http"
+#   host-c (python http.server :8080) — ConfirmedWeb via service_guess="http-alt"
+#   host-d (python http.server :7777) — UnknownNeedsMoreSensing → ConfirmedWeb
+#                                       via Layer 3 targeted HTTP probe
 #
 # What this script does:
 #   1. Verifies local Rust toolchain is >= 1.86
-#   2. Compiles physarum-maze locally (cargo build --release)
-#   3. Builds the Docker image via Docker Cloud (cloud-expertsonline-physarum-attack-paths)
-#   4. Creates the lineage output directory
-#   5. Starts the two-container lab (docker compose up)
-#   6. Streams host-a logs in real time
-#   7. On exit (Ctrl-C or timeout) prints the lineage evidence
+#   2. Builds the Docker image via Docker Cloud (cloud-expertsonline-physarum-attack-paths)
+#      using OCI export + docker load (cloud builder cannot --load directly)
+#   3. Creates the lineage output directory
+#   4. Starts the four-container lab (docker compose up)
+#   5. Streams host-a logs in real time
+#   6. On exit (Ctrl-C or timeout) prints the lineage evidence
 #
 # Usage:
 #   ./Utilities/docker-lab.sh            # run the lab
@@ -27,9 +34,10 @@ PASS="${GREEN}✔${NC}"; FAIL="${RED}✘${NC}"; INFO="${BLUE}→${NC}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCKER_DIR="$PROJECT_ROOT/docker"
 COMPOSE_FILE="$DOCKER_DIR/docker-compose-lab.yml"
-DOCKERFILE="$DOCKER_DIR/physarum-maze.Dockerfile"
+DOCKERFILE="$DOCKER_DIR/physarum-maze-lab.Dockerfile"
 LINEAGE_DIR="$DOCKER_DIR/lineage"
 IMAGE_TAG="physarum-maze:lab"
+OCI_TAR="/tmp/physarum-maze-lab.tar"
 CLOUD_BUILDER="cloud-expertsonline-physarum-attack-paths"
 MIN_RUST_VERSION="1.86.0"
 
@@ -83,37 +91,36 @@ echo ""
 echo -e "${BOLD}── Step 0: verify Rust toolchain${NC}"
 check_rust_toolchain
 
-# ─── Step 1: Compile physarum-maze locally ─────────────────────────────────
+# ─── Step 1: Build Docker image via Docker Cloud ───────────────────────────
+# Cloud builder cannot --load directly; export OCI tar then docker load.
 echo ""
-echo -e "${BOLD}── Step 1: cargo build --release${NC}"
-cargo build --release -p physarum-maze \
-    --manifest-path "$PROJECT_ROOT/Cargo.toml" 2>&1 | tail -3
-echo -e "  [${PASS}] physarum-maze compiled"
-
-# ─── Step 2: Build Docker image via Docker Cloud ───────────────────────────
-echo ""
-echo -e "${BOLD}── Step 2: docker buildx build (cloud builder)${NC}"
-echo -e "  [${INFO}] builder: $CLOUD_BUILDER"
+echo -e "${BOLD}── Step 1: docker buildx build (cloud builder)${NC}"
+echo -e "  [${INFO}] builder:  $CLOUD_BUILDER"
+echo -e "  [${INFO}] output:   $OCI_TAR"
 
 docker buildx build \
     --builder "$CLOUD_BUILDER" \
     --platform linux/amd64 \
-    --load \
+    --output "type=oci,dest=$OCI_TAR" \
     -t "$IMAGE_TAG" \
     -f "$DOCKERFILE" \
     "$PROJECT_ROOT"
 
-echo -e "  [${PASS}] image built: $IMAGE_TAG"
+echo -e "  [${INFO}] loading image into docker daemon..."
+docker load -i "$OCI_TAR"
+echo -e "  [${PASS}] image loaded: $IMAGE_TAG"
 
-# ─── Step 3: Prepare lineage output directory ──────────────────────────────
+# ─── Step 2: Prepare lineage output directory ──────────────────────────────
 mkdir -p "$LINEAGE_DIR"
 echo -e "  [${PASS}] lineage dir: $LINEAGE_DIR"
 
-# ─── Step 4: Start lab ─────────────────────────────────────────────────────
+# ─── Step 3: Start lab ─────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}── Step 4: docker compose up${NC}"
-echo -e "  [${INFO}] host-b: nginx:alpine (172.20.0.3, port 80 only)"
-echo -e "  [${INFO}] host-a: physarum-maze (172.20.0.2, --llm-endpoint mock-http)"
+echo -e "${BOLD}── Step 3: docker compose up${NC}"
+echo -e "  [${INFO}] host-b: nginx:alpine        172.20.0.3 :80   (ConfirmedWeb via service_guess)"
+echo -e "  [${INFO}] host-c: python http.server  172.20.0.4 :8080 (ConfirmedWeb via service_guess)"
+echo -e "  [${INFO}] host-d: python http.server  172.20.0.5 :7777 (Layer 3 HTTP probe)"
+echo -e "  [${INFO}] host-a: physarum-maze        172.20.0.2       (agent, --llm-endpoint mock-http)"
 echo -e "  [${INFO}] Press Ctrl-C to stop and view lineage evidence"
 echo ""
 

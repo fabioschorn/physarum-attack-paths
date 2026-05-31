@@ -1,16 +1,23 @@
-# physarum-maze Docker Lab — source-build variant
+# physarum-maze Docker Lab — source-build variant (PF-3.1 adaptive fingerprint)
 #
 # Two-stage build for Docker Lab validation from macOS.
 # Stage 1: compiles physarum-maze from source in linux/amd64 Rust environment.
 # Stage 2: packages the binary into a slim runtime image.
 #
+# Used by docker-compose-lab.yml for the four-container PF-3.1 validation lab:
+#   host-a (this image) — physarum-maze agent with mock LLM
+#   host-b              — nginx:alpine on port 80
+#   host-c              — python http.server on port 8080
+#   host-d              — python http.server on port 7777 (Layer 3 adaptive probe)
+#
 # Production releases use physarum-maze.Dockerfile (pre-compiled binary via CI).
 # This Dockerfile is for lab runs only where a Linux cross-compiler is unavailable.
 #
-# Build:
+# Build (cloud builder — law):
 #   docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
-#     --platform linux/amd64 --load -t physarum-maze:lab \
+#     --platform linux/amd64 --output type=oci,dest=/tmp/physarum-maze-lab.tar \
 #     -f docker/physarum-maze-lab.Dockerfile .
+#   docker load -i /tmp/physarum-maze-lab.tar
 
 FROM rust:1.86-slim-bookworm AS builder
 
