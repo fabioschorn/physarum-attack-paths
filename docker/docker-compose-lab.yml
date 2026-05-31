@@ -1,20 +1,34 @@
-# physarum-llm Docker Lab — Issue #106 Phase 5
+# physarum-maze Docker Lab — PF-3.1 adaptive fingerprint validation
 #
-# Two-container lab that proves the full reasoning cycle:
+# Three-target lab validating the full adaptive evidence pipeline:
 #
 #   host-a (physarum-maze + LLM enabled)
-#     │  senses host-b via /24 periodic discovery
-#     │  port 22 closed on host-b → Causal Continuity Paradox
-#     │  LLM reasoning loop fires (mock-http → HTTP GET strategy)
-#     │  PolicyGate accepts (172.20.0.0/24 CIDR, confidence 0.9)
-#     │  bootstrap: HTTP GET http://172.20.0.3/ → 200 OK
-#     └→ LlmAttemptEvidence recorded in /tmp/physarum-lineage.json
+#     │  senses host-b/c/d via /24 periodic discovery
+#     │  port 22 closed on all targets → LLM reasoning loop fires
+#     │
+#     ├─ host-b :80  (service_guess="http")
+#     │    Layer 1 → ConfirmedWeb (service_guess starts with "http")
+#     │    banner grab: HTTP GET → scheme_hint=Http, confidence=0.85
+#     │    spore enrichment → PatternFindingSummary → DiscoveryQuery
+#     │
+#     ├─ host-c :8080 (service_guess="http-alt")
+#     │    Layer 1 → ConfirmedWeb (service_guess starts with "http")
+#     │    banner grab: HTTP GET → scheme_hint=Http, confidence=0.85
+#     │    spore enrichment → PatternFindingSummary → DiscoveryQuery
+#     │
+#     └─ host-d :7777 (no service_guess, scheme_hint=Unknown)
+#          Layer 1 → port-convention only, confidence=0.5
+#          Layer 2 banner grab → no spontaneous greeting → None
+#          Layer 3 HTTP probe → http://172.20.0.5:7777/ → 200 OK
+#                → UnknownNeedsMoreSensing resolved to ConfirmedWeb
+#          spore enrichment → PatternFindingSummary → DiscoveryQuery
 #
-#   host-b (nginx — port 80 open, port 22 closed)
+# Trigger stimuli after lab starts:
+#   docker exec physarum-host-b sh -c "apk add --no-cache iputils -q; ping -c 3 172.20.0.2"
+#   docker exec physarum-host-c sh -c "apk add --no-cache iputils -q; ping -c 3 172.20.0.2"
+#   docker exec physarum-host-d sh -c "apk add --no-cache iputils -q; ping -c 3 172.20.0.2"
 #
-# Run with: ./Utilities/docker-lab.sh
-#
-# To inspect lineage after the run:
+# Inspect lineage:
 #   cat lineage/physarum-lineage.json | python3 -m json.tool
 
 networks:
@@ -49,6 +63,23 @@ services:
     command: ["python3", "-m", "http.server", "8080"]
     # Port 22 NOT exposed — LLM reasoning loop fires for this host too
 
+  # ── Host D — HTTP on port 7777 (Case 3: UnknownNeedsMoreSensing → ConfirmedWeb) ──
+  #
+  # Port 7777 has no service_guess and scheme_hint=Unknown.
+  # Banner grab returns None (Python http.server doesn't greet spontaneously).
+  # resolve_classification() triggers targeted HTTP probe:
+  #   try_http_probe(172.20.0.5, 7777, Unknown) → http://172.20.0.5:7777/ → 200 OK
+  #   → UnknownNeedsMoreSensing resolved to ConfirmedWeb (PF-3.1 adaptive path)
+  # physarum-spore runs all templates against 172.20.0.5:7777.
+  host-d:
+    image: python:3-alpine
+    container_name: physarum-host-d
+    networks:
+      physarum-lab:
+        ipv4_address: 172.20.0.5
+    command: ["python3", "-m", "http.server", "7777"]
+    # Port 22 NOT exposed — LLM reasoning loop fires for this host too
+
   # ── Host A — physarum-maze agent with LLM enabled ────────────────────────────
   host-a:
     image: physarum-maze:lab
@@ -56,6 +87,7 @@ services:
     depends_on:
       - host-b
       - host-c
+      - host-d
     networks:
       physarum-lab:
         ipv4_address: 172.20.0.2

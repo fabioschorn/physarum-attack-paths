@@ -163,7 +163,11 @@ pub const DEEP_PORTS: &[u16] = &[
 ];
 
 /// Focused port set for `StimulusTargeted` — stimulus host service probe.
-pub const STIMULUS_PORTS: &[u16] = &[22, 80, 443, 8080, 8443, 3000, 5000, 9000];
+///
+/// 7777 is included as a representative non-standard web-service port with no
+/// registered service name. It exercises the `UnknownNeedsMoreSensing → HTTP
+/// probe → ConfirmedWeb` adaptive fingerprint path (PF-3.1 validation).
+pub const STIMULUS_PORTS: &[u16] = &[22, 80, 443, 7777, 8080, 8443, 3000, 5000, 9000];
 
 // ── SchemeHint / NextProbeHint ────────────────────────────────────────────────
 
