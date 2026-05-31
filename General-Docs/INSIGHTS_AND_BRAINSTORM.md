@@ -4,7 +4,7 @@ This document captures exploratory ideas, research insights, and future directio
 
 It is intentionally separate from the operational prototype roadmap. The roadmap defines what we are building next. This document preserves promising ideas that may influence future architecture, research positioning, or invention framing.
 
-**Last reviewed:** 2026-05-30 — updated after `physarum-llm` contracts/client/Docker Lab work, Issue #114 structured sensing merge, and Issue #115 `physarum-sporangium` direction.
+**Last reviewed:** 2026-05-30 — updated after `physarum-llm` contracts/client/Docker Lab work, Issue #114 structured sensing merge, Issue #115 `physarum-sporangium` / `physarum-spore` direction, and the Online/Offline Cortex brainstorm.
 
 ---
 
@@ -226,7 +226,7 @@ Updated order:
 ```text
 4a. physarum-llm — LLM-aware adaptive reasoning                    → ACTIVE
 4b. physarum-scanner SensingProfile / SensingResult                ✔ DONE — Issue #114
-4c. physarum-sporangium — native Nuclei-inspired evidence engine   → NEXT — Issue #115
+4c. physarum-sporangium / physarum-spore evidence engine           → ACTIVE — Issue #115
 4d. MCPM-inspired path density                                     → FUTURE
 ```
 
@@ -396,7 +396,215 @@ The strategic autonomy questions remain the north star. `physarum-llm` is the fi
 
 ---
 
-## 11. Future visualization idea: wasm-lab
+## 11. Online and offline cortex modes for the same agent
+
+> **Status:** Brainstorm only. No issue should be opened yet. This section records a future behavioral model for the same `physarum-maze` agent under different environmental conditions.
+
+The same agent should be able to behave differently depending on what it senses about its environment. This is not a separate agent type; it is an internal mode switch.
+
+Conceptually:
+
+```text
+if LLM is reachable and policy allows external reasoning:
+    enter Online Cortex Mode
+else:
+    enter Offline Cortex Capsule Mode
+```
+
+This split helps the organism handle two very different node classes:
+
+```text
+resource-rich node:
+  has outbound path to an LLM gateway or relay
+  can ask for richer reasoning
+  can submit graph context for evaluation
+  can receive policy-constrained plan proposals
+
+resource-poor / isolated node:
+  has no Internet or no LLM route
+  may only have local network visibility
+  can still sense, record, score, and synchronize later
+  should not escalate autonomy only because external reasoning is unavailable
+```
+
+### Online Cortex Mode — LLM reachable
+
+Online Cortex Mode is used when the agent can reach a configured LLM endpoint directly or through an approved relay.
+
+Input to the LLM should be structured and bounded:
+
+```text
+SensingResult[]
+PatternFinding[]
+FlowObservation[]
+RecentLineage
+GraphSnapshot or GraphDelta summary
+AllowedLabScope
+PolicyConstraints
+KnownDeadEnds
+KnownSecondaryConduits
+```
+
+The LLM should not receive uncontrolled raw dumps. It should receive evidence summaries that are already filtered, capped, and policy-aware.
+
+Expected flow:
+
+```text
+sense
+  -> enrich evidence
+  -> update local graph delta
+  -> prepare GraphContext
+  -> call physarum-llm
+  -> receive PlanProposal
+  -> PolicyGate validation
+  -> controlled lab action only if accepted
+  -> append LineageEvent
+  -> sync graph/ledger deltas
+```
+
+In this mode, the LLM is a cortex-like advisor, not the permanent memory of the organism. The durable memory should still live in graph, lineage, and policy state.
+
+```text
+LLM = reasoning advisor
+Graph = memory
+Lineage = history
+Policy = boundary
+DNA = continuity identity
+```
+
+### Offline Cortex Capsule Mode — LLM not reachable
+
+Offline Cortex Capsule Mode is used when the agent cannot reach the LLM, cannot reach a relay, or is running on a node with limited resources or restricted egress.
+
+The agent should not stop. It should reduce autonomy and preserve continuity.
+
+Expected behavior:
+
+```text
+sense
+  -> enrich evidence locally
+  -> update local graph delta
+  -> apply offline heuristic scorer
+  -> append LineageEvent
+  -> try parent/peer/relay sync
+  -> wait for reconnection or operator-controlled export
+```
+
+The offline capsule can contain:
+
+```text
+policy snapshot
+allowed scope
+trusted roots
+last known graph root
+last known lineage root
+small scoring heuristic
+template/check allowlist
+capability manifest
+parent/relay hints
+```
+
+This mode should be conservative:
+
+```text
+observe and record: yes
+enrich evidence locally: yes
+update local graph delta: yes
+sync with trusted peers if available: yes
+perform high-risk autonomous action without current policy/LLM: no
+expand scope beyond DNA/policy: no
+```
+
+### The if/else as organism behavior
+
+A future implementation could make the mode explicit inside the agent runtime:
+
+```text
+fn choose_cortex_mode(agent_context): CortexMode {
+    if llm_endpoint_reachable()
+       && policy.allows_external_reasoning()
+       && node_resources_are_sufficient() {
+        CortexMode::Online
+    } else {
+        CortexMode::OfflineCapsule
+    }
+}
+```
+
+The important point is that both branches belong to the same organism.
+
+```text
+Online mode thinks with help.
+Offline mode remembers and survives.
+```
+
+### DNA, graph, and ledger relationship
+
+The DNA idea should not be a heavyweight public blockchain. A better fit is a lightweight internal continuity ledger:
+
+```text
+Agent DNA:
+  organism_id
+  agent_id
+  parent_agent_id
+  generation
+  policy_version
+  capability_manifest
+  trusted_roots
+  last_graph_root
+  last_lineage_root
+
+Lineage Ledger:
+  append-only signed events
+  parent event hash
+  evidence hash
+  graph delta hash
+  policy version
+  action/result summary
+
+Graph Memory:
+  mergeable node/edge/service observations
+  dead ends
+  secondary conduits
+  confidence
+  conductivity
+  path-density candidates
+```
+
+This gives the organism continuity without requiring a central always-online brain.
+
+### Future naming ideas
+
+Potential component names for later consideration:
+
+```text
+physarum-dna       -> continuity identity and inherited policy roots
+physarum-ledger    -> signed append-only lineage event log
+physarum-graph     -> mergeable graph memory
+physarum-synapse   -> peer/relay synchronization between agents
+physarum-cortex    -> online/offline reasoning interface
+physarum-nucleus   -> trust roots, policy, and identity boundary
+```
+
+### Design principle
+
+```text
+The agent should not become useless without Internet.
+It should become more conservative.
+```
+
+And:
+
+```text
+The LLM may disappear.
+The organism memory must not.
+```
+
+This section should remain in `INSIGHTS_AND_BRAINSTORM.md` until the release and current evidence loop are stable. No issues should be opened yet.
+
+---
+
+## 12. Future visualization idea: wasm-lab
 
 > **Status:** Research/backlog idea only. Not part of the current implementation roadmap.
 
@@ -416,9 +624,9 @@ This should remain separate from the main README status table until there is an 
 
 ---
 
-## 12. Sensing profiles and native Rust refactoring of external security tools
+## 13. Sensing profiles and native Rust refactoring of external security tools
 
-> **Status (2026-05-30):** Partly implemented and partly active. Issue #114 delivered `SensingProfile` and `SensingResult` in `physarum-scanner`. Issue #115 is now active for the native Nuclei-inspired Rust port, named `physarum-sporangium`. SSRFmap-inspired work remains future/backlog.
+> **Status (2026-05-30):** Partly implemented and partly active. Issue #114 delivered `SensingProfile` and `SensingResult` in `physarum-scanner`. Issue #115 is now active for the native Nuclei-inspired Rust port, named `physarum-sporangium`; `physarum-spore` is the corresponding CLI binary. SSRFmap-inspired work remains future/backlog.
 
 The project should avoid treating external tools as permanent subprocess dependencies. The preferred direction is to study useful behavior from mature tools and refactor the relevant concepts into native Rust components that can be incorporated into the `physarum-maze` organism, similar to how `physarum-scanner` became a native project capability.
 
@@ -453,20 +661,15 @@ The operational inspiration was translated into project-native semantics:
 
 `SensingResult` now gives the project a structured evidence envelope that can feed `physarum-llm` instead of passing only raw open ports.
 
-### Native Nuclei-inspired capability — physarum-sporangium
+### Native Nuclei-inspired capability — physarum-sporangium / physarum-spore
 
 `nuclei` should be considered source material for a native Rust evidence engine, not a permanent subprocess dependency.
 
-Working name:
+Working names:
 
 ```text
-physarum-sporangium
-```
-
-Suggested crate:
-
-```text
-crates/physarum-sporangium
+physarum-sporangium  -> crate / evidence engine
+physarum-spore       -> CLI binary / pattern-evidence runner
 ```
 
 Biological framing:
@@ -564,7 +767,7 @@ physarum-maze
   -> native SSRF evidence engine
   -> physarum-llm reasoning
   -> policy gate
-  -> controlled propagation
+  -> controlled action
   -> lineage update
   -> next organism loop
 ```
@@ -577,7 +780,7 @@ Recommended posture:
 1. Expand sensing and fingerprint richness first.                  ✔ Issue #114
 2. Port vulnerability-pattern evidence into native Rust.           → Issue #115
 3. Feed more precise evidence into physarum-llm.                   → Issue #106 next integration
-4. Keep exploitation and propagation behind explicit policy gates.
+4. Keep high-risk actions behind explicit policy gates.
 5. Refactor external-tool ideas into native Rust components instead of building a wrapper chain.
 ```
 
