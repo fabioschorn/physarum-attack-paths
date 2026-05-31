@@ -1352,12 +1352,15 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "chrono",
+ "clap",
+ "futures",
  "regex",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
