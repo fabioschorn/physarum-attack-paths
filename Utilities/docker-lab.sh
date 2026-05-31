@@ -14,7 +14,13 @@
 #   PF-3.1 mock (default, no API key):
 #     ./Utilities/docker-lab.sh
 #
-#   PF-4 real LLM (OpenAI-compatible):
+#   PF-4 real LLM (OpenAI-compatible) — via .env.local (recommended):
+#     cp examples/pf-4-real-llm-lab/sensitive-info/.env.example \
+#        examples/pf-4-real-llm-lab/sensitive-info/.env.local
+#     # edit .env.local — fill in PHYSARUM_LLM_ENDPOINT and LLM_API_KEY
+#     ./Utilities/docker-lab.sh     # script auto-loads .env.local
+#
+#   PF-4 real LLM — via environment variables:
 #     export LLM_API_KEY="sk-..."
 #     export PHYSARUM_LLM_ENDPOINT="https://api.openai.com"
 #     export PHYSARUM_LLM_MODEL="gpt-4o-mini"      # optional, default gpt-4o-mini
@@ -103,6 +109,15 @@ case "${1:-}" in
         ;;
 esac
 
+# ─── Step 0: Auto-load .env.local if present ─────────────────────────────────
+ENV_LOCAL="$PROJECT_ROOT/examples/pf-4-real-llm-lab/sensitive-info/.env.local"
+if [ -f "$ENV_LOCAL" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_LOCAL"
+    set +a
+fi
+
 # ─── Step 0a: Verify Rust toolchain ───────────────────────────────────────────
 echo ""
 echo -e "${BOLD}── Step 0a: verify Rust toolchain${NC}"
@@ -167,6 +182,27 @@ echo ""
 
 # Run compose in background so we can trap exit
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+
+# ─── Step 4: Trigger stimuli ───────────────────────────────────────────────────
+# Send ICMP ping from each host to host-a after a short delay so host-a's
+# raw socket is ready. Each ping triggers a DiscoveryQuery → LLM reasoning cycle.
+(
+    sleep 6
+    echo -e "\n  [${INFO}] triggering stimulus: host-b → 172.20.0.2"
+    docker exec physarum-host-b sh -c \
+        "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
+        >/dev/null 2>&1 || true
+    sleep 3
+    echo -e "  [${INFO}] triggering stimulus: host-c → 172.20.0.2"
+    docker exec physarum-host-c sh -c \
+        "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
+        >/dev/null 2>&1 || true
+    sleep 3
+    echo -e "  [${INFO}] triggering stimulus: host-d → 172.20.0.2"
+    docker exec physarum-host-d sh -c \
+        "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
+        >/dev/null 2>&1 || true
+) &
 
 # Stream host-a logs — this is where the reasoning loop output appears
 trap 'on_exit' INT TERM EXIT
