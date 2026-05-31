@@ -163,7 +163,40 @@ pub const DEEP_PORTS: &[u16] = &[
 ];
 
 /// Focused port set for `StimulusTargeted` — stimulus host service probe.
-pub const STIMULUS_PORTS: &[u16] = &[22, 80, 443, 8080, 8443, 3000, 5000, 9000];
+///
+/// 7777 is included as a representative non-standard web-service port with no
+/// registered service name. It exercises the `UnknownNeedsMoreSensing → HTTP
+/// probe → ConfirmedWeb` adaptive fingerprint path (PF-3.1 validation).
+pub const STIMULUS_PORTS: &[u16] = &[22, 80, 443, 7777, 8080, 8443, 3000, 5000, 9000];
+
+// ── SchemeHint / NextProbeHint ────────────────────────────────────────────────
+
+/// Protocol scheme inferred from banner evidence or port convention.
+///
+/// Used by physarum-maze to select HTTP/HTTPS probe strategy and by
+/// `PatternRunner` to avoid scheme mis-detection on non-standard ports.
+/// Starts as `Unknown` (port-convention only); upgraded to `Http`/`Https`
+/// after banner confirmation in the adaptive fingerprint pass (PF-3.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SchemeHint {
+    Http,
+    Https,
+    #[default]
+    Unknown,
+}
+
+/// Next sensing action recommended when protocol evidence is insufficient.
+///
+/// Set initially from port convention by [`result_from_open_port`].
+/// Cleared (`None`) once banner grab or HTTP probe resolves the ambiguity.
+/// Consumed by physarum-maze's adaptive re-sensing loop (PF-3.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NextProbeHint {
+    /// Send an HTTP or HTTPS probe to resolve protocol ambiguity.
+    HttpProbe { scheme: SchemeHint },
+    /// No additional probing recommended for this service.
+    None,
+}
 
 // ── SensingResult ─────────────────────────────────────────────────────────────
 
@@ -192,6 +225,12 @@ pub struct SensingResult {
     /// lower than banner-confirmed evidence.
     pub confidence: f32,
     pub evidence_source: EvidenceSource,
+    /// Protocol scheme derived from port convention or banner evidence.
+    /// Starts as `Unknown`; upgraded to `Http`/`Https` after banner grab.
+    pub scheme_hint: SchemeHint,
+    /// Next sensing action recommended when evidence remains ambiguous.
+    /// Cleared once banner grab or HTTP probe resolves the service class.
+    pub recommended_next_probe: NextProbeHint,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -243,6 +282,53 @@ pub enum OsHintSource {
     HttpHeader,
     ServiceBanner,
     Convention,
+}
+
+// ── Scheme + probe hint derivation ───────────────────────────────────────────
+
+/// Infer protocol scheme from port convention alone.
+///
+/// Returns `Https` for well-known TLS ports, `Http` for well-known plain-HTTP
+/// ports, and `Unknown` for everything else. Callers should upgrade this after
+/// a banner grab confirms the actual scheme.
+fn scheme_hint_from_port(port: u16) -> SchemeHint {
+    match port {
+        443 | 8443 | 9443 => SchemeHint::Https,
+        80 | 2375 | 2376 | 3000 | 4243 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000
+        | 9090 | 9200 | 9999 => SchemeHint::Http,
+        _ => SchemeHint::Unknown,
+    }
+}
+
+/// Recommend the next probe based on initial port + service_guess evidence.
+///
+/// Non-web protocols (SSH, SMTP, …) and well-known web ports need no further
+/// probing — the organism already knows enough to classify the service.
+/// Unknown ports with no conclusive service_guess get `HttpProbe` so the
+/// maze's adaptive fingerprint pass can resolve the ambiguity.
+fn initial_probe_hint(service_guess: &Option<String>, scheme_hint: &SchemeHint) -> NextProbeHint {
+    if let Some(g) = service_guess {
+        let g_lower = g.to_ascii_lowercase();
+        // Definitively non-web protocols — HTTP probe would be meaningless.
+        if matches!(
+            g_lower.as_str(),
+            "ssh" | "ftp" | "sftp" | "telnet" | "smtp" | "smtps" | "submission" | "pop3"
+                | "pop3s" | "imap" | "imaps" | "mysql" | "postgresql" | "redis" | "mssql"
+                | "oracle" | "ldap" | "ldaps" | "rdp" | "vnc" | "netbios-ssn"
+                | "microsoft-ds" | "syslog" | "dns" | "rpcbind" | "ipp" | "nfs" | "socks"
+                | "pptp"
+        ) {
+            return NextProbeHint::None;
+        }
+    }
+    // Well-known web port — scheme is already determined by convention.
+    if !matches!(scheme_hint, SchemeHint::Unknown) {
+        return NextProbeHint::None;
+    }
+    // Unknown scheme and no conclusive service_guess — recommend HTTP probe.
+    NextProbeHint::HttpProbe {
+        scheme: SchemeHint::Unknown,
+    }
 }
 
 // ── Service guess ─────────────────────────────────────────────────────────────
@@ -306,7 +392,8 @@ pub fn service_guess_from_port(port: u16) -> Option<&'static str> {
 /// Build a `SensingResult` from a raw open-port observation (no banner).
 ///
 /// Sets `confidence = 0.5` — port-convention only.
-/// The caller can upgrade confidence after banner collection.
+/// Sets `scheme_hint` and `recommended_next_probe` from port convention.
+/// The caller can upgrade all three after banner collection.
 pub fn result_from_open_port(
     target_ip: IpAddr,
     port: u16,
@@ -315,6 +402,8 @@ pub fn result_from_open_port(
 ) -> SensingResult {
     let service_guess = service_guess_from_port(port).map(|s| s.to_string());
     let os_hint = infer_os_hint_from_port(port);
+    let scheme_hint = scheme_hint_from_port(port);
+    let recommended_next_probe = initial_probe_hint(&service_guess, &scheme_hint);
 
     SensingResult {
         target_ip,
@@ -328,6 +417,8 @@ pub fn result_from_open_port(
         os_hint,
         confidence: 0.5,
         evidence_source,
+        scheme_hint,
+        recommended_next_probe,
     }
 }
 
@@ -450,12 +541,40 @@ mod tests {
             }),
             confidence: 0.85,
             evidence_source: EvidenceSource::EbpfObservation,
+            scheme_hint: SchemeHint::Https,
+            recommended_next_probe: NextProbeHint::None,
         };
         let json = serde_json::to_string(&result).unwrap();
         let back: SensingResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back.port, 443);
         assert_eq!(back.service_guess.as_deref(), Some("https"));
         assert_eq!(back.version_hint.as_deref(), Some("nginx/1.25"));
+        assert_eq!(back.scheme_hint, SchemeHint::Https);
+        assert_eq!(back.recommended_next_probe, NextProbeHint::None);
+    }
+
+    #[test]
+    fn result_from_open_port_derives_scheme_hint() {
+        use std::net::IpAddr;
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+
+        let r80 = result_from_open_port(ip, 80, SensingProfile::Fast, EvidenceSource::ScheduledScan);
+        assert_eq!(r80.scheme_hint, SchemeHint::Http);
+        assert_eq!(r80.recommended_next_probe, NextProbeHint::None);
+
+        let r443 = result_from_open_port(ip, 443, SensingProfile::Fast, EvidenceSource::ScheduledScan);
+        assert_eq!(r443.scheme_hint, SchemeHint::Https);
+        assert_eq!(r443.recommended_next_probe, NextProbeHint::None);
+
+        // SSH — known non-web, no HTTP probe recommended
+        let r22 = result_from_open_port(ip, 22, SensingProfile::Fast, EvidenceSource::ScheduledScan);
+        assert_eq!(r22.scheme_hint, SchemeHint::Unknown);
+        assert_eq!(r22.recommended_next_probe, NextProbeHint::None);
+
+        // Unknown port — HTTP probe recommended to resolve ambiguity
+        let r12345 = result_from_open_port(ip, 12345, SensingProfile::Fast, EvidenceSource::ScheduledScan);
+        assert_eq!(r12345.scheme_hint, SchemeHint::Unknown);
+        assert!(matches!(r12345.recommended_next_probe, NextProbeHint::HttpProbe { .. }));
     }
 
     #[test]
