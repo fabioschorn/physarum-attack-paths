@@ -310,17 +310,76 @@ fn infer_os_hint_from_results(results: &[physarum_scanner::SensingResult]) -> Op
 /// Maximum concurrent physarum-spore template probes per enrichment call.
 const MAX_ENRICH_CONCURRENCY: usize = 8;
 
-/// Returns true if `r` represents a web-like service that physarum-sporangium
-/// HTTP templates can meaningfully probe.
+/// Ports that warrant opportunistic physarum-spore probing when no protocol
+/// evidence is available — common HTTP/HTTPS alternative and dev ports.
+const CONVENTIONAL_WEB_PORTS: &[u16] = &[
+    80, 443, 3000, 5000, 7001, 7080, 8000, 8080, 8443, 8888, 9000, 9090, 9200, 9443, 9999,
+];
+
+/// Service guess names that indicate a clearly non-web protocol.
+const NON_WEB_SERVICE_NAMES: &[&str] = &[
+    "ssh",
+    "ftp",
+    "sftp",
+    "telnet",
+    "smtp",
+    "smtps",
+    "submission",
+    "pop3",
+    "pop3s",
+    "imap",
+    "imaps",
+    "mysql",
+    "postgresql",
+    "redis",
+    "mssql",
+    "oracle",
+    "ldap",
+    "ldaps",
+    "rdp",
+    "vnc",
+    "netbios-ssn",
+    "microsoft-ds",
+    "syslog",
+    "dns",
+    "rpcbind",
+    "ipp",
+    "nfs",
+    "socks",
+    "pptp",
+];
+
+/// Returns true if `r` carries clear evidence of a non-web protocol.
 ///
-/// Decision order (highest signal first):
-///   1. `service_guess` names an HTTP-family or HTTP-API service.
-///   2. `banner_or_handshake_summary` contains HTTP response indicators.
-///   3. `version_hint` names a known web server.
-///
-/// Port number alone is never sufficient — a non-HTTP service on port 8080
-/// returns false; an HTTP service on port 12345 returns true.
-fn is_web_like(r: &physarum_scanner::SensingResult) -> bool {
+/// Checked first in `is_web_like` — a positive result here short-circuits
+/// all further classification, even for conventionally web-like port numbers.
+fn has_negative_non_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
+    if let Some(g) = &r.service_guess {
+        if NON_WEB_SERVICE_NAMES.contains(&g.to_ascii_lowercase().as_str()) {
+            return true;
+        }
+    }
+
+    if let Some(banner) = &r.banner_or_handshake_summary {
+        let b = banner.to_ascii_lowercase();
+        // SSH: "SSH-2.0-OpenSSH_8.4p1 ..."
+        // FTP/SMTP: "220 <hostname> ..." greeting
+        // POP3:  "+OK ..."
+        // IMAP:  "* OK ..."
+        if b.starts_with("ssh-")
+            || b.starts_with("220 ")
+            || b.starts_with("+ok ")
+            || b.starts_with("* ok ")
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Returns true if `r` carries explicit evidence of an HTTP/web-like service.
+fn has_strong_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
     if let Some(g) = &r.service_guess {
         let g = g.to_ascii_lowercase();
         if g.starts_with("http")
@@ -356,6 +415,24 @@ fn is_web_like(r: &physarum_scanner::SensingResult) -> bool {
     }
 
     false
+}
+
+/// Classify whether `r` is a web-like service that physarum-sporangium should probe.
+///
+/// Three-layer decision:
+///   1. Clear non-web protocol evidence → false (SSH on 8080 is not a web service).
+///   2. Explicit HTTP/web evidence → true (HTTP on any port, known web servers).
+///   3. No strong evidence either way, but port is conventionally web → true (opportunistic).
+fn is_web_like(r: &physarum_scanner::SensingResult) -> bool {
+    if has_negative_non_web_evidence(r) {
+        return false;
+    }
+
+    if has_strong_web_evidence(r) {
+        return true;
+    }
+
+    CONVENTIONAL_WEB_PORTS.contains(&r.port)
 }
 
 /// Run all built-in physarum-sporangium templates against every web-like service
