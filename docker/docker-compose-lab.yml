@@ -26,7 +26,7 @@ networks:
 
 services:
 
-  # ── Host B — HTTP-only target ────────────────────────────────────────────────
+  # ── Host B — HTTP on port 80 (Case 1: ConfirmedWeb via service_guess="http") ──
   host-b:
     image: nginx:alpine
     container_name: physarum-host-b
@@ -35,12 +35,27 @@ services:
         ipv4_address: 172.20.0.3
     # Port 22 deliberately NOT exposed — triggers LLM reasoning on host-a
 
+  # ── Host C — HTTP on port 8080 (Case 2: ConfirmedWeb via service_guess="http-alt") ──
+  #
+  # Python http.server serves HTTP on 8080 so physarum-scanner sees:
+  #   port=8080, service_guess="http-alt" (starts with "http") → ConfirmedWeb
+  # physarum-spore runs all templates against 172.20.0.4:8080.
+  host-c:
+    image: python:3-alpine
+    container_name: physarum-host-c
+    networks:
+      physarum-lab:
+        ipv4_address: 172.20.0.4
+    command: ["python3", "-m", "http.server", "8080"]
+    # Port 22 NOT exposed — LLM reasoning loop fires for this host too
+
   # ── Host A — physarum-maze agent with LLM enabled ────────────────────────────
   host-a:
     image: physarum-maze:lab
     container_name: physarum-host-a
     depends_on:
       - host-b
+      - host-c
     networks:
       physarum-lab:
         ipv4_address: 172.20.0.2
@@ -48,7 +63,8 @@ services:
       - NET_RAW    # raw ICMP socket
       - NET_ADMIN  # interface binding
     environment:
-      RUST_LOG: "physarum_maze=info,physarum_llm=info"
+      # debug level exposes classify_web_candidate decisions per port
+      RUST_LOG: "physarum_maze=debug,physarum_llm=debug,physarum_sporangium=info"
     command: >
       --mode seed
       --interface eth0

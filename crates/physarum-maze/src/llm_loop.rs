@@ -484,7 +484,7 @@ async fn enrich_with_patterns(
     let mut web_results: Vec<&physarum_scanner::SensingResult> = Vec::new();
     for r in sensing_results {
         match classify_web_candidate(r) {
-            ServiceClassification::ConfirmedWeb | ServiceClassification::LikelyWeb => {
+            ServiceClassification::ConfirmedWeb => {
                 // Warn when service_guess suggests HTTPS on a port that PatternRunner
                 // does not auto-select TLS for (only 443/8443/9443 get https://).
                 // A custom TLS port will be probed as HTTP and may produce silent misses.
@@ -499,10 +499,27 @@ async fn enrich_with_patterns(
                         %target,
                         port = r.port,
                         service_guess = ?r.service_guess,
-                        "service_guess suggests HTTPS but port is not in known TLS list — \
+                        "ConfirmedWeb (HTTPS hint on non-standard port) — \
                          PatternRunner will probe as HTTP (scheme_hint not yet implemented)"
                     );
+                } else {
+                    tracing::debug!(
+                        %target,
+                        port = r.port,
+                        service_guess = ?r.service_guess,
+                        "ConfirmedWeb — running all spore templates"
+                    );
                 }
+                web_results.push(r);
+            }
+            ServiceClassification::LikelyWeb => {
+                tracing::debug!(
+                    %target,
+                    port = r.port,
+                    service_guess = ?r.service_guess,
+                    "LikelyWeb (conventional web port, no strong evidence) — \
+                     running spore templates opportunistically"
+                );
                 web_results.push(r);
             }
             ServiceClassification::UnknownNeedsMoreSensing => {
@@ -514,10 +531,17 @@ async fn enrich_with_patterns(
                     %target,
                     port = r.port,
                     service_guess = ?r.service_guess,
-                    "ambiguous service — spore skipped, forwarded to LLM as unknown"
+                    "UnknownNeedsMoreSensing — spore skipped, forwarded to LLM as unknown"
                 );
             }
-            ServiceClassification::ConfirmedNonWeb => {}
+            ServiceClassification::ConfirmedNonWeb => {
+                tracing::debug!(
+                    %target,
+                    port = r.port,
+                    service_guess = ?r.service_guess,
+                    "ConfirmedNonWeb — spore skipped, forwarded to LLM via PortScan"
+                );
+            }
         }
     }
 
