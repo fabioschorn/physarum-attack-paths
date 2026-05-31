@@ -15,7 +15,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use anyhow::Result;
-use futures::future::join_all;
+use futures::stream::{self, StreamExt};
 use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
     LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
@@ -61,10 +61,9 @@ pub async fn run(
         .collect();
     let os_hint = infer_os_hint_from_results(&sensing_results);
 
-    // Enrich with physarum-sporangium pattern evidence on open HTTP ports.
+    // Enrich with physarum-sporangium pattern evidence on web-like services.
     // Runs once before the attempt loop — findings are stable across retries.
-    let open_ports: Vec<u16> = sensing_results.iter().map(|r| r.port).collect();
-    let raw_findings = enrich_with_patterns(target, &open_ports).await;
+    let raw_findings = enrich_with_patterns(target, &sensing_results).await;
     let pattern_summaries: Vec<PatternFindingSummary> = raw_findings
         .iter()
         .map(pattern_finding_to_summary)
@@ -72,7 +71,7 @@ pub async fn run(
 
     tracing::info!(
         %target,
-        open_ports = open_ports.len(),
+        open_ports = sensing_results.len(),
         pattern_findings = pattern_summaries.len(),
         actionable = pattern_summaries.iter().filter(|f| f.is_actionable).count(),
         "evidence bundle ready"
@@ -308,24 +307,72 @@ fn infer_os_hint_from_results(results: &[physarum_scanner::SensingResult]) -> Op
 
 // ── Sporangium pattern enrichment ─────────────────────────────────────────────
 
-/// HTTP ports that physarum-sporangium templates are designed to probe.
-const HTTP_PROBE_PORTS: &[u16] = &[80, 443, 8080, 8443, 3000, 5000, 8000, 9000, 9090];
+/// Maximum concurrent physarum-spore template probes per enrichment call.
+const MAX_ENRICH_CONCURRENCY: usize = 8;
 
-/// Run all built-in physarum-sporangium templates against every open HTTP port
-/// on `target`, returning the findings concurrently.
+/// Returns true if `r` represents a web-like service that physarum-sporangium
+/// HTTP templates can meaningfully probe.
 ///
-/// Non-HTTP ports are skipped — all 21 built-in templates are HTTP-only.
-/// Network errors per template are silently ignored: the scanner already
-/// confirmed reachability; individual template failures mean "no match", not
-/// "host unreachable".
-async fn enrich_with_patterns(target: Ipv4Addr, open_ports: &[u16]) -> Vec<PatternFinding> {
-    let http_ports: Vec<u16> = open_ports
-        .iter()
-        .copied()
-        .filter(|p| HTTP_PROBE_PORTS.contains(p))
-        .collect();
+/// Decision order (highest signal first):
+///   1. `service_guess` names an HTTP-family or HTTP-API service.
+///   2. `banner_or_handshake_summary` contains HTTP response indicators.
+///   3. `version_hint` names a known web server.
+///
+/// Port number alone is never sufficient — a non-HTTP service on port 8080
+/// returns false; an HTTP service on port 12345 returns true.
+fn is_web_like(r: &physarum_scanner::SensingResult) -> bool {
+    if let Some(g) = &r.service_guess {
+        let g = g.to_ascii_lowercase();
+        if g.starts_with("http")
+            || matches!(
+                g.as_str(),
+                "weblogic" | "couchdb" | "elasticsearch" | "docker"
+            )
+        {
+            return true;
+        }
+    }
 
-    if http_ports.is_empty() {
+    if let Some(banner) = &r.banner_or_handshake_summary {
+        let b = banner.to_ascii_lowercase();
+        if b.contains("http/")
+            || b.contains("server:")
+            || b.contains("content-type:")
+            || b.contains("<html")
+        {
+            return true;
+        }
+    }
+
+    if let Some(vh) = &r.version_hint {
+        let v = vh.to_ascii_lowercase();
+        if v.contains("nginx")
+            || v.contains("apache")
+            || v.contains("express")
+            || v.contains("tomcat")
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Run all built-in physarum-sporangium templates against every web-like service
+/// on `target`, returning the findings with bounded concurrency.
+///
+/// Web-likeness is inferred from `SensingResult` evidence (service_guess, banner,
+/// version_hint) — not from port number alone.  A service on port 12345 that
+/// banners as HTTP is probed; a non-HTTP service on port 8080 is not.
+/// Template probe errors are logged at debug level and treated as no-match.
+async fn enrich_with_patterns(
+    target: Ipv4Addr,
+    sensing_results: &[physarum_scanner::SensingResult],
+) -> Vec<PatternFinding> {
+    let web_results: Vec<&physarum_scanner::SensingResult> =
+        sensing_results.iter().filter(|r| is_web_like(r)).collect();
+
+    if web_results.is_empty() {
         return vec![];
     }
 
@@ -340,29 +387,48 @@ async fn enrich_with_patterns(target: Ipv4Addr, open_ports: &[u16]) -> Vec<Patte
     let runner = match PatternRunner::new(policy) {
         Ok(r) => std::sync::Arc::new(r),
         Err(e) => {
-            tracing::warn!(%target, err = %e, "sporangium PatternRunner init failed — skipping enrichment");
+            tracing::warn!(
+                %target, err = %e,
+                "sporangium PatternRunner init failed — skipping enrichment"
+            );
             return vec![];
         }
     };
 
-    let tasks: Vec<_> = http_ports
+    let tasks: Vec<_> = web_results
         .iter()
-        .flat_map(|&port| {
+        .flat_map(|r| {
+            let port = r.port;
             let runner = runner.clone();
             templates.iter().map(move |t| {
                 let runner = runner.clone();
                 let template = t.clone();
                 async move {
-                    runner
+                    match runner
                         .run(&template, std::net::IpAddr::V4(target), port)
                         .await
-                        .unwrap_or_default()
+                    {
+                        Ok(findings) => findings,
+                        Err(e) => {
+                            tracing::debug!(
+                                %target, port, check_id = %template.id,
+                                err = %e, "sporangium template probe error"
+                            );
+                            vec![]
+                        }
+                    }
                 }
             })
         })
         .collect();
 
-    join_all(tasks).await.into_iter().flatten().collect()
+    stream::iter(tasks)
+        .buffer_unordered(MAX_ENRICH_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// Convert a `PatternFinding` into the condensed `PatternFindingSummary` that
