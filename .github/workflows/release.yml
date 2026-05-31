@@ -43,11 +43,11 @@ jobs:
 
           - \`physarum-maze\` is the canonical organism binary.
           - \`physarum-scan\` is the native scanner binary from \`physarum-scanner\`.
-          - \`physarum-sporangium\` is included as a source/API crate package, because it is currently a library crate, not a standalone binary.
+          - \`physarum-spore\` is the native HTTP pattern-evidence binary from \`physarum-sporangium\`.
           - \`physarum-llm\` contracts, mock/client path, policy gate, and maze hook are present.
           - Two-container Docker Lab validates the controlled LLM reasoning path.
           - \`physarum-scanner\` exposes organism-native \`SensingProfile\` / \`SensingResult\` evidence.
-          - \`physarum-sporangium\` introduces native Rust Nuclei-inspired pattern evidence.
+          - \`physarum-sporangium\` introduces native Rust pattern evidence inspired by Nuclei conventions.
           - Rust 1.86.0 is the pinned project toolchain.
 
           ### Download
@@ -56,7 +56,7 @@ jobs:
           |--------------|----------|
           | Linux x86_64 | \`physarum-maze-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
           | Linux x86_64 | \`physarum-scan-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
-          | Source/API   | \`physarum-sporangium-${GITHUB_REF_NAME}-source.tar.gz\` |
+          | Linux x86_64 | \`physarum-spore-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
 
           ### Installation
 
@@ -66,6 +66,9 @@ jobs:
 
           tar -xzf physarum-scan-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz
           ./physarum-scan --help
+
+          tar -xzf physarum-spore-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz
+          ./physarum-spore --help
           \`\`\`
 
           ### Scope
@@ -111,6 +114,7 @@ jobs:
         run: |
           cargo build --release --locked --target x86_64-unknown-linux-gnu -p physarum-maze
           cargo build --release --locked --target x86_64-unknown-linux-gnu -p physarum-scanner --bin physarum-scan
+          cargo build --release --locked --target x86_64-unknown-linux-gnu -p physarum-sporangium --bin physarum-spore
 
       # ── Empacotamento (.tar.gz) ────────────────────────────────────────────
       - name: Package binaries
@@ -119,7 +123,7 @@ jobs:
           VERSION=${{ needs.create-release.outputs.version }}
           TARGET=x86_64-unknown-linux-gnu
 
-          for BINARY in physarum-maze physarum-scan; do
+          for BINARY in physarum-maze physarum-scan physarum-spore; do
             ASSET_NAME="${BINARY}-${VERSION}-${TARGET}"
             STAGING="${ASSET_NAME}"
 
@@ -133,36 +137,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── Etapa 3: publica o pacote fonte/API do physarum-sporangium ─────────────
-  package-sporangium:
-    name: Package physarum-sporangium source/API crate
-    needs: create-release
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Package physarum-sporangium source
-        shell: bash
-        run: |
-          VERSION=${{ needs.create-release.outputs.version }}
-          ASSET_NAME="physarum-sporangium-${VERSION}-source"
-          STAGING="$ASSET_NAME"
-
-          mkdir -p "$STAGING/crates"
-          cp -R crates/physarum-sporangium "$STAGING/crates/"
-          cp Cargo.toml Cargo.lock README.md LICENSE NOTICE "$STAGING/"
-
-          tar -czf "${STAGING}.tar.gz" "$STAGING"
-          gh release upload "$VERSION" "${STAGING}.tar.gz" --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ── Etapa 4: publica a Release (tira do modo draft) ───────────────────────
+  # ── Etapa 3: publica a Release (tira do modo draft) ───────────────────────
   publish-release:
     name: Publish Release
-    needs: [create-release, build-release, package-sporangium]
+    needs: [create-release, build-release]
     runs-on: ubuntu-latest
 
     steps:
