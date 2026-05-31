@@ -189,6 +189,10 @@ pub enum PropagationMethod {
         path: String,
         http_method: HttpMethod,
         headers: Vec<(String, String)>,
+        /// TCP port to target. LLM must set this from the open ports list.
+        /// Defaults to 80 when absent (backward-compatible with v0.3.x lineage).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
     },
     /// Lab-only. Disabled by default; requires explicit lab policy enablement.
     Exploit {
@@ -248,9 +252,15 @@ pub enum BootstrapAction {
     HttpPost {
         path: String,
         body: String,
+        /// TCP port to target. Defaults to 80 when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
     },
     HttpGet {
         path: String,
+        /// TCP port to target. Defaults to 80 when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
     },
     /// A → B push (current SSH/SCP propagation path).
     ScpUpload {

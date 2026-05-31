@@ -921,8 +921,9 @@ async fn execute_step(action: &BootstrapAction, target: Ipv4Addr, timeout_ms: u6
     use tokio::time::{timeout, Duration};
 
     match action {
-        BootstrapAction::HttpGet { path } => {
-            let url = format!("http://{target}{path}");
+        BootstrapAction::HttpGet { path, port } => {
+            let p = port.unwrap_or(80);
+            let url = format!("http://{}:{}{}", target, p, path);
             tracing::info!(%url, "HTTP GET");
             match timeout(Duration::from_millis(timeout_ms), reqwest::get(&url)).await {
                 Ok(Ok(r)) if r.status().is_success() => StepResult::Ok,
@@ -932,8 +933,9 @@ async fn execute_step(action: &BootstrapAction, target: Ipv4Addr, timeout_ms: u6
             }
         }
 
-        BootstrapAction::HttpPost { path, body } => {
-            let url = format!("http://{target}{path}");
+        BootstrapAction::HttpPost { path, body, port } => {
+            let p = port.unwrap_or(80);
+            let url = format!("http://{}:{}{}", target, p, path);
             tracing::info!(%url, "HTTP POST");
             let client = reqwest::Client::new();
             match timeout(

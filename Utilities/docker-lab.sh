@@ -1,13 +1,36 @@
 #!/usr/bin/env bash
 #
-# docker-lab.sh — physarum-maze Docker Lab runner (PF-3.1 adaptive fingerprint)
+# docker-lab.sh — physarum-maze Docker Lab runner (PF-3.1 / PF-4)
 #
-# Four-container lab validating the three-layer adaptive sensing pipeline:
-#   host-a (physarum-maze:lab)    — agent with mock LLM, senses the /24
-#   host-b (nginx:alpine :80)     — ConfirmedWeb via service_guess="http"
+# Four-container lab validating the adaptive sensing + LLM reasoning pipeline:
+#   host-a (physarum-maze:lab)        — agent, senses the /24 subnet
+#   host-b (nginx:alpine :80)         — ConfirmedWeb via service_guess="http"
 #   host-c (python http.server :8080) — ConfirmedWeb via service_guess="http-alt"
 #   host-d (python http.server :7777) — UnknownNeedsMoreSensing → ConfirmedWeb
 #                                       via Layer 3 targeted HTTP probe
+#
+# LLM mode (controlled by host environment variables):
+#
+#   PF-3.1 mock (default, no API key):
+#     ./Utilities/docker-lab.sh
+#
+#   PF-4 real LLM (OpenAI-compatible) — via .env.local (recommended):
+#     cp examples/pf-4-real-llm-lab/sensitive-info/.env.example \
+#        examples/pf-4-real-llm-lab/sensitive-info/.env.local
+#     # edit .env.local — fill in PHYSARUM_LLM_ENDPOINT and LLM_API_KEY
+#     ./Utilities/docker-lab.sh     # script auto-loads .env.local
+#
+#   PF-4 real LLM — via environment variables:
+#     export LLM_API_KEY="sk-..."
+#     export PHYSARUM_LLM_ENDPOINT="https://api.openai.com"
+#     export PHYSARUM_LLM_MODEL="gpt-4o-mini"      # optional, default gpt-4o-mini
+#     ./Utilities/docker-lab.sh
+#
+#   PF-4 with local Ollama (Mac host):
+#     export LLM_API_KEY="ollama"
+#     export PHYSARUM_LLM_ENDPOINT="http://host.docker.internal:11434"
+#     export PHYSARUM_LLM_MODEL="llama3.2"
+#     ./Utilities/docker-lab.sh
 #
 # What this script does:
 #   1. Verifies local Rust toolchain is >= 1.86
@@ -86,10 +109,43 @@ case "${1:-}" in
         ;;
 esac
 
-# ─── Step 0: Verify Rust toolchain ────────────────────────────────────────────
+# ─── Step 0: Auto-load .env.local if present ─────────────────────────────────
+ENV_LOCAL="$PROJECT_ROOT/examples/pf-4-real-llm-lab/sensitive-info/.env.local"
+if [ -f "$ENV_LOCAL" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_LOCAL"
+    set +a
+fi
+
+# ─── Step 0a: Verify Rust toolchain ───────────────────────────────────────────
 echo ""
-echo -e "${BOLD}── Step 0: verify Rust toolchain${NC}"
+echo -e "${BOLD}── Step 0a: verify Rust toolchain${NC}"
 check_rust_toolchain
+
+# ─── Step 0b: Detect LLM mode ─────────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}── Step 0b: LLM mode${NC}"
+LLM_ENDPOINT="${PHYSARUM_LLM_ENDPOINT:-mock-http}"
+LLM_MODEL="${PHYSARUM_LLM_MODEL:-gpt-4o-mini}"
+
+if [ "$LLM_ENDPOINT" = "mock-http" ]; then
+    echo -e "  [${INFO}] mode:     PF-3.1 mock (no real LLM — HTTP GET against host-b:80)"
+    echo -e "  [${INFO}] To run PF-4 real LLM:"
+    echo -e "           export LLM_API_KEY=\"sk-...\""
+    echo -e "           export PHYSARUM_LLM_ENDPOINT=\"https://api.openai.com\""
+    echo -e "           export PHYSARUM_LLM_MODEL=\"gpt-4o-mini\""
+else
+    if [ -z "${LLM_API_KEY:-}" ]; then
+        echo -e "  [${FAIL}] PHYSARUM_LLM_ENDPOINT is set but LLM_API_KEY is empty."
+        echo -e "        Set LLM_API_KEY before running in real-LLM mode."
+        exit 1
+    fi
+    echo -e "  [${PASS}] mode:     PF-4 real LLM"
+    echo -e "  [${INFO}] endpoint: $LLM_ENDPOINT"
+    echo -e "  [${INFO}] model:    $LLM_MODEL"
+    echo -e "  [${INFO}] api_key:  present (redacted)"
+fi
 
 # ─── Step 1: Build Docker image via Docker Cloud ───────────────────────────
 # Cloud builder cannot --load directly; export OCI tar then docker load.
@@ -126,6 +182,27 @@ echo ""
 
 # Run compose in background so we can trap exit
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+
+# ─── Step 4: Trigger stimuli ───────────────────────────────────────────────────
+# Send ICMP ping from each host to host-a after a short delay so host-a's
+# raw socket is ready. Each ping triggers a DiscoveryQuery → LLM reasoning cycle.
+(
+    sleep 6
+    echo -e "\n  [${INFO}] triggering stimulus: host-b → 172.20.0.2"
+    docker exec physarum-host-b sh -c \
+        "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
+        >/dev/null 2>&1 || true
+    sleep 3
+    echo -e "  [${INFO}] triggering stimulus: host-c → 172.20.0.2"
+    docker exec physarum-host-c sh -c \
+        "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
+        >/dev/null 2>&1 || true
+    sleep 3
+    echo -e "  [${INFO}] triggering stimulus: host-d → 172.20.0.2"
+    docker exec physarum-host-d sh -c \
+        "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
+        >/dev/null 2>&1 || true
+) &
 
 # Stream host-a logs — this is where the reasoning loop output appears
 trap 'on_exit' INT TERM EXIT

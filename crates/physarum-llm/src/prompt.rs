@@ -39,6 +39,9 @@ RULES:
 - If `rejected_strategies` is non-empty, do NOT suggest the same method_class again.
 - `reasoning_summary` must be a single sentence suitable for lineage audit storage.
 - `safety_notes` must list any side effects or risks of the proposed strategy.
+- PORT RULE: For Http method and HttpGet/HttpPost bootstrap steps, set `port` to the exact TCP port
+  observed in the `ports` scan list. Do NOT default to 80 unless port 80 is explicitly listed.
+  Example: if port 8080 is open, set `\"port\": 8080` in both the method and the bootstrap step.
 
 RESPONSE FORMAT:
 Return ONLY valid JSON matching the PropagationStrategy schema.
@@ -81,13 +84,26 @@ fn method_label(m: &PropagationMethodClass) -> &'static str {
 pub const STRATEGY_SCHEMA: &str = r#"{
   "method": {
     "Ssh":     { "user": "<string>", "auth": "EmptyPassword | PrivateKey" },
-    "Http":    { "path": "<string>", "http_method": "Get | Post | Put", "headers": [] },
+    "Http":    { "path": "<string>", "port": 80, "http_method": "Get | Post | Put", "headers": [] },
     "Exploit": { "cve": "<CVE-ID>" },
     "Custom":  { "description": "<string>" },
     "NoPath":  { "reason": "<string>" }
   },
   "artifact_type": "AgentBinary | Script | HttpRequest | None",
-  "bootstrap_plan": null,
+  "bootstrap_plan": {
+    "steps": [
+      {
+        "action": {
+          "HttpGet":  { "path": "<string>", "port": 80 },
+          "HttpPost": { "path": "<string>", "body": "<string>", "port": 80 }
+        },
+        "target": "<ip:port>",
+        "timeout_ms": 5000,
+        "requires_root": false,
+        "expected_result": { "success_indicator": "<string>", "failure_indicator": null }
+      }
+    ]
+  },
   "confidence": 0.0,
   "reasoning_summary": "<single sentence>",
   "preconditions": [],
