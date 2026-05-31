@@ -349,11 +349,41 @@ const NON_WEB_SERVICE_NAMES: &[&str] = &[
     "pptp",
 ];
 
-/// Returns true if `r` carries clear evidence of a non-web protocol.
+/// Classification of a discovered service with respect to HTTP/web-layer probing.
 ///
-/// Checked first in `is_web_like` — a positive result here short-circuits
-/// all further classification, even for conventionally web-like port numbers.
-fn has_negative_non_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
+/// The decision is not binary. A service may be confirmed, likely, ambiguous, or
+/// definitively non-web. Each class drives a different enrichment policy:
+///
+/// | Class                    | physarum-spore | LLM via SensingResult |
+/// |--------------------------|----------------|-----------------------|
+/// | ConfirmedWeb             | all templates  | yes                   |
+/// | LikelyWeb                | opportunistic  | yes                   |
+/// | UnknownNeedsMoreSensing  | skip (for now) | yes (low confidence)  |
+/// | ConfirmedNonWeb          | skip           | yes                   |
+///
+/// `UnknownNeedsMoreSensing` is the hook for future adaptive re-sensing:
+/// physarum-scan should eventually perform a targeted HTTP probe (e.g.
+/// `GET / HTTP/1.0`) to resolve ambiguity before the LLM attempt loop.
+/// This connects to the PF-2 adaptive re-routing design.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ServiceClassification {
+    /// Banner or service header confirms HTTP/HTTPS. All spore templates apply.
+    ConfirmedWeb,
+    /// Port convention suggests HTTP/web but no definitive banner exists.
+    /// Physarum-spore is run opportunistically; false-positive rate is low.
+    LikelyWeb,
+    /// Service responded but protocol evidence is insufficient to conclude.
+    /// physarum-spore is skipped. The service is forwarded to the LLM as a
+    /// SensingResult with low confidence. Future evolution: trigger a deeper
+    /// physarum-scan fingerprint pass (targeted HTTP probe) to resolve this.
+    UnknownNeedsMoreSensing,
+    /// Banner or service name definitively identifies a non-web protocol.
+    /// physarum-spore is not run. The service is forwarded to the LLM normally.
+    ConfirmedNonWeb,
+}
+
+/// Returns true if `r` carries definitive evidence of a non-web protocol.
+fn has_definitive_non_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
     if let Some(g) = &r.service_guess {
         if NON_WEB_SERVICE_NAMES.contains(&g.to_ascii_lowercase().as_str()) {
             return true;
@@ -378,8 +408,8 @@ fn has_negative_non_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
     false
 }
 
-/// Returns true if `r` carries explicit evidence of an HTTP/web-like service.
-fn has_strong_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
+/// Returns true if `r` carries definitive evidence of an HTTP/web-like service.
+fn has_definitive_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
     if let Some(g) = &r.service_guess {
         let g = g.to_ascii_lowercase();
         if g.starts_with("http")
@@ -417,37 +447,61 @@ fn has_strong_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
     false
 }
 
-/// Classify whether `r` is a web-like service that physarum-sporangium should probe.
+/// Classify a discovered service for physarum-spore enrichment eligibility.
 ///
-/// Three-layer decision:
-///   1. Clear non-web protocol evidence → false (SSH on 8080 is not a web service).
-///   2. Explicit HTTP/web evidence → true (HTTP on any port, known web servers).
-///   3. No strong evidence either way, but port is conventionally web → true (opportunistic).
-fn is_web_like(r: &physarum_scanner::SensingResult) -> bool {
-    if has_negative_non_web_evidence(r) {
-        return false;
+/// Layer order:
+///   1. Definitive non-web evidence → `ConfirmedNonWeb` (SSH on 8080 is not web).
+///   2. Definitive web evidence → `ConfirmedWeb` (HTTP on any port).
+///   3. Conventional web port, no strong evidence → `LikelyWeb` (opportunistic).
+///   4. Non-standard port, no evidence → `UnknownNeedsMoreSensing`.
+fn classify_web_candidate(r: &physarum_scanner::SensingResult) -> ServiceClassification {
+    if has_definitive_non_web_evidence(r) {
+        return ServiceClassification::ConfirmedNonWeb;
     }
 
-    if has_strong_web_evidence(r) {
-        return true;
+    if has_definitive_web_evidence(r) {
+        return ServiceClassification::ConfirmedWeb;
     }
 
-    CONVENTIONAL_WEB_PORTS.contains(&r.port)
+    if CONVENTIONAL_WEB_PORTS.contains(&r.port) {
+        return ServiceClassification::LikelyWeb;
+    }
+
+    ServiceClassification::UnknownNeedsMoreSensing
 }
 
 /// Run all built-in physarum-sporangium templates against every web-like service
 /// on `target`, returning the findings with bounded concurrency.
 ///
-/// Web-likeness is inferred from `SensingResult` evidence (service_guess, banner,
-/// version_hint) — not from port number alone.  A service on port 12345 that
-/// banners as HTTP is probed; a non-HTTP service on port 8080 is not.
+/// Only `ConfirmedWeb` and `LikelyWeb` services are probed. `UnknownNeedsMoreSensing`
+/// services are skipped here but still forwarded to the LLM via `PortScan` entries —
+/// the LLM receives the full picture regardless of spore enrichment.
 /// Template probe errors are logged at debug level and treated as no-match.
 async fn enrich_with_patterns(
     target: Ipv4Addr,
     sensing_results: &[physarum_scanner::SensingResult],
 ) -> Vec<PatternFinding> {
-    let web_results: Vec<&physarum_scanner::SensingResult> =
-        sensing_results.iter().filter(|r| is_web_like(r)).collect();
+    let mut web_results: Vec<&physarum_scanner::SensingResult> = Vec::new();
+    for r in sensing_results {
+        match classify_web_candidate(r) {
+            ServiceClassification::ConfirmedWeb | ServiceClassification::LikelyWeb => {
+                web_results.push(r);
+            }
+            ServiceClassification::UnknownNeedsMoreSensing => {
+                // Service is ambiguous — cannot conclude from current sensing depth.
+                // Forwarded to the LLM as a SensingResult/PortScan entry (low confidence).
+                // Future: physarum-scan deeper fingerprint should resolve this before
+                // the LLM loop runs (PF-2 adaptive re-sensing).
+                tracing::debug!(
+                    %target,
+                    port = r.port,
+                    service_guess = ?r.service_guess,
+                    "ambiguous service — spore skipped, forwarded to LLM as unknown"
+                );
+            }
+            ServiceClassification::ConfirmedNonWeb => {}
+        }
+    }
 
     if web_results.is_empty() {
         return vec![];
