@@ -71,6 +71,7 @@ impl MockLlmClient {
                 path: p.clone(),
                 http_method: crate::types::HttpMethod::Get,
                 headers: vec![],
+                port: None,
             },
             artifact_type: ArtifactType::HttpRequest,
             bootstrap_plan: None,
@@ -95,11 +96,15 @@ impl MockLlmClient {
                 path: p.clone(),
                 http_method: crate::types::HttpMethod::Get,
                 headers: vec![],
+                port: None,
             },
             artifact_type: ArtifactType::HttpRequest,
             bootstrap_plan: Some(BootstrapPlan {
                 steps: vec![BootstrapStep {
-                    action: crate::types::BootstrapAction::HttpGet { path: p.clone() },
+                    action: crate::types::BootstrapAction::HttpGet {
+                        path: p.clone(),
+                        port: None,
+                    },
                     target: String::new(), // filled at runtime from target IP
                     timeout_ms: 5_000,
                     requires_root: false,

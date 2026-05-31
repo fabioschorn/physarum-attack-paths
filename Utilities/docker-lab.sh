@@ -1,13 +1,30 @@
 #!/usr/bin/env bash
 #
-# docker-lab.sh — physarum-maze Docker Lab runner (PF-3.1 adaptive fingerprint)
+# docker-lab.sh — physarum-maze Docker Lab runner (PF-3.1 / PF-4)
 #
-# Four-container lab validating the three-layer adaptive sensing pipeline:
-#   host-a (physarum-maze:lab)    — agent with mock LLM, senses the /24
-#   host-b (nginx:alpine :80)     — ConfirmedWeb via service_guess="http"
+# Four-container lab validating the adaptive sensing + LLM reasoning pipeline:
+#   host-a (physarum-maze:lab)        — agent, senses the /24 subnet
+#   host-b (nginx:alpine :80)         — ConfirmedWeb via service_guess="http"
 #   host-c (python http.server :8080) — ConfirmedWeb via service_guess="http-alt"
 #   host-d (python http.server :7777) — UnknownNeedsMoreSensing → ConfirmedWeb
 #                                       via Layer 3 targeted HTTP probe
+#
+# LLM mode (controlled by host environment variables):
+#
+#   PF-3.1 mock (default, no API key):
+#     ./Utilities/docker-lab.sh
+#
+#   PF-4 real LLM (OpenAI-compatible):
+#     export LLM_API_KEY="sk-..."
+#     export PHYSARUM_LLM_ENDPOINT="https://api.openai.com"
+#     export PHYSARUM_LLM_MODEL="gpt-4o-mini"      # optional, default gpt-4o-mini
+#     ./Utilities/docker-lab.sh
+#
+#   PF-4 with local Ollama (Mac host):
+#     export LLM_API_KEY="ollama"
+#     export PHYSARUM_LLM_ENDPOINT="http://host.docker.internal:11434"
+#     export PHYSARUM_LLM_MODEL="llama3.2"
+#     ./Utilities/docker-lab.sh
 #
 # What this script does:
 #   1. Verifies local Rust toolchain is >= 1.86
@@ -86,10 +103,34 @@ case "${1:-}" in
         ;;
 esac
 
-# ─── Step 0: Verify Rust toolchain ────────────────────────────────────────────
+# ─── Step 0a: Verify Rust toolchain ───────────────────────────────────────────
 echo ""
-echo -e "${BOLD}── Step 0: verify Rust toolchain${NC}"
+echo -e "${BOLD}── Step 0a: verify Rust toolchain${NC}"
 check_rust_toolchain
+
+# ─── Step 0b: Detect LLM mode ─────────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}── Step 0b: LLM mode${NC}"
+LLM_ENDPOINT="${PHYSARUM_LLM_ENDPOINT:-mock-http}"
+LLM_MODEL="${PHYSARUM_LLM_MODEL:-gpt-4o-mini}"
+
+if [ "$LLM_ENDPOINT" = "mock-http" ]; then
+    echo -e "  [${INFO}] mode:     PF-3.1 mock (no real LLM — HTTP GET against host-b:80)"
+    echo -e "  [${INFO}] To run PF-4 real LLM:"
+    echo -e "           export LLM_API_KEY=\"sk-...\""
+    echo -e "           export PHYSARUM_LLM_ENDPOINT=\"https://api.openai.com\""
+    echo -e "           export PHYSARUM_LLM_MODEL=\"gpt-4o-mini\""
+else
+    if [ -z "${LLM_API_KEY:-}" ]; then
+        echo -e "  [${FAIL}] PHYSARUM_LLM_ENDPOINT is set but LLM_API_KEY is empty."
+        echo -e "        Set LLM_API_KEY before running in real-LLM mode."
+        exit 1
+    fi
+    echo -e "  [${PASS}] mode:     PF-4 real LLM"
+    echo -e "  [${INFO}] endpoint: $LLM_ENDPOINT"
+    echo -e "  [${INFO}] model:    $LLM_MODEL"
+    echo -e "  [${INFO}] api_key:  ${LLM_API_KEY:0:8}... (masked)"
+fi
 
 # ─── Step 1: Build Docker image via Docker Cloud ───────────────────────────
 # Cloud builder cannot --load directly; export OCI tar then docker load.

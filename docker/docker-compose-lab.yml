@@ -81,6 +81,23 @@ services:
     # Port 22 NOT exposed — LLM reasoning loop fires for this host too
 
   # ── Host A — physarum-maze agent with LLM enabled ────────────────────────────
+  #
+  # LLM mode is controlled by host environment variables:
+  #
+  #   PF-3.1 mock (default — no API key needed):
+  #     docker compose up
+  #
+  #   PF-4 real LLM (OpenAI-compatible endpoint):
+  #     export LLM_API_KEY="sk-..."
+  #     export PHYSARUM_LLM_ENDPOINT="https://api.openai.com"
+  #     export PHYSARUM_LLM_MODEL="gpt-4o-mini"        # optional
+  #     docker compose up
+  #
+  #   PF-4 with local Ollama (Mac host):
+  #     export LLM_API_KEY="ollama"
+  #     export PHYSARUM_LLM_ENDPOINT="http://host.docker.internal:11434"
+  #     export PHYSARUM_LLM_MODEL="llama3.2"
+  #     docker compose up
   host-a:
     image: physarum-maze:lab
     container_name: physarum-host-a
@@ -97,10 +114,13 @@ services:
     environment:
       # debug level exposes classify_web_candidate decisions per port
       RUST_LOG: "physarum_maze=debug,physarum_llm=debug,physarum_sporangium=info"
+      # API key injected from host env — never hardcoded here
+      LLM_API_KEY: "${LLM_API_KEY:-}"
     command: >
       --mode seed
       --interface eth0
-      --llm-endpoint mock-http
+      --llm-endpoint ${PHYSARUM_LLM_ENDPOINT:-mock-http}
+      --llm-model ${PHYSARUM_LLM_MODEL:-gpt-4o-mini}
       --llm-allowed-cidr 172.20.0.0/24
       --discovery-interval-secs 5
       --stimulus-timeout-secs 90
