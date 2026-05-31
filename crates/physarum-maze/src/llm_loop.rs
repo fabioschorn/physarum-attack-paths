@@ -485,6 +485,24 @@ async fn enrich_with_patterns(
     for r in sensing_results {
         match classify_web_candidate(r) {
             ServiceClassification::ConfirmedWeb | ServiceClassification::LikelyWeb => {
+                // Warn when service_guess suggests HTTPS on a port that PatternRunner
+                // does not auto-select TLS for (only 443/8443/9443 get https://).
+                // A custom TLS port will be probed as HTTP and may produce silent misses.
+                // Future: pass a scheme_hint into PatternRunner to resolve this.
+                let guess_is_https = r
+                    .service_guess
+                    .as_deref()
+                    .map(|g| g.to_ascii_lowercase().starts_with("https"))
+                    .unwrap_or(false);
+                if guess_is_https && !matches!(r.port, 443 | 8443 | 9443) {
+                    tracing::debug!(
+                        %target,
+                        port = r.port,
+                        service_guess = ?r.service_guess,
+                        "service_guess suggests HTTPS but port is not in known TLS list — \
+                         PatternRunner will probe as HTTP (scheme_hint not yet implemented)"
+                    );
+                }
                 web_results.push(r);
             }
             ServiceClassification::UnknownNeedsMoreSensing => {

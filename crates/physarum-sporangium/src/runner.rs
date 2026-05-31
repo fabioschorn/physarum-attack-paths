@@ -90,7 +90,15 @@ impl PatternRunner {
         target_ip: IpAddr,
         port: u16,
     ) -> Result<ResponseData> {
-        let scheme = if port == 443 { "https" } else { "http" };
+        // Known HTTPS ports get TLS. Non-standard TLS ports (e.g. 10443, custom
+        // admin panels) are not yet detected here and will be probed as HTTP,
+        // which may produce silent misses. Future: accept a scheme_hint parameter
+        // derived from SensingResult.service_guess to handle arbitrary TLS ports.
+        let scheme = if matches!(port, 443 | 8443 | 9443) {
+            "https"
+        } else {
+            "http"
+        };
         let url = format!("{}://{}:{}{}", scheme, target_ip, port, check.path);
 
         let method = match check.method {

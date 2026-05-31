@@ -71,10 +71,11 @@ pub enum OsHintSource {
 
 /// Condensed evidence from physarum-sporangium HTTP pattern probing.
 ///
-/// Carries the actionable subset of a `PatternFinding` — enough for the LLM
-/// to reason about what service or misconfiguration is present without embedding
-/// full binary evidence into the query. Only the fields needed for propagation
-/// reasoning are included; raw response bodies are never forwarded.
+/// Includes both fingerprint/context findings (e.g. server version detection,
+/// info-level) and actionable risk findings (severity >= low, confidence >= 0.7).
+/// Use `is_actionable = true` to distinguish higher-priority findings from
+/// passive fingerprint context. Only the fields needed for propagation reasoning
+/// are included; raw response bodies are never forwarded.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatternFindingSummary {
     /// Template ID that matched (e.g. "nginx-server-detect", "missing-hsts").
@@ -111,9 +112,10 @@ pub struct DiscoveryQuery {
     pub attempt_number: u8,
     /// Pattern-evidence findings from physarum-sporangium HTTP probing.
     ///
-    /// Only findings that pass the actionability threshold (severity >= Low,
-    /// confidence >= 0.7) are included. Empty when no HTTP ports are open or
-    /// when sporangium enrichment is unavailable.
+    /// Includes both fingerprint/context findings (e.g. server version, info-level)
+    /// and actionable risk findings (severity >= low, confidence >= 0.7).
+    /// Use `is_actionable = true` to distinguish higher-priority evidence.
+    /// Empty when no web-like services are detected or sporangium enrichment fails.
     ///
     /// `default` ensures existing lineage JSON without this field deserialises
     /// cleanly — backwards-compatible with v0.3.0 and earlier lineage records.
