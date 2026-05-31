@@ -20,7 +20,7 @@ pub use policy::{PolicyGate, MAX_ATTEMPTS, MIN_CONFIDENCE};
 pub use types::{
     ArtifactType, BootstrapAction, BootstrapPlan, BootstrapStep, DiscoveryQuery,
     ExecutionResultSummary, ExpectedResult, HttpMethod, LineageSummary, LlmAttemptEvidence,
-    NextAction, OsHint, OsHintSource, PolicyDecision, PolicyRejectionReason, PortScan, PortState,
-    PropagationMethod, PropagationMethodClass, PropagationStrategy, RejectedStrategy, SecretRef,
-    SecretSource, SshAuth, TransportProtocol,
+    NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyRejectionReason,
+    PortScan, PortState, PropagationMethod, PropagationMethodClass, PropagationStrategy,
+    RejectedStrategy, SecretRef, SecretSource, SshAuth, TransportProtocol,
 };

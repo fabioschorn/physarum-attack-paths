@@ -20,7 +20,6 @@
 //!   -tl               list available built-in templates and exit
 //!   -stats            print stats summary after scan
 
-mod catalog;
 mod filter;
 mod output;
 
@@ -255,7 +254,7 @@ async fn main() -> Result<()> {
     writer.print_banner();
 
     // ── template catalog + filters ────────────────────────────────────────────
-    let all = catalog::all_templates();
+    let all = physarum_sporangium::all_templates();
 
     if cli.list_templates {
         let filter = build_filter(&cli);

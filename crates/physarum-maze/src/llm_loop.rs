@@ -15,16 +15,18 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use anyhow::Result;
+use futures::stream::{self, StreamExt};
 use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
-    LlmClient, NextAction, OsHint, OsHintSource, PolicyDecision, PolicyGate, PolicyRejectionReason,
-    PortScan, PortState, PropagationMethod, PropagationMethodClass, RejectedStrategy,
-    TransportProtocol, MAX_ATTEMPTS,
+    LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
+    PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
+    RejectedStrategy, TransportProtocol, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     result_from_open_port, EvidenceSource as ScanEvidenceSource, OsHintSource as ScanOsHintSource,
     PortList, Scanner, SensingProfile,
 };
+use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
 use crate::lineage::Lineage;
 
@@ -58,6 +60,23 @@ pub async fn run(
         .map(sensing_result_to_port_scan)
         .collect();
     let os_hint = infer_os_hint_from_results(&sensing_results);
+
+    // Enrich with physarum-sporangium pattern evidence on web-like services.
+    // Runs once before the attempt loop — findings are stable across retries.
+    let raw_findings = enrich_with_patterns(target, &sensing_results).await;
+    let pattern_summaries: Vec<PatternFindingSummary> = raw_findings
+        .iter()
+        .map(pattern_finding_to_summary)
+        .collect();
+
+    tracing::info!(
+        %target,
+        open_ports = sensing_results.len(),
+        pattern_findings = pattern_summaries.len(),
+        actionable = pattern_summaries.iter().filter(|f| f.is_actionable).count(),
+        "evidence bundle ready"
+    );
+
     let mut rejected: Vec<RejectedStrategy> = Vec::new();
 
     for attempt_number in 1..=MAX_ATTEMPTS {
@@ -73,6 +92,7 @@ pub async fn run(
                 .collect(),
             rejected_strategies: rejected.clone(),
             attempt_number,
+            pattern_findings: pattern_summaries.clone(),
         };
 
         // ── Query LLM ────────────────────────────────────────────────────────
@@ -283,6 +303,337 @@ fn infer_os_hint_from_results(results: &[physarum_scanner::SensingResult]) -> Op
                 ScanOsHintSource::Convention => OsHintSource::Convention,
             },
         })
+}
+
+// ── Sporangium pattern enrichment ─────────────────────────────────────────────
+
+/// Maximum concurrent physarum-spore template probes per enrichment call.
+const MAX_ENRICH_CONCURRENCY: usize = 8;
+
+/// Ports that warrant opportunistic physarum-spore probing when no protocol
+/// evidence is available — common HTTP/HTTPS alternative and dev ports.
+const CONVENTIONAL_WEB_PORTS: &[u16] = &[
+    80, 443, 3000, 5000, 7001, 7080, 8000, 8080, 8443, 8888, 9000, 9090, 9200, 9443, 9999,
+];
+
+/// Service guess names that indicate a clearly non-web protocol.
+const NON_WEB_SERVICE_NAMES: &[&str] = &[
+    "ssh",
+    "ftp",
+    "sftp",
+    "telnet",
+    "smtp",
+    "smtps",
+    "submission",
+    "pop3",
+    "pop3s",
+    "imap",
+    "imaps",
+    "mysql",
+    "postgresql",
+    "redis",
+    "mssql",
+    "oracle",
+    "ldap",
+    "ldaps",
+    "rdp",
+    "vnc",
+    "netbios-ssn",
+    "microsoft-ds",
+    "syslog",
+    "dns",
+    "rpcbind",
+    "ipp",
+    "nfs",
+    "socks",
+    "pptp",
+];
+
+/// Classification of a discovered service with respect to HTTP/web-layer probing.
+///
+/// The decision is not binary. A service may be confirmed, likely, ambiguous, or
+/// definitively non-web. Each class drives a different enrichment policy:
+///
+/// | Class                    | physarum-spore | LLM via SensingResult |
+/// |--------------------------|----------------|-----------------------|
+/// | ConfirmedWeb             | all templates  | yes                   |
+/// | LikelyWeb                | opportunistic  | yes                   |
+/// | UnknownNeedsMoreSensing  | skip (for now) | yes (low confidence)  |
+/// | ConfirmedNonWeb          | skip           | yes                   |
+///
+/// `UnknownNeedsMoreSensing` is the hook for future adaptive re-sensing:
+/// physarum-scan should eventually perform a targeted HTTP probe (e.g.
+/// `GET / HTTP/1.0`) to resolve ambiguity before the LLM attempt loop.
+/// This connects to the PF-2 adaptive re-routing design.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ServiceClassification {
+    /// Banner or service header confirms HTTP/HTTPS. All spore templates apply.
+    ConfirmedWeb,
+    /// Port convention suggests HTTP/web but no definitive banner exists.
+    /// Physarum-spore is run opportunistically; false-positive rate is low.
+    LikelyWeb,
+    /// Service responded but protocol evidence is insufficient to conclude.
+    /// physarum-spore is skipped. The service is forwarded to the LLM as a
+    /// SensingResult with low confidence. Future evolution: trigger a deeper
+    /// physarum-scan fingerprint pass (targeted HTTP probe) to resolve this.
+    UnknownNeedsMoreSensing,
+    /// Banner or service name definitively identifies a non-web protocol.
+    /// physarum-spore is not run. The service is forwarded to the LLM normally.
+    ConfirmedNonWeb,
+}
+
+/// Returns true if `r` carries definitive evidence of a non-web protocol.
+fn has_definitive_non_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
+    if let Some(g) = &r.service_guess {
+        if NON_WEB_SERVICE_NAMES.contains(&g.to_ascii_lowercase().as_str()) {
+            return true;
+        }
+    }
+
+    if let Some(banner) = &r.banner_or_handshake_summary {
+        let b = banner.to_ascii_lowercase();
+        // SSH: "SSH-2.0-OpenSSH_8.4p1 ..."
+        // FTP/SMTP: "220 <hostname> ..." greeting
+        // POP3:  "+OK ..."
+        // IMAP:  "* OK ..."
+        if b.starts_with("ssh-")
+            || b.starts_with("220 ")
+            || b.starts_with("+ok ")
+            || b.starts_with("* ok ")
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Returns true if `r` carries definitive evidence of an HTTP/web-like service.
+fn has_definitive_web_evidence(r: &physarum_scanner::SensingResult) -> bool {
+    if let Some(g) = &r.service_guess {
+        let g = g.to_ascii_lowercase();
+        if g.starts_with("http")
+            || matches!(
+                g.as_str(),
+                "weblogic" | "couchdb" | "elasticsearch" | "docker"
+            )
+        {
+            return true;
+        }
+    }
+
+    if let Some(banner) = &r.banner_or_handshake_summary {
+        let b = banner.to_ascii_lowercase();
+        if b.contains("http/")
+            || b.contains("server:")
+            || b.contains("content-type:")
+            || b.contains("<html")
+        {
+            return true;
+        }
+    }
+
+    if let Some(vh) = &r.version_hint {
+        let v = vh.to_ascii_lowercase();
+        if v.contains("nginx")
+            || v.contains("apache")
+            || v.contains("express")
+            || v.contains("tomcat")
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Classify a discovered service for physarum-spore enrichment eligibility.
+///
+/// Layer order:
+///   1. Definitive non-web evidence → `ConfirmedNonWeb` (SSH on 8080 is not web).
+///   2. Definitive web evidence → `ConfirmedWeb` (HTTP on any port).
+///   3. Conventional web port, no strong evidence → `LikelyWeb` (opportunistic).
+///   4. Non-standard port, no evidence → `UnknownNeedsMoreSensing`.
+fn classify_web_candidate(r: &physarum_scanner::SensingResult) -> ServiceClassification {
+    if has_definitive_non_web_evidence(r) {
+        return ServiceClassification::ConfirmedNonWeb;
+    }
+
+    if has_definitive_web_evidence(r) {
+        return ServiceClassification::ConfirmedWeb;
+    }
+
+    if CONVENTIONAL_WEB_PORTS.contains(&r.port) {
+        return ServiceClassification::LikelyWeb;
+    }
+
+    ServiceClassification::UnknownNeedsMoreSensing
+}
+
+/// Run all built-in physarum-sporangium templates against every web-like service
+/// on `target`, returning the findings with bounded concurrency.
+///
+/// Only `ConfirmedWeb` and `LikelyWeb` services are probed. `UnknownNeedsMoreSensing`
+/// services are skipped here but still forwarded to the LLM via `PortScan` entries —
+/// the LLM receives the full picture regardless of spore enrichment.
+/// Template probe errors are logged at debug level and treated as no-match.
+async fn enrich_with_patterns(
+    target: Ipv4Addr,
+    sensing_results: &[physarum_scanner::SensingResult],
+) -> Vec<PatternFinding> {
+    let mut web_results: Vec<&physarum_scanner::SensingResult> = Vec::new();
+    for r in sensing_results {
+        match classify_web_candidate(r) {
+            ServiceClassification::ConfirmedWeb => {
+                // Warn when service_guess suggests HTTPS on a port that PatternRunner
+                // does not auto-select TLS for (only 443/8443/9443 get https://).
+                // A custom TLS port will be probed as HTTP and may produce silent misses.
+                // Future: pass a scheme_hint into PatternRunner to resolve this.
+                let guess_is_https = r
+                    .service_guess
+                    .as_deref()
+                    .map(|g| g.to_ascii_lowercase().starts_with("https"))
+                    .unwrap_or(false);
+                if guess_is_https && !matches!(r.port, 443 | 8443 | 9443) {
+                    tracing::debug!(
+                        %target,
+                        port = r.port,
+                        service_guess = ?r.service_guess,
+                        "ConfirmedWeb (HTTPS hint on non-standard port) — \
+                         PatternRunner will probe as HTTP (scheme_hint not yet implemented)"
+                    );
+                } else {
+                    tracing::debug!(
+                        %target,
+                        port = r.port,
+                        service_guess = ?r.service_guess,
+                        "ConfirmedWeb — running all spore templates"
+                    );
+                }
+                web_results.push(r);
+            }
+            ServiceClassification::LikelyWeb => {
+                tracing::debug!(
+                    %target,
+                    port = r.port,
+                    service_guess = ?r.service_guess,
+                    "LikelyWeb (conventional web port, no strong evidence) — \
+                     running spore templates opportunistically"
+                );
+                web_results.push(r);
+            }
+            ServiceClassification::UnknownNeedsMoreSensing => {
+                // Service is ambiguous — cannot conclude from current sensing depth.
+                // Forwarded to the LLM as a SensingResult/PortScan entry (low confidence).
+                // Future: physarum-scan deeper fingerprint should resolve this before
+                // the LLM loop runs (PF-2 adaptive re-sensing).
+                tracing::debug!(
+                    %target,
+                    port = r.port,
+                    service_guess = ?r.service_guess,
+                    "UnknownNeedsMoreSensing — spore skipped, forwarded to LLM as unknown"
+                );
+            }
+            ServiceClassification::ConfirmedNonWeb => {
+                tracing::debug!(
+                    %target,
+                    port = r.port,
+                    service_guess = ?r.service_guess,
+                    "ConfirmedNonWeb — spore skipped, forwarded to LLM via PortScan"
+                );
+            }
+        }
+    }
+
+    if web_results.is_empty() {
+        return vec![];
+    }
+
+    let templates = physarum_sporangium::all_templates();
+    let policy = RunPolicy {
+        allowed_check_ids: templates.iter().map(|t| t.id.clone()).collect(),
+        max_response_bytes: 32_768,
+        request_timeout_ms: 3_000,
+        max_redirects: 2,
+    };
+
+    let runner = match PatternRunner::new(policy) {
+        Ok(r) => std::sync::Arc::new(r),
+        Err(e) => {
+            tracing::warn!(
+                %target, err = %e,
+                "sporangium PatternRunner init failed — skipping enrichment"
+            );
+            return vec![];
+        }
+    };
+
+    let tasks: Vec<_> = web_results
+        .iter()
+        .flat_map(|r| {
+            let port = r.port;
+            let runner = runner.clone();
+            templates.iter().map(move |t| {
+                let runner = runner.clone();
+                let template = t.clone();
+                async move {
+                    match runner
+                        .run(&template, std::net::IpAddr::V4(target), port)
+                        .await
+                    {
+                        Ok(findings) => findings,
+                        Err(e) => {
+                            tracing::debug!(
+                                %target, port, check_id = %template.id,
+                                err = %e, "sporangium template probe error"
+                            );
+                            vec![]
+                        }
+                    }
+                }
+            })
+        })
+        .collect();
+
+    stream::iter(tasks)
+        .buffer_unordered(MAX_ENRICH_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// Convert a `PatternFinding` into the condensed `PatternFindingSummary` that
+/// travels inside `DiscoveryQuery` to the LLM.
+///
+/// Only the fields relevant to propagation reasoning are included.
+/// Raw response bodies are never forwarded.
+fn pattern_finding_to_summary(f: &PatternFinding) -> PatternFindingSummary {
+    let severity = match f.severity_hint {
+        SeverityHint::Info => "info",
+        SeverityHint::Low => "low",
+        SeverityHint::Medium => "medium",
+        SeverityHint::High => "high",
+        SeverityHint::Critical => "critical",
+        SeverityHint::Unknown => "unknown",
+    };
+
+    let extracted: Vec<String> = f
+        .extracted_facts
+        .iter()
+        .flat_map(|fact| fact.values.iter().cloned())
+        .collect();
+
+    PatternFindingSummary {
+        check_id: f.check_id.clone(),
+        name: f.name.clone(),
+        severity: severity.to_string(),
+        confidence: f.confidence,
+        matched_summary: f.matched_condition_summary.clone(),
+        extracted,
+        is_actionable: f.is_actionable(),
+    }
 }
 
 // ── Lineage summary bridge ────────────────────────────────────────────────────
