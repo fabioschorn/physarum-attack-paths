@@ -37,6 +37,7 @@
 //! - TCP/DNS protocol handlers
 //! - PatternFinding → DiscoveryQuery bridge for physarum-llm (#106)
 
+pub mod catalog;
 pub mod extractor;
 pub mod finding;
 pub mod matcher;
@@ -45,6 +46,7 @@ pub mod runner;
 pub mod template;
 
 // Flat re-exports for ergonomic use from physarum-maze / physarum-llm.
+pub use catalog::all_templates;
 pub use extractor::{ExtractPart, ExtractedFact, ExtractorType, PatternExtractor};
 pub use finding::{EvidenceSource, PatternFinding};
 pub use matcher::{MatchCondition, MatchPart, MatcherType, PatternMatcher};

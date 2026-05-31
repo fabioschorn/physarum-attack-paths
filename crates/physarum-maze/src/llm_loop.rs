@@ -15,16 +15,18 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use anyhow::Result;
+use futures::future::join_all;
 use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
-    LlmClient, NextAction, OsHint, OsHintSource, PolicyDecision, PolicyGate, PolicyRejectionReason,
-    PortScan, PortState, PropagationMethod, PropagationMethodClass, RejectedStrategy,
-    TransportProtocol, MAX_ATTEMPTS,
+    LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
+    PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
+    RejectedStrategy, TransportProtocol, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     result_from_open_port, EvidenceSource as ScanEvidenceSource, OsHintSource as ScanOsHintSource,
     PortList, Scanner, SensingProfile,
 };
+use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
 use crate::lineage::Lineage;
 
@@ -58,6 +60,24 @@ pub async fn run(
         .map(sensing_result_to_port_scan)
         .collect();
     let os_hint = infer_os_hint_from_results(&sensing_results);
+
+    // Enrich with physarum-sporangium pattern evidence on open HTTP ports.
+    // Runs once before the attempt loop — findings are stable across retries.
+    let open_ports: Vec<u16> = sensing_results.iter().map(|r| r.port).collect();
+    let raw_findings = enrich_with_patterns(target, &open_ports).await;
+    let pattern_summaries: Vec<PatternFindingSummary> = raw_findings
+        .iter()
+        .map(pattern_finding_to_summary)
+        .collect();
+
+    tracing::info!(
+        %target,
+        open_ports = open_ports.len(),
+        pattern_findings = pattern_summaries.len(),
+        actionable = pattern_summaries.iter().filter(|f| f.is_actionable).count(),
+        "evidence bundle ready"
+    );
+
     let mut rejected: Vec<RejectedStrategy> = Vec::new();
 
     for attempt_number in 1..=MAX_ATTEMPTS {
@@ -73,6 +93,7 @@ pub async fn run(
                 .collect(),
             rejected_strategies: rejected.clone(),
             attempt_number,
+            pattern_findings: pattern_summaries.clone(),
         };
 
         // ── Query LLM ────────────────────────────────────────────────────────
@@ -283,6 +304,97 @@ fn infer_os_hint_from_results(results: &[physarum_scanner::SensingResult]) -> Op
                 ScanOsHintSource::Convention => OsHintSource::Convention,
             },
         })
+}
+
+// ── Sporangium pattern enrichment ─────────────────────────────────────────────
+
+/// HTTP ports that physarum-sporangium templates are designed to probe.
+const HTTP_PROBE_PORTS: &[u16] = &[80, 443, 8080, 8443, 3000, 5000, 8000, 9000, 9090];
+
+/// Run all built-in physarum-sporangium templates against every open HTTP port
+/// on `target`, returning the findings concurrently.
+///
+/// Non-HTTP ports are skipped — all 21 built-in templates are HTTP-only.
+/// Network errors per template are silently ignored: the scanner already
+/// confirmed reachability; individual template failures mean "no match", not
+/// "host unreachable".
+async fn enrich_with_patterns(target: Ipv4Addr, open_ports: &[u16]) -> Vec<PatternFinding> {
+    let http_ports: Vec<u16> = open_ports
+        .iter()
+        .copied()
+        .filter(|p| HTTP_PROBE_PORTS.contains(p))
+        .collect();
+
+    if http_ports.is_empty() {
+        return vec![];
+    }
+
+    let templates = physarum_sporangium::all_templates();
+    let policy = RunPolicy {
+        allowed_check_ids: templates.iter().map(|t| t.id.clone()).collect(),
+        max_response_bytes: 32_768,
+        request_timeout_ms: 3_000,
+        max_redirects: 2,
+    };
+
+    let runner = match PatternRunner::new(policy) {
+        Ok(r) => std::sync::Arc::new(r),
+        Err(e) => {
+            tracing::warn!(%target, err = %e, "sporangium PatternRunner init failed — skipping enrichment");
+            return vec![];
+        }
+    };
+
+    let tasks: Vec<_> = http_ports
+        .iter()
+        .flat_map(|&port| {
+            let runner = runner.clone();
+            templates.iter().map(move |t| {
+                let runner = runner.clone();
+                let template = t.clone();
+                async move {
+                    runner
+                        .run(&template, std::net::IpAddr::V4(target), port)
+                        .await
+                        .unwrap_or_default()
+                }
+            })
+        })
+        .collect();
+
+    join_all(tasks).await.into_iter().flatten().collect()
+}
+
+/// Convert a `PatternFinding` into the condensed `PatternFindingSummary` that
+/// travels inside `DiscoveryQuery` to the LLM.
+///
+/// Only the fields relevant to propagation reasoning are included.
+/// Raw response bodies are never forwarded.
+fn pattern_finding_to_summary(f: &PatternFinding) -> PatternFindingSummary {
+    let severity = match f.severity_hint {
+        SeverityHint::Info => "info",
+        SeverityHint::Low => "low",
+        SeverityHint::Medium => "medium",
+        SeverityHint::High => "high",
+        SeverityHint::Critical => "critical",
+        SeverityHint::Unknown => "unknown",
+    };
+
+    let extracted: Vec<String> = f
+        .extracted_facts
+        .iter()
+        .flat_map(|fact| fact.values.iter().cloned())
+        .collect();
+
+    PatternFindingSummary {
+        check_id: f.check_id.clone(),
+        name: f.name.clone(),
+        severity: severity.to_string(),
+        confidence: f.confidence,
+        matched_summary: f.matched_condition_summary.clone(),
+        extracted,
+        is_actionable: f.is_actionable(),
+    }
 }
 
 // ── Lineage summary bridge ────────────────────────────────────────────────────

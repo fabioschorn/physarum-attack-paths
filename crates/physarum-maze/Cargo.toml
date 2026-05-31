@@ -37,6 +37,12 @@ physarum-scanner = { path = "../physarum-scanner" }
 # LLM-aware propagation reasoning — disabled by default unless --llm-endpoint is set
 physarum-llm = { path = "../physarum-llm" }
 
+# Nuclei-inspired HTTP pattern evidence enrichment — feeds PatternFinding into DiscoveryQuery
+physarum-sporangium = { path = "../physarum-sporangium" }
+
+# Async combinators for concurrent pattern probing
+futures = { workspace = true }
+
 # HTTP execution in LLM bootstrap steps (HttpGet / HttpPost actions)
 reqwest = { workspace = true }
 

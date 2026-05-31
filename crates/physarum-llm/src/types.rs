@@ -67,6 +67,33 @@ pub enum OsHintSource {
     Convention,
 }
 
+// ── Pattern evidence summary ──────────────────────────────────────────────────
+
+/// Condensed evidence from physarum-sporangium HTTP pattern probing.
+///
+/// Carries the actionable subset of a `PatternFinding` — enough for the LLM
+/// to reason about what service or misconfiguration is present without embedding
+/// full binary evidence into the query. Only the fields needed for propagation
+/// reasoning are included; raw response bodies are never forwarded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatternFindingSummary {
+    /// Template ID that matched (e.g. "nginx-server-detect", "missing-hsts").
+    pub check_id: String,
+    /// Human-readable template name.
+    pub name: String,
+    /// Severity level: "info" | "low" | "medium" | "high" | "critical".
+    pub severity: String,
+    /// Probe confidence — 0.0–1.0.
+    pub confidence: f32,
+    /// Short summary of which matchers fired (e.g. "words=['nginx']").
+    pub matched_summary: String,
+    /// Values extracted by the template (version strings, page titles, etc.).
+    pub extracted: Vec<String>,
+    /// True when severity >= Low and confidence >= 0.7.
+    /// Signals that the LLM should treat this finding as actionable evidence.
+    pub is_actionable: bool,
+}
+
 // ── Discovery query ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +109,16 @@ pub struct DiscoveryQuery {
     /// One-based: first attempt is 1, last valid attempt is `max_attempts`.
     /// Values above `max_attempts` are rejected by `PolicyGate::evaluate()`.
     pub attempt_number: u8,
+    /// Pattern-evidence findings from physarum-sporangium HTTP probing.
+    ///
+    /// Only findings that pass the actionability threshold (severity >= Low,
+    /// confidence >= 0.7) are included. Empty when no HTTP ports are open or
+    /// when sporangium enrichment is unavailable.
+    ///
+    /// `default` ensures existing lineage JSON without this field deserialises
+    /// cleanly — backwards-compatible with v0.3.0 and earlier lineage records.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pattern_findings: Vec<PatternFindingSummary>,
 }
 
 /// Minimal lineage context sent to the LLM — no secrets, no raw payloads.

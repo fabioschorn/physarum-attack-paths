@@ -9,7 +9,7 @@
 //!
 //! All templates are validated at startup via `PatternTemplate::validate()`.
 
-use physarum_sporangium::{
+use crate::{
     extractor::{ExtractPart, ExtractorType, PatternExtractor},
     matcher::{MatchCondition, MatchPart, MatcherType, PatternMatcher},
     template::{HttpCheck, PatternProtocol, PatternTemplate, SeverityHint, TemplateInfo},

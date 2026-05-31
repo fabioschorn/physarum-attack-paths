@@ -13,9 +13,9 @@ mod tests {
         types::{
             ArtifactType, BootstrapAction, BootstrapPlan, BootstrapStep, DiscoveryQuery,
             ExecutionResultSummary, ExpectedResult, LineageSummary, LlmAttemptEvidence, NextAction,
-            OsHint, OsHintSource, PolicyDecision, PolicyRejectionReason, PortScan, PortState,
-            PropagationMethod, PropagationMethodClass, PropagationStrategy, RejectedStrategy,
-            SecretRef, SecretSource, SshAuth, TransportProtocol,
+            OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyRejectionReason,
+            PortScan, PortState, PropagationMethod, PropagationMethodClass, PropagationStrategy,
+            RejectedStrategy, SecretRef, SecretSource, SshAuth, TransportProtocol,
         },
         LlmClient,
     };
@@ -289,6 +289,26 @@ mod tests {
                 summary: "SSH rejected — target outside CIDR".into(),
             }],
             attempt_number: 2,
+            pattern_findings: vec![
+                PatternFindingSummary {
+                    check_id: "nginx-server-detect".into(),
+                    name: "Nginx Server Detect".into(),
+                    severity: "info".into(),
+                    confidence: 0.9,
+                    matched_summary: "words=['nginx']".into(),
+                    extracted: vec!["nginx/1.25.3".into()],
+                    is_actionable: false,
+                },
+                PatternFindingSummary {
+                    check_id: "server-version-exposed".into(),
+                    name: "Server Version Exposed".into(),
+                    severity: "low".into(),
+                    confidence: 0.85,
+                    matched_summary: "regex='^[^ ]+ [0-9]'".into(),
+                    extracted: vec!["nginx/1.25.3".into()],
+                    is_actionable: true,
+                },
+            ],
         });
     }
 
@@ -359,6 +379,7 @@ mod tests {
             methods_tried: vec![],
             rejected_strategies: vec![],
             attempt_number: 1,
+            pattern_findings: vec![],
         };
 
         let strategy = client.query_propagation(&query).await.unwrap();
@@ -388,6 +409,7 @@ mod tests {
             methods_tried: vec!["ssh".into()],
             rejected_strategies: vec![],
             attempt_number: 2,
+            pattern_findings: vec![],
         };
 
         let strategy = client.query_propagation(&query).await.unwrap();
@@ -414,6 +436,7 @@ mod tests {
             methods_tried: vec![],
             rejected_strategies: vec![],
             attempt_number: 1,
+            pattern_findings: vec![],
         };
 
         let strategy = client.query_propagation(&query).await.unwrap();
@@ -427,5 +450,72 @@ mod tests {
             gate.evaluate(&strategy, "10.0.1.5".parse().unwrap(), 1),
             PolicyDecision::Accepted
         ));
+    }
+
+    // ── PatternFindingSummary round-trip ─────────────────────────────────────
+
+    #[test]
+    fn pattern_finding_summary_actionable_round_trip() {
+        round_trip(&PatternFindingSummary {
+            check_id: "server-version-exposed".into(),
+            name: "Server Version Exposed".into(),
+            severity: "low".into(),
+            confidence: 0.9,
+            matched_summary: "regex='^nginx/[0-9]'".into(),
+            extracted: vec!["nginx/1.25.3".into()],
+            is_actionable: true,
+        });
+    }
+
+    #[test]
+    fn pattern_finding_summary_info_round_trip() {
+        round_trip(&PatternFindingSummary {
+            check_id: "nginx-server-detect".into(),
+            name: "Nginx Server Detect".into(),
+            severity: "info".into(),
+            confidence: 1.0,
+            matched_summary: "words=['nginx']".into(),
+            extracted: vec![],
+            is_actionable: false,
+        });
+    }
+
+    #[test]
+    fn discovery_query_empty_pattern_findings_omitted_from_json() {
+        let q = DiscoveryQuery {
+            target: "10.0.0.1".parse::<IpAddr>().unwrap(),
+            ports: vec![],
+            os_hint: None,
+            lineage_summary: LineageSummary {
+                node_id: "seed".into(),
+                hop_count: 0,
+                current_score: 0.0,
+                colonized_count: 0,
+            },
+            methods_tried: vec![],
+            rejected_strategies: vec![],
+            attempt_number: 1,
+            pattern_findings: vec![],
+        };
+        let json = serde_json::to_string(&q).unwrap();
+        // Empty pattern_findings must be omitted — backwards compat with v0.3.0 lineage.
+        assert!(!json.contains("pattern_findings"));
+    }
+
+    #[test]
+    fn discovery_query_without_pattern_findings_field_deserialises() {
+        // Simulates a v0.3.0 lineage JSON that has no pattern_findings key.
+        let json = r#"{
+            "target": "10.0.0.1",
+            "ports": [],
+            "os_hint": null,
+            "lineage_summary": { "node_id": "seed", "hop_count": 0, "current_score": 0.0, "colonized_count": 0 },
+            "methods_tried": [],
+            "rejected_strategies": [],
+            "attempt_number": 1
+        }"#;
+        let q: DiscoveryQuery =
+            serde_json::from_str(json).expect("must deserialise without pattern_findings");
+        assert!(q.pattern_findings.is_empty());
     }
 }
