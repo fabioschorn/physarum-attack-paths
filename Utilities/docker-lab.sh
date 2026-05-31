@@ -129,7 +129,7 @@ else
     echo -e "  [${PASS}] mode:     PF-4 real LLM"
     echo -e "  [${INFO}] endpoint: $LLM_ENDPOINT"
     echo -e "  [${INFO}] model:    $LLM_MODEL"
-    echo -e "  [${INFO}] api_key:  ${LLM_API_KEY:0:8}... (masked)"
+    echo -e "  [${INFO}] api_key:  present (redacted)"
 fi
 
 # ─── Step 1: Build Docker image via Docker Cloud ───────────────────────────

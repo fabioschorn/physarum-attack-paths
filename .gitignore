@@ -79,3 +79,12 @@ formal/tla/tla2tools.jar
 
 # ── Docker Lab runtime output (not source) ────────────────────────────────────
 docker/lineage/
+
+# ── PF-4 and future labs — local credential files (never commit) ──────────────
+examples/**/sensitive-info/*.env
+examples/**/sensitive-info/.env
+examples/**/sensitive-info/*.vars
+examples/**/sensitive-info/*.local
+!examples/**/sensitive-info/.env.example
+!examples/**/sensitive-info/README.md
+!examples/**/sensitive-info/.gitkeep
