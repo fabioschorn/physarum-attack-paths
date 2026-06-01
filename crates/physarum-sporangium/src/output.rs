@@ -281,6 +281,9 @@ fn format_screen(f: &PatternFinding, no_color: bool) -> String {
     let proto = match f.protocol {
         PatternProtocol::Http => "http",
         PatternProtocol::Tcp => "tcp",
+        PatternProtocol::Dns => "dns",
+        PatternProtocol::Ssl => "ssl",
+        PatternProtocol::WebSocket => "websocket",
     };
 
     let sev = severity_str(f.severity_hint, no_color);
@@ -328,7 +331,13 @@ fn format_json(f: &PatternFinding) -> String {
         "target":        f.target_ip.to_string(),
         "port":          f.port,
         "severity":      format!("{:?}", f.severity_hint).to_lowercase(),
-        "protocol":      match f.protocol { PatternProtocol::Http => "http", PatternProtocol::Tcp => "tcp" },
+        "protocol":      match f.protocol {
+            PatternProtocol::Http => "http",
+            PatternProtocol::Tcp => "tcp",
+            PatternProtocol::Dns => "dns",
+            PatternProtocol::Ssl => "ssl",
+            PatternProtocol::WebSocket => "websocket",
+        },
         "matched":       f.matched_condition_summary,
         "extracted":     extracted,
         "confidence":    f.confidence,
