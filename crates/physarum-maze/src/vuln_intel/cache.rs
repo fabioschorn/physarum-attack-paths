@@ -226,7 +226,7 @@ mod tests {
         let input = make_input("1.21.0");
         let detected = parse_semver(&input.version).unwrap();
         let fixed = parse_semver(&entry.fixed_version).unwrap();
-        assert!(!(detected < fixed));
+        assert!(detected >= fixed);
     }
 
     #[test]
@@ -235,7 +235,7 @@ mod tests {
         let input = make_input("1.18.0");
         let detected = parse_semver(&input.version).unwrap();
         let fixed = parse_semver(&entry.fixed_version).unwrap();
-        assert!(!(detected < fixed));
+        assert!(detected >= fixed);
     }
 
     #[test]
