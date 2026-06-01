@@ -28,6 +28,9 @@ pub struct OpenAiCompatibleClient {
     timeout: Duration,
     allowed_methods: Vec<PropagationMethodClass>,
     http: Client,
+    /// When true, log the full prompt and raw LLM response at DEBUG level.
+    /// Lab-only (PHYSARUM_LLM_LOG_PROMPTS=true) — keep false in production.
+    log_prompts: bool,
 }
 
 impl OpenAiCompatibleClient {
@@ -37,6 +40,7 @@ impl OpenAiCompatibleClient {
         api_key: impl Into<String>,
         timeout_ms: u64,
         allowed_methods: Vec<PropagationMethodClass>,
+        log_prompts: bool,
     ) -> Result<Self> {
         let http = Client::builder()
             .timeout(Duration::from_millis(timeout_ms))
@@ -50,6 +54,7 @@ impl OpenAiCompatibleClient {
             timeout: Duration::from_millis(timeout_ms),
             allowed_methods,
             http,
+            log_prompts,
         })
     }
 
@@ -68,7 +73,7 @@ impl OpenAiCompatibleClient {
                 },
                 ChatMessage {
                     role: "user".into(),
-                    content: user_prompt,
+                    content: user_prompt.clone(),
                 },
             ],
             temperature: 0.2,
@@ -86,6 +91,9 @@ impl OpenAiCompatibleClient {
             attempt = query.attempt_number,
             "sending DiscoveryQuery to LLM"
         );
+        if self.log_prompts {
+            debug!(user_prompt = %user_prompt, "LLM request body");
+        }
 
         let resp = self
             .http
@@ -116,9 +124,17 @@ impl OpenAiCompatibleClient {
             .message
             .content;
 
+        if self.log_prompts {
+            debug!(raw_response = %content, "LLM raw response");
+        }
         let strategy: PropagationStrategy = serde_json::from_str(&content).map_err(|e| {
-            warn!(raw = %content, error = %e, "LLM response did not parse as PropagationStrategy");
-            anyhow!("LLM response JSON parse error: {e} — raw: {content}")
+            if self.log_prompts {
+                warn!(raw = %content, error = %e, "LLM response did not parse as PropagationStrategy");
+                anyhow!("LLM response JSON parse error: {e} — raw: {content}")
+            } else {
+                warn!(error = %e, "LLM response did not parse as PropagationStrategy");
+                anyhow!("LLM response JSON parse error: {e}")
+            }
         })?;
 
         Ok(strategy)

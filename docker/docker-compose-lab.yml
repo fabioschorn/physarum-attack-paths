@@ -116,6 +116,8 @@ services:
       RUST_LOG: "physarum_maze=debug,physarum_llm=debug,physarum_sporangium=info"
       # API key injected from host env — never hardcoded here
       LLM_API_KEY: "${LLM_API_KEY:-}"
+      # Set to true for lab evidence capture (logs full prompt + raw LLM response)
+      PHYSARUM_LLM_LOG_PROMPTS: "${PHYSARUM_LLM_LOG_PROMPTS:-false}"
     command: >
       --mode seed
       --interface eth0

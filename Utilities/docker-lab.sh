@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# docker-lab.sh — physarum-maze Docker Lab runner (PF-3.1 / PF-4)
+# docker-lab.sh — physarum-maze Docker Lab runner (PF-3.1 / PF-4 / PF-5)
 #
 # Four-container lab validating the adaptive sensing + LLM reasoning pipeline:
 #   host-a (physarum-maze:lab)        — agent, senses the /24 subnet
@@ -32,17 +32,31 @@
 #     export PHYSARUM_LLM_MODEL="llama3.2"
 #     ./Utilities/docker-lab.sh
 #
+# Stimulus harness (Step 4):
+#
+#   Default (PF-5 organic startup validation):
+#     PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS=false  ← default
+#     Agent discovers hosts organically via startup_sweep every 180 s.
+#     Acceptance criteria: lineage shows stimulus_source="startup-sensing".
+#
+#   ICMP harness (runtime stimulus path validation):
+#     PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS=true
+#     Step 4 pings host-a from each container to trigger the ICMP stimulus path.
+#     Acceptance criteria: lineage shows stimulus_source="icmp".
+#
 # What this script does:
 #   1. Verifies local Rust toolchain is >= 1.86
 #   2. Builds the Docker image via Docker Cloud (cloud-expertsonline-physarum-attack-paths)
 #      using OCI export + docker load (cloud builder cannot --load directly)
 #   3. Creates the lineage output directory
 #   4. Starts the four-container lab (docker compose up)
-#   5. Streams host-a logs in real time
-#   6. On exit (Ctrl-C or timeout) prints the lineage evidence
+#   5. Optionally triggers ICMP stimuli (controlled by PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS)
+#   6. Streams host-a logs in real time
+#   7. On exit (Ctrl-C or timeout) prints the lineage evidence
 #
 # Usage:
-#   ./Utilities/docker-lab.sh            # run the lab
+#   ./Utilities/docker-lab.sh            # run the lab (organic startup sensing)
+#   PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS=true ./Utilities/docker-lab.sh   # + ICMP harness
 #   ./Utilities/docker-lab.sh --clean    # remove containers and lineage output
 #   ./Utilities/docker-lab.sh --logs     # show logs of last run without rebuilding
 
@@ -128,6 +142,8 @@ echo ""
 echo -e "${BOLD}── Step 0b: LLM mode${NC}"
 LLM_ENDPOINT="${PHYSARUM_LLM_ENDPOINT:-mock-http}"
 LLM_MODEL="${PHYSARUM_LLM_MODEL:-gpt-4o-mini}"
+ENABLE_ICMP_HARNESS="${PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS:-false}"
+LLM_LOG_PROMPTS="${PHYSARUM_LLM_LOG_PROMPTS:-false}"
 
 if [ "$LLM_ENDPOINT" = "mock-http" ]; then
     echo -e "  [${INFO}] mode:     PF-3.1 mock (no real LLM — HTTP GET against host-b:80)"
@@ -141,10 +157,15 @@ else
         echo -e "        Set LLM_API_KEY before running in real-LLM mode."
         exit 1
     fi
-    echo -e "  [${PASS}] mode:     PF-4 real LLM"
-    echo -e "  [${INFO}] endpoint: $LLM_ENDPOINT"
-    echo -e "  [${INFO}] model:    $LLM_MODEL"
-    echo -e "  [${INFO}] api_key:  present (redacted)"
+    echo -e "  [${PASS}] mode:       PF-4/PF-5 real LLM"
+    echo -e "  [${INFO}] endpoint:   $LLM_ENDPOINT"
+    echo -e "  [${INFO}] model:      $LLM_MODEL"
+    echo -e "  [${INFO}] api_key:    present (redacted)"
+fi
+if [ "$LLM_LOG_PROMPTS" = "true" ]; then
+    echo -e "  [${INFO}] log_prompts: ENABLED (PHYSARUM_LLM_LOG_PROMPTS=true — lab evidence mode)"
+else
+    echo -e "  [${INFO}] log_prompts: disabled (set PHYSARUM_LLM_LOG_PROMPTS=true to capture evidence)"
 fi
 
 # ─── Step 1: Build Docker image via Docker Cloud ───────────────────────────
@@ -183,27 +204,42 @@ echo ""
 # Run compose in background so we can trap exit
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
 
-# ─── Step 4: Trigger stimuli ───────────────────────────────────────────────────
-# Send ICMP ping from each host to host-a after a short delay so host-a's
-# raw socket is ready. Each ping triggers a DiscoveryQuery → LLM reasoning cycle.
-(
-    sleep 6
-    echo -e "\n  [${INFO}] triggering stimulus: host-b → 172.20.0.2"
-    docker exec physarum-host-b sh -c \
-        "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
-        >/dev/null 2>&1 || true
-    sleep 3
-    echo -e "  [${INFO}] triggering stimulus: host-c → 172.20.0.2"
-    docker exec physarum-host-c sh -c \
-        "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
-        >/dev/null 2>&1 || true
-    sleep 3
-    echo -e "  [${INFO}] triggering stimulus: host-d → 172.20.0.2"
-    docker exec physarum-host-d sh -c \
-        "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
-        >/dev/null 2>&1 || true
-) &
+# ─── Step 4: ICMP stimulus harness (optional) ─────────────────────────────────
+# Validates the runtime ICMP stimulus path (Path B).
+# Disabled by default so PF-5 acceptance criteria can verify Path A
+# (organic startup_sweep) without an external harness.
+#
+# Enable with: PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS=true
+if [ "$ENABLE_ICMP_HARNESS" = "true" ]; then
+    echo ""
+    echo -e "${BOLD}── Step 4: ICMP stimulus harness (PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS=true)${NC}"
+    echo -e "  [${INFO}] Sending ICMP pings to host-a to trigger runtime stimulus path"
+    (
+        sleep 6
+        echo -e "\n  [${INFO}] triggering stimulus: host-b → 172.20.0.2"
+        docker exec physarum-host-b sh -c \
+            "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
+            >/dev/null 2>&1 || true
+        sleep 3
+        echo -e "  [${INFO}] triggering stimulus: host-c → 172.20.0.2"
+        docker exec physarum-host-c sh -c \
+            "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
+            >/dev/null 2>&1 || true
+        sleep 3
+        echo -e "  [${INFO}] triggering stimulus: host-d → 172.20.0.2"
+        docker exec physarum-host-d sh -c \
+            "apk add --no-cache iputils -q 2>/dev/null; ping -c 3 172.20.0.2" \
+            >/dev/null 2>&1 || true
+    ) &
+else
+    echo ""
+    echo -e "${BOLD}── Step 4: ICMP harness skipped (organic startup sensing — PF-5 default)${NC}"
+    echo -e "  [${INFO}] agent will discover hosts via startup_sweep every 180 s"
+    echo -e "  [${INFO}] acceptance: lineage must show stimulus_source=\"startup-sensing\""
+    echo -e "  [${INFO}] to enable ICMP path: PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS=true"
+fi
 
+# ─── Step 5: Stream logs ──────────────────────────────────────────────────────
 # Stream host-a logs — this is where the reasoning loop output appears
 trap 'on_exit' INT TERM EXIT
 

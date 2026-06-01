@@ -20,11 +20,12 @@ use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
     LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
     PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
-    RejectedStrategy, TransportProtocol, MAX_ATTEMPTS,
+    RejectedStrategy, TransportProtocol, VulnerabilityCandidate, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     result_from_open_port, EvidenceSource as ScanEvidenceSource, NextProbeHint,
     OsHintSource as ScanOsHintSource, PortList, Scanner, SchemeHint, SensingProfile,
+    STIMULUS_PORTS,
 };
 use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
@@ -54,7 +55,8 @@ pub async fn run(
     tracing::info!(%target, stimulus, "LLM reasoning loop started");
 
     let evidence_source = stimulus_to_evidence_source(stimulus);
-    let sensing_results = fingerprint(target, evidence_source).await;
+    let profile = stimulus_to_profile(stimulus);
+    let sensing_results = fingerprint(target, evidence_source, profile).await;
     // Upgrade port-convention results with lightweight banner grabs.
     // Raises confidence 0.5 → 0.65–0.85, sets scheme_hint from banner evidence,
     // and clears recommended_next_probe when the protocol is resolved.
@@ -107,6 +109,7 @@ pub async fn run(
                 lineage.record_llm_attempt(LlmAttemptEvidence {
                     target: target.to_string(),
                     attempt_number,
+                    stimulus_source: stimulus.to_string(),
                     method_class: PropagationMethodClass::NoPath,
                     artifact_type: ArtifactType::None,
                     policy_decision: PolicyDecision::Rejected {
@@ -135,6 +138,7 @@ pub async fn run(
             lineage.record_llm_attempt(LlmAttemptEvidence {
                 target: target.to_string(),
                 attempt_number,
+                stimulus_source: stimulus.to_string(),
                 method_class: PropagationMethodClass::NoPath,
                 artifact_type: ArtifactType::None,
                 policy_decision: PolicyDecision::Accepted,
@@ -165,6 +169,7 @@ pub async fn run(
             lineage.record_llm_attempt(LlmAttemptEvidence {
                 target: target.to_string(),
                 attempt_number,
+                stimulus_source: stimulus.to_string(),
                 method_class,
                 artifact_type: strategy.artifact_type.clone(),
                 policy_decision,
@@ -197,6 +202,7 @@ pub async fn run(
         lineage.record_llm_attempt(LlmAttemptEvidence {
             target: target.to_string(),
             attempt_number,
+            stimulus_source: stimulus.to_string(),
             method_class,
             artifact_type: strategy.artifact_type.clone(),
             policy_decision: PolicyDecision::Accepted,
@@ -223,14 +229,10 @@ pub async fn run(
 
 // ── Scanner fingerprint ───────────────────────────────────────────────────────
 
-/// Fingerprint `target` using `SensingProfile::StimulusTargeted`.
-///
-/// Returns `SensingResult` — structured evidence that feeds directly into
-/// `DiscoveryQuery` via [`sensing_result_to_port_scan`].  Profile params
-/// (batch_size, timeout_ms, tries, port_subset) come from the profile, not
-/// from hardcoded values, so tuning the profile tunes the fingerprint.
+/// Map a stimulus string to the `EvidenceSource` tag written into `SensingResult`.
 fn stimulus_to_evidence_source(stimulus: &str) -> ScanEvidenceSource {
     match stimulus {
+        "startup-sensing" => ScanEvidenceSource::StartupSensing,
         "icmp" => ScanEvidenceSource::IcmpStimulus,
         "tcp-syn" => ScanEvidenceSource::TcpStimulus,
         "ebpf" => ScanEvidenceSource::EbpfObservation,
@@ -238,17 +240,34 @@ fn stimulus_to_evidence_source(stimulus: &str) -> ScanEvidenceSource {
     }
 }
 
+/// Map a stimulus string to the adaptive `SensingProfile` used for fingerprinting.
+///
+/// | Stimulus        | Profile                | Behaviour                        |
+/// |-----------------|------------------------|----------------------------------|
+/// | startup-sensing | StartupLocalDiscovery  | broad ports, moderate speed      |
+/// | tcp-syn / ebpf  | RuntimeTcpEbpfFast     | top ports, skip host discovery   |
+/// | icmp            | RuntimeIcmpFast        | top ports, normal host confirm   |
+/// | (other)         | StimulusTargeted       | focused STIMULUS_PORTS, -Pn      |
+fn stimulus_to_profile(stimulus: &str) -> SensingProfile {
+    match stimulus {
+        "startup-sensing" => SensingProfile::StartupLocalDiscovery,
+        "tcp-syn" | "ebpf" => SensingProfile::RuntimeTcpEbpfFast,
+        "icmp" => SensingProfile::RuntimeIcmpFast,
+        _ => SensingProfile::StimulusTargeted,
+    }
+}
+
+/// Fingerprint `target` using the adaptive profile selected by `stimulus_to_profile`.
+///
+/// Profile params (batch_size, timeout_ms, tries, port_subset) are derived
+/// deterministically from the profile so tuning a profile tunes the fingerprint.
 async fn fingerprint(
     target: Ipv4Addr,
     evidence_source: ScanEvidenceSource,
+    profile: SensingProfile,
 ) -> Vec<physarum_scanner::SensingResult> {
-    let params = SensingProfile::StimulusTargeted.params();
-    let port_list = PortList::explicit(
-        params
-            .port_subset
-            .unwrap_or(physarum_scanner::STIMULUS_PORTS)
-            .to_vec(),
-    );
+    let params = profile.params();
+    let port_list = PortList::explicit(params.port_subset.unwrap_or(STIMULUS_PORTS).to_vec());
     match Scanner::new(vec![IpAddr::V4(target)], port_list)
         .batch_size(params.batch_size)
         .timeout_ms(params.timeout_ms)
@@ -262,7 +281,7 @@ async fn fingerprint(
                 result_from_open_port(
                     IpAddr::V4(target),
                     sa.port(),
-                    SensingProfile::StimulusTargeted,
+                    profile.clone(),
                     evidence_source,
                 )
             })
@@ -856,6 +875,8 @@ fn pattern_finding_to_summary(f: &PatternFinding) -> PatternFindingSummary {
         matched_summary: f.matched_condition_summary.clone(),
         extracted,
         is_actionable: f.is_actionable(),
+        // Populated by physarum-spore NVD/OSV enrichment in PF-5+.
+        vulnerability_candidates: Vec::<VulnerabilityCandidate>::new(),
     }
 }
 
