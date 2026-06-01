@@ -143,6 +143,7 @@ echo -e "${BOLD}── Step 0b: LLM mode${NC}"
 LLM_ENDPOINT="${PHYSARUM_LLM_ENDPOINT:-mock-http}"
 LLM_MODEL="${PHYSARUM_LLM_MODEL:-gpt-4o-mini}"
 ENABLE_ICMP_HARNESS="${PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS:-false}"
+LLM_LOG_PROMPTS="${PHYSARUM_LLM_LOG_PROMPTS:-false}"
 
 if [ "$LLM_ENDPOINT" = "mock-http" ]; then
     echo -e "  [${INFO}] mode:     PF-3.1 mock (no real LLM — HTTP GET against host-b:80)"
@@ -156,10 +157,15 @@ else
         echo -e "        Set LLM_API_KEY before running in real-LLM mode."
         exit 1
     fi
-    echo -e "  [${PASS}] mode:     PF-4 real LLM"
-    echo -e "  [${INFO}] endpoint: $LLM_ENDPOINT"
-    echo -e "  [${INFO}] model:    $LLM_MODEL"
-    echo -e "  [${INFO}] api_key:  present (redacted)"
+    echo -e "  [${PASS}] mode:       PF-4/PF-5 real LLM"
+    echo -e "  [${INFO}] endpoint:   $LLM_ENDPOINT"
+    echo -e "  [${INFO}] model:      $LLM_MODEL"
+    echo -e "  [${INFO}] api_key:    present (redacted)"
+fi
+if [ "$LLM_LOG_PROMPTS" = "true" ]; then
+    echo -e "  [${INFO}] log_prompts: ENABLED (PHYSARUM_LLM_LOG_PROMPTS=true — lab evidence mode)"
+else
+    echo -e "  [${INFO}] log_prompts: disabled (set PHYSARUM_LLM_LOG_PROMPTS=true to capture evidence)"
 fi
 
 # ─── Step 1: Build Docker image via Docker Cloud ───────────────────────────

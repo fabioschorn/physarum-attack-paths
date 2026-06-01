@@ -311,6 +311,9 @@ pub struct LlmAttemptEvidence {
     pub target: String,
     /// One-based attempt number matching `DiscoveryQuery::attempt_number`.
     pub attempt_number: u8,
+    /// Stimulus that triggered this evidence pipeline:
+    /// `"startup-sensing"`, `"icmp"`, `"tcp-syn"`, `"ebpf"`, or `"discovery"`.
+    pub stimulus_source: String,
     pub method_class: PropagationMethodClass,
     pub artifact_type: ArtifactType,
     pub policy_decision: PolicyDecision,

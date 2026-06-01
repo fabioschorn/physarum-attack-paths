@@ -83,6 +83,12 @@ pub struct Cli {
     #[arg(long, default_value_t = 30_000, env = "PHYSARUM_LLM_TIMEOUT_MS")]
     pub llm_timeout_ms: u64,
 
+    /// Log the full LLM prompt and raw response at DEBUG level.
+    /// Lab-only — keep false (default) in production to avoid leaking target
+    /// information into logs. Enable with PHYSARUM_LLM_LOG_PROMPTS=true.
+    #[arg(long, default_value_t = false, env = "PHYSARUM_LLM_LOG_PROMPTS")]
+    pub llm_log_prompts: bool,
+
     /// CIDR allowed for LLM-assisted propagation attempts (e.g. 10.0.0.0/8).
     /// Must be set when --llm-endpoint is active; targets outside this CIDR
     /// are rejected by the policy gate regardless of LLM recommendation.

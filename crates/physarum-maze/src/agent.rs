@@ -68,6 +68,7 @@ impl LlmConfig {
                 api_key,
                 cli.llm_timeout_ms,
                 allowed_methods,
+                cli.llm_log_prompts,
             ) {
                 Ok(c) => Arc::new(c),
                 Err(e) => {

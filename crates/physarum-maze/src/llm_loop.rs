@@ -109,6 +109,7 @@ pub async fn run(
                 lineage.record_llm_attempt(LlmAttemptEvidence {
                     target: target.to_string(),
                     attempt_number,
+                    stimulus_source: stimulus.to_string(),
                     method_class: PropagationMethodClass::NoPath,
                     artifact_type: ArtifactType::None,
                     policy_decision: PolicyDecision::Rejected {
@@ -137,6 +138,7 @@ pub async fn run(
             lineage.record_llm_attempt(LlmAttemptEvidence {
                 target: target.to_string(),
                 attempt_number,
+                stimulus_source: stimulus.to_string(),
                 method_class: PropagationMethodClass::NoPath,
                 artifact_type: ArtifactType::None,
                 policy_decision: PolicyDecision::Accepted,
@@ -167,6 +169,7 @@ pub async fn run(
             lineage.record_llm_attempt(LlmAttemptEvidence {
                 target: target.to_string(),
                 attempt_number,
+                stimulus_source: stimulus.to_string(),
                 method_class,
                 artifact_type: strategy.artifact_type.clone(),
                 policy_decision,
@@ -199,6 +202,7 @@ pub async fn run(
         lineage.record_llm_attempt(LlmAttemptEvidence {
             target: target.to_string(),
             attempt_number,
+            stimulus_source: stimulus.to_string(),
             method_class,
             artifact_type: strategy.artifact_type.clone(),
             policy_decision: PolicyDecision::Accepted,
