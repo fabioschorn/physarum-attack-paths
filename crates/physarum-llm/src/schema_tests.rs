@@ -312,6 +312,7 @@ mod tests {
                     matched_summary: "words=['nginx']".into(),
                     extracted: vec!["nginx/1.25.3".into()],
                     is_actionable: false,
+                    vulnerability_candidates: vec![],
                 },
                 PatternFindingSummary {
                     check_id: "server-version-exposed".into(),
@@ -321,6 +322,7 @@ mod tests {
                     matched_summary: "regex='^[^ ]+ [0-9]'".into(),
                     extracted: vec!["nginx/1.25.3".into()],
                     is_actionable: true,
+                    vulnerability_candidates: vec![],
                 },
             ],
         });
@@ -333,6 +335,7 @@ mod tests {
         round_trip(&LlmAttemptEvidence {
             target: "10.0.0.2".into(),
             attempt_number: 1,
+            stimulus_source: "startup-sensing".into(),
             method_class: PropagationMethodClass::Http,
             artifact_type: ArtifactType::Script,
             policy_decision: PolicyDecision::Accepted,
@@ -345,6 +348,7 @@ mod tests {
         round_trip(&LlmAttemptEvidence {
             target: "10.0.0.3".into(),
             attempt_number: 3,
+            stimulus_source: "icmp".into(),
             method_class: PropagationMethodClass::Ssh,
             artifact_type: ArtifactType::None,
             policy_decision: PolicyDecision::Rejected {
@@ -362,6 +366,7 @@ mod tests {
         round_trip(&LlmAttemptEvidence {
             target: "10.0.0.4".into(),
             attempt_number: MAX_ATTEMPTS,
+            stimulus_source: "tcp-syn".into(),
             method_class: PropagationMethodClass::NoPath,
             artifact_type: ArtifactType::None,
             policy_decision: PolicyDecision::Accepted,
@@ -478,6 +483,7 @@ mod tests {
             matched_summary: "regex='^nginx/[0-9]'".into(),
             extracted: vec!["nginx/1.25.3".into()],
             is_actionable: true,
+            vulnerability_candidates: vec![],
         });
     }
 
@@ -491,6 +497,7 @@ mod tests {
             matched_summary: "words=['nginx']".into(),
             extracted: vec![],
             is_actionable: false,
+            vulnerability_candidates: vec![],
         });
     }
 
