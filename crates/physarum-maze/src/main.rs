@@ -2,6 +2,7 @@ use clap::{Parser, ValueEnum};
 use tracing_subscriber::EnvFilter;
 
 mod agent;
+mod cve_heuristic;
 mod discovery;
 #[cfg(target_os = "linux")]
 mod ebpf;

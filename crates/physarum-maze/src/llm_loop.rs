@@ -20,7 +20,7 @@ use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
     LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
     PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
-    RejectedStrategy, TransportProtocol, VulnerabilityCandidate, MAX_ATTEMPTS,
+    RejectedStrategy, TransportProtocol, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     result_from_open_port, EvidenceSource as ScanEvidenceSource, NextProbeHint,
@@ -29,6 +29,7 @@ use physarum_scanner::{
 };
 use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
+use crate::cve_heuristic;
 use crate::lineage::Lineage;
 
 pub enum LlmOutcome {
@@ -875,8 +876,7 @@ fn pattern_finding_to_summary(f: &PatternFinding) -> PatternFindingSummary {
         matched_summary: f.matched_condition_summary.clone(),
         extracted,
         is_actionable: f.is_actionable(),
-        // Populated by physarum-spore NVD/OSV enrichment in PF-5+.
-        vulnerability_candidates: Vec::<VulnerabilityCandidate>::new(),
+        vulnerability_candidates: cve_heuristic::enrich_finding(f),
     }
 }
 

@@ -71,15 +71,13 @@ pub enum OsHintSource {
 
 /// CVE / vulnerability candidate associated with a service fingerprint finding.
 ///
-/// Populated by `physarum-spore` NVD/OSV enrichment after `ServiceVersion`
-/// scanning resolves `version_hint` on open ports (PF-5+).
-///
-/// In the current release this field is always empty — the struct establishes
-/// the evidence contract between the scanner layer and the LLM `DiscoveryQuery`.
-/// The LLM must treat populated entries as prioritised exploit-path signals.
+/// Populated by `physarum-spore` banner-heuristic enrichment (Issue #128) and
+/// future NVD/OSV feed enrichment. The LLM must treat populated entries as
+/// prioritised exploit-path signals and reference the `cve_id` in its
+/// `reasoning_summary`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VulnerabilityCandidate {
-    /// CVE identifier, e.g. `"CVE-2021-44228"`.
+    /// CVE identifier, e.g. `"CVE-2021-23017"`.
     pub cve_id: String,
     /// CVSS base score 0.0–10.0, when available from the feed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -92,6 +90,18 @@ pub struct VulnerabilityCandidate {
     pub confidence: f32,
     /// Origin of this vulnerability intelligence.
     pub source: VulnerabilitySource,
+    /// Service product name matched (e.g. `"nginx"`, `"apache"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_service: Option<String>,
+    /// Exact version string extracted from the banner (e.g. `"1.18.0"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_version: Option<String>,
+    /// Short evidence strings supporting this candidate (header extracts, banner fragments).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<String>,
+    /// `true` when the version match is exact; `false` for range or heuristic match.
+    #[serde(default)]
+    pub is_confirmed: bool,
 }
 
 /// How the `VulnerabilityCandidate` was obtained.

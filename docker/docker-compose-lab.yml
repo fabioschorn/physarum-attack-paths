@@ -1,27 +1,24 @@
-# physarum-maze Docker Lab — PF-3.1 adaptive fingerprint validation
+# physarum-maze Docker Lab — PF-5.1 CVE-aware spore enrichment (Issue #128)
 #
-# Three-target lab validating the full adaptive evidence pipeline:
+# Three-target lab validating the full CVE-aware evidence pipeline:
 #
 #   host-a (physarum-maze + LLM enabled)
 #     │  senses host-b/c/d via /24 periodic discovery
 #     │  port 22 closed on all targets → LLM reasoning loop fires
 #     │
-#     ├─ host-b :80  (service_guess="http")
-#     │    Layer 1 → ConfirmedWeb (service_guess starts with "http")
-#     │    banner grab: HTTP GET → scheme_hint=Http, confidence=0.85
+#     ├─ host-b :80  nginx/1.18.0 (server_tokens on — exposes version)
+#     │    Layer 1 → ConfirmedWeb
+#     │    spore: server-version-exposed fires → extracted "nginx/1.18.0"
+#     │    CVE heuristic → CVE-2021-23017 (CVSS 7.7), CVE-2019-9511 (CVSS 7.5)
+#     │    DiscoveryQuery carries vulnerability_candidates (non-empty)
+#     │    LLM references CVE in reasoning_summary
+#     │
+#     ├─ host-c :8080 (service_guess="http-alt", Python http.server)
+#     │    Layer 1 → ConfirmedWeb
 #     │    spore enrichment → PatternFindingSummary → DiscoveryQuery
 #     │
-#     ├─ host-c :8080 (service_guess="http-alt")
-#     │    Layer 1 → ConfirmedWeb (service_guess starts with "http")
-#     │    banner grab: HTTP GET → scheme_hint=Http, confidence=0.85
-#     │    spore enrichment → PatternFindingSummary → DiscoveryQuery
-#     │
-#     └─ host-d :7777 (no service_guess, scheme_hint=Unknown)
-#          Layer 1 → port-convention only, confidence=0.5
-#          Layer 2 banner grab → no spontaneous greeting → None
-#          Layer 3 HTTP probe → http://172.20.0.5:7777/ → 200 OK
-#                → UnknownNeedsMoreSensing resolved to ConfirmedWeb
-#          spore enrichment → PatternFindingSummary → DiscoveryQuery
+#     └─ host-d :7777 (no service_guess, UnknownNeedsMoreSensing → ConfirmedWeb)
+#          HTTP probe confirms web service → spore enrichment → DiscoveryQuery
 #
 # Trigger stimuli after lab starts:
 #   docker exec physarum-host-b sh -c "apk add --no-cache iputils -q; ping -c 3 172.20.0.2"
@@ -40,9 +37,19 @@ networks:
 
 services:
 
-  # ── Host B — HTTP on port 80 (Case 1: ConfirmedWeb via service_guess="http") ──
+  # ── Host B — nginx/1.18.0 on port 80 (CVE-aware enrichment target) ──────────
+  #
+  # nginx 1.18.0 is affected by:
+  #   CVE-2021-23017 — resolver off-by-one (CVSS 7.7, nginx < 1.21.0)
+  #   CVE-2019-9511  — HTTP/2 Data Dribble DoS (CVSS 7.5, nginx < 1.17.3)
+  #   CVE-2019-9516  — HTTP/2 0-length headers memory leak (CVSS 6.5, nginx < 1.17.3)
+  #
+  # nginx default configuration has server_tokens on — the Server response header
+  # exposes "nginx/1.18.0", which the server-version-exposed spore template extracts.
+  # The CVE heuristic enricher in physarum-maze maps this to VulnerabilityCandidate
+  # entries, making vulnerability_candidates non-empty in the DiscoveryQuery.
   host-b:
-    image: nginx:alpine
+    image: nginx:1.18.0
     container_name: physarum-host-b
     networks:
       physarum-lab:
