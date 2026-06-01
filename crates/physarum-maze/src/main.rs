@@ -53,12 +53,14 @@ pub struct Cli {
     #[arg(long, default_value_t = 12, env = "PHYSARUM_MAX_HOPS")]
     pub max_hops: usize,
 
-    /// Seconds without ICMP/TCP stimulus before the agent goes dormant
-    #[arg(long, default_value_t = 120, env = "PHYSARUM_STIMULUS_TIMEOUT")]
+    /// Seconds without any stimulus before the agent goes dormant.
+    /// Should be > discovery_interval_secs so startup sweeps keep the agent alive.
+    #[arg(long, default_value_t = 360, env = "PHYSARUM_STIMULUS_TIMEOUT")]
     pub stimulus_timeout_secs: u64,
 
-    /// Interval in seconds between periodic /24 TCP-connect subnet discovery runs
-    #[arg(long, default_value_t = 60, env = "PHYSARUM_DISCOVERY_INTERVAL")]
+    /// Interval in seconds between startup /24 sweep runs (Issue #126).
+    /// First tick fires immediately on startup — no external ping required.
+    #[arg(long, default_value_t = 180, env = "PHYSARUM_DISCOVERY_INTERVAL")]
     pub discovery_interval_secs: u64,
 
     // ── LLM reasoning flags (all optional — disabled by default) ───────────

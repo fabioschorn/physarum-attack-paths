@@ -67,6 +67,27 @@ pub enum SensingProfile {
     /// observation, lineage, or previous probe. Inspired by `-Pn`.
     /// Only applies when the host is already evidenced — not a blanket flag.
     NoDiscovery,
+
+    /// Lightweight first-pass /24 sweep on startup.
+    ///
+    /// Scans `STARTUP_SWEEP_PORTS` at moderate concurrency — broad enough to
+    /// find HTTP services on non-standard ports (7777, 8080, …) while remaining
+    /// fast enough to repeat every 3 minutes without overloading the subnet.
+    /// Inspired by `-T4 -F` applied to a focused web-service port list.
+    StartupLocalDiscovery,
+
+    /// Fast targeted scan for a TCP/eBPF-observed host.
+    ///
+    /// Host is already evidenced — ICMP host-discovery is skipped (`-Pn`).
+    /// Uses top service ports with tight timing, inspired by `-T4 -F -Pn`.
+    RuntimeTcpEbpfFast,
+
+    /// Fast targeted scan for an ICMP-observed host.
+    ///
+    /// Host is confirmed alive by ICMP echo; normal TCP-connect semantics are
+    /// preserved (no `-Pn`). Uses top service ports with tight timing,
+    /// inspired by `-T4 -F`.
+    RuntimeIcmpFast,
 }
 
 /// Scanner parameters derived from a `SensingProfile`.
@@ -134,6 +155,27 @@ impl SensingProfile {
                 port_subset: None,
                 skip_host_discovery: true,
             },
+            Self::StartupLocalDiscovery => ProfileParams {
+                batch_size: 1_000,
+                timeout_ms: 1_500,
+                tries: 1,
+                port_subset: Some(STARTUP_SWEEP_PORTS),
+                skip_host_discovery: false,
+            },
+            Self::RuntimeTcpEbpfFast => ProfileParams {
+                batch_size: 2_000,
+                timeout_ms: 800,
+                tries: 1,
+                port_subset: Some(TOP_PORTS),
+                skip_host_discovery: true,
+            },
+            Self::RuntimeIcmpFast => ProfileParams {
+                batch_size: 1_500,
+                timeout_ms: 1_000,
+                tries: 1,
+                port_subset: Some(TOP_PORTS),
+                skip_host_discovery: false,
+            },
         }
     }
 
@@ -168,6 +210,17 @@ pub const DEEP_PORTS: &[u16] = &[
 /// registered service name. It exercises the `UnknownNeedsMoreSensing → HTTP
 /// probe → ConfirmedWeb` adaptive fingerprint path (PF-3.1 validation).
 pub const STIMULUS_PORTS: &[u16] = &[22, 80, 443, 7777, 8080, 8443, 3000, 5000, 9000];
+
+/// Port set for `StartupLocalDiscovery` — /24 first-pass sweep on agent startup.
+///
+/// Covers the most common web, database, and infrastructure ports likely to
+/// appear in lab and production subnets. Deliberately kept under 25 ports so
+/// a /24 sweep (254 × 21 = 5334 probes) completes in well under 10 seconds
+/// at the profile's 1500 ms timeout.
+pub const STARTUP_SWEEP_PORTS: &[u16] = &[
+    21, 22, 25, 53, 80, 443, 3000, 3306, 5000, 5432, 6379, 7777, 7080, 8000, 8080, 8443, 8888,
+    9000, 9090, 9200, 9999,
+];
 
 // ── SchemeHint / NextProbeHint ────────────────────────────────────────────────
 
@@ -252,6 +305,8 @@ pub enum PortState {
 pub enum EvidenceSource {
     /// Periodic /24 TCP-connect subnet discovery.
     ScheduledScan,
+    /// Proactive startup sweep of the local /24 on agent initialisation.
+    StartupSensing,
     /// Inbound TCP SYN to port 22 — host actively signalled.
     TcpStimulus,
     /// Inbound ICMP echo request — host actively signalled.
@@ -501,8 +556,11 @@ mod tests {
     fn no_discovery_skips_host_discovery() {
         assert!(SensingProfile::NoDiscovery.skips_host_discovery());
         assert!(SensingProfile::StimulusTargeted.skips_host_discovery());
+        assert!(SensingProfile::RuntimeTcpEbpfFast.skips_host_discovery());
         assert!(!SensingProfile::Balanced.skips_host_discovery());
         assert!(!SensingProfile::Fast.skips_host_discovery());
+        assert!(!SensingProfile::StartupLocalDiscovery.skips_host_discovery());
+        assert!(!SensingProfile::RuntimeIcmpFast.skips_host_discovery());
     }
 
     #[test]
@@ -630,6 +688,37 @@ mod tests {
     }
 
     #[test]
+    fn startup_sweep_ports_covers_docker_lab_targets() {
+        assert!(STARTUP_SWEEP_PORTS.contains(&80), "must cover port 80");
+        assert!(STARTUP_SWEEP_PORTS.contains(&8080), "must cover port 8080");
+        assert!(STARTUP_SWEEP_PORTS.contains(&7777), "must cover port 7777");
+    }
+
+    #[test]
+    fn runtime_tcp_ebpf_fast_skips_discovery_and_uses_top_ports() {
+        let p = SensingProfile::RuntimeTcpEbpfFast.params();
+        assert!(p.skip_host_discovery);
+        assert!(p.port_subset.is_some());
+        assert!(p.batch_size >= 1_000);
+    }
+
+    #[test]
+    fn runtime_icmp_fast_does_not_skip_discovery() {
+        let p = SensingProfile::RuntimeIcmpFast.params();
+        assert!(!p.skip_host_discovery);
+        assert!(p.port_subset.is_some());
+    }
+
+    #[test]
+    fn startup_local_discovery_does_not_skip_host_discovery() {
+        let p = SensingProfile::StartupLocalDiscovery.params();
+        assert!(!p.skip_host_discovery);
+        let subset = p.port_subset.expect("StartupLocalDiscovery must have port_subset");
+        assert!(subset.contains(&80));
+        assert!(subset.contains(&7777));
+    }
+
+    #[test]
     fn all_profiles_have_nonzero_batch_size_and_timeout() {
         for profile in [
             SensingProfile::LowNoise,
@@ -639,6 +728,9 @@ mod tests {
             SensingProfile::Deep,
             SensingProfile::StimulusTargeted,
             SensingProfile::NoDiscovery,
+            SensingProfile::StartupLocalDiscovery,
+            SensingProfile::RuntimeTcpEbpfFast,
+            SensingProfile::RuntimeIcmpFast,
         ] {
             let p = profile.params();
             assert!(p.batch_size > 0, "{profile:?}: batch_size must be > 0");

@@ -1,31 +1,42 @@
-use physarum_scanner::{PortList, Scanner};
+use physarum_scanner::{PortList, Scanner, STARTUP_SWEEP_PORTS};
 use std::net::{IpAddr, Ipv4Addr};
 
-/// Scan the /24 subnet containing `local_ip` for hosts with port 22 open.
-/// Returns all responsive IPs except `local_ip` itself.
-pub async fn scan_local_subnet(local_ip: Ipv4Addr) -> Vec<Ipv4Addr> {
+/// Proactive /24 startup sweep using `StartupLocalDiscovery` profile.
+///
+/// Scans `STARTUP_SWEEP_PORTS` against every host in the /24 derived from
+/// `local_ip` (excluding `local_ip` itself). Returns all IPs that have at
+/// least one port open — regardless of whether port 22 is present.
+///
+/// Called on every `discovery_ticker` tick (default: every 180 s).
+/// Results are fed directly into `llm_loop::run` with stimulus `"startup-sensing"`.
+pub async fn startup_sweep(local_ip: Ipv4Addr) -> Vec<Ipv4Addr> {
     let octets = local_ip.octets();
     let candidates: Vec<IpAddr> = (1u8..=254)
         .filter(|&last| last != octets[3])
         .map(|last| IpAddr::V4(Ipv4Addr::new(octets[0], octets[1], octets[2], last)))
         .collect();
 
-    let ports = PortList::explicit(vec![22]);
+    let ports = PortList::explicit(STARTUP_SWEEP_PORTS.to_vec());
     match Scanner::new(candidates, ports)
-        .batch_size(500)
-        .timeout_ms(3_000)
+        .batch_size(1_000)
+        .timeout_ms(1_500)
         .run()
         .await
     {
-        Ok(open) => open
-            .into_iter()
-            .filter_map(|sa| match sa.ip() {
-                IpAddr::V4(ip) => Some(ip),
-                _ => None,
-            })
-            .collect(),
+        Ok(open) => {
+            // Deduplicate: multiple open ports on the same host → one entry.
+            let mut seen = std::collections::HashSet::new();
+            open.into_iter()
+                .filter_map(|sa| match sa.ip() {
+                    IpAddr::V4(ip) => {
+                        if seen.insert(ip) { Some(ip) } else { None }
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
         Err(e) => {
-            tracing::warn!(err = %e, "subnet discovery scan failed");
+            tracing::warn!(err = %e, "startup sweep failed");
             vec![]
         }
     }

