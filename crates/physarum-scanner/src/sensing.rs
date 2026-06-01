@@ -68,26 +68,49 @@ pub enum SensingProfile {
     /// Only applies when the host is already evidenced — not a blanket flag.
     NoDiscovery,
 
-    /// Lightweight first-pass /24 sweep on startup.
+    /// SYN-style /24 local-discovery semantic profile.
     ///
-    /// Scans `STARTUP_SWEEP_PORTS` at moderate concurrency — broad enough to
-    /// find HTTP services on non-standard ports (7777, 8080, …) while remaining
-    /// fast enough to repeat every 3 minutes without overloading the subnet.
-    /// Inspired by `-T4 -F` applied to a focused web-service port list.
+    /// Scans `STARTUP_SWEEP_PORTS` across every host in the local /24, broad
+    /// enough to find HTTP services on non-standard ports (7777, 8080, …) while
+    /// remaining fast enough to repeat every 3 minutes.
+    ///
+    /// Conceptual nmap equivalent: `-sS -F` on a focused web-service port list.
+    /// The organism encodes this as a named profile — not raw flags — so the
+    /// policy gate can audit intensity without parsing CLI arguments.
+    ///
+    /// First tick fires immediately on startup; subsequent ticks repeat at
+    /// `discovery_interval_secs` (default 180 s).
     StartupLocalDiscovery,
 
     /// Fast targeted scan for a TCP/eBPF-observed host.
     ///
-    /// Host is already evidenced — ICMP host-discovery is skipped (`-Pn`).
-    /// Uses top service ports with tight timing, inspired by `-T4 -F -Pn`.
+    /// Host is already evidenced by a TCP SYN observation or eBPF ring-buffer
+    /// event — ICMP host-discovery is skipped (`skip_host_discovery = true`).
+    /// Uses top service ports with tight timing.
+    ///
+    /// Conceptual nmap equivalent: `-T4 -F -Pn`.
     RuntimeTcpEbpfFast,
 
     /// Fast targeted scan for an ICMP-observed host.
     ///
-    /// Host is confirmed alive by ICMP echo; normal TCP-connect semantics are
-    /// preserved (no `-Pn`). Uses top service ports with tight timing,
-    /// inspired by `-T4 -F`.
+    /// Host is confirmed alive by an inbound ICMP echo request; normal
+    /// TCP-connect probe semantics are preserved (no `-Pn` suppression).
+    /// Uses top service ports with tight timing.
+    ///
+    /// Conceptual nmap equivalent: `-T4 -F`.
     RuntimeIcmpFast,
+
+    /// Service/version enrichment scan (PF-5 placeholder).
+    ///
+    /// Probes `DEEP_PORTS` at low concurrency with long timeouts — optimised
+    /// for banner capture and version string extraction rather than speed.
+    /// The resulting `version_hint` fields feed `physarum-spore` CVE look-up
+    /// and populate `DiscoveryQuery.ports[].version_hint` for LLM reasoning.
+    ///
+    /// Conceptual nmap equivalent: `-sV` on the deep port set.
+    ///
+    /// Not yet triggered automatically — wired up in PF-5 spore enrichment.
+    ServiceVersion,
 }
 
 /// Scanner parameters derived from a `SensingProfile`.
@@ -175,6 +198,13 @@ impl SensingProfile {
                 tries: 1,
                 port_subset: Some(TOP_PORTS),
                 skip_host_discovery: false,
+            },
+            Self::ServiceVersion => ProfileParams {
+                batch_size: 100,
+                timeout_ms: 3_000,
+                tries: 2,
+                port_subset: Some(DEEP_PORTS),
+                skip_host_discovery: true,
             },
         }
     }
@@ -519,6 +549,45 @@ fn infer_os_hint_from_port(port: u16) -> Option<OsHint> {
     }
 }
 
+// ── VulnerabilityCandidate ────────────────────────────────────────────────────
+
+/// CVE / vulnerability candidate derived from service fingerprint evidence.
+///
+/// PF-5 placeholder — establishes the evidence contract between
+/// `physarum-scanner` sensing and `physarum-llm` `DiscoveryQuery`.
+///
+/// In PF-5 the `physarum-spore` enricher populates this from NVD/OSV feeds
+/// after `ServiceVersion` scanning resolves `version_hint` on open ports.
+/// The LLM then receives populated `VulnerabilityCandidate` entries alongside
+/// port evidence and can recommend exploit-aware propagation paths.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VulnerabilityCandidate {
+    /// CVE identifier, e.g. `"CVE-2021-44228"`.
+    pub cve_id: String,
+    /// CVSS base score 0.0–10.0, if available from the feed.
+    pub cvss_score: Option<f32>,
+    /// Short description of the vulnerability.
+    pub description: String,
+    /// Port on which the vulnerable service was detected.
+    pub affected_port: u16,
+    /// Organism-local confidence that this target is actually vulnerable (0.0–1.0).
+    /// Degraded when derived from banner heuristics; higher after spore confirmation.
+    pub confidence: f32,
+    /// Origin of this vulnerability intelligence.
+    pub source: VulnerabilitySource,
+}
+
+/// How the `VulnerabilityCandidate` was obtained.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VulnerabilitySource {
+    /// `physarum-spore` enrichment against NVD/OSV feeds (PF-5+).
+    PhysarumSpore,
+    /// Locally cached NVD/OSV snapshot.
+    NvdFeed,
+    /// Static heuristic from the service banner or `version_hint` string.
+    BannerHeuristic,
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -731,6 +800,7 @@ mod tests {
             SensingProfile::StartupLocalDiscovery,
             SensingProfile::RuntimeTcpEbpfFast,
             SensingProfile::RuntimeIcmpFast,
+            SensingProfile::ServiceVersion,
         ] {
             let p = profile.params();
             assert!(p.batch_size > 0, "{profile:?}: batch_size must be > 0");
@@ -751,5 +821,30 @@ mod tests {
         let hint = infer_os_hint_from_port(3389).unwrap();
         assert_eq!(hint.guess, "Windows");
         assert_eq!(hint.source, OsHintSource::Convention);
+    }
+
+    #[test]
+    fn service_version_profile_uses_deep_ports_and_skips_discovery() {
+        let p = SensingProfile::ServiceVersion.params();
+        assert!(p.skip_host_discovery, "ServiceVersion must skip ICMP host discovery");
+        let subset = p.port_subset.expect("ServiceVersion must have a port subset");
+        assert!(subset.len() > TOP_PORTS.len(), "ServiceVersion must probe more ports than TOP_PORTS");
+        assert!(p.timeout_ms >= 2_000, "ServiceVersion needs long timeout for banner capture");
+    }
+
+    #[test]
+    fn vulnerability_candidate_round_trips_json() {
+        let vc = VulnerabilityCandidate {
+            cve_id: "CVE-2021-44228".to_string(),
+            cvss_score: Some(10.0),
+            description: "Log4Shell RCE".to_string(),
+            affected_port: 8080,
+            confidence: 0.6,
+            source: VulnerabilitySource::BannerHeuristic,
+        };
+        let json = serde_json::to_string(&vc).unwrap();
+        let back: VulnerabilityCandidate = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.cve_id, "CVE-2021-44228");
+        assert_eq!(back.source, VulnerabilitySource::BannerHeuristic);
     }
 }
