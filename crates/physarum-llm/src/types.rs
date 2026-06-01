@@ -67,6 +67,44 @@ pub enum OsHintSource {
     Convention,
 }
 
+// ── Vulnerability candidate ───────────────────────────────────────────────────
+
+/// CVE / vulnerability candidate associated with a service fingerprint finding.
+///
+/// Populated by `physarum-spore` NVD/OSV enrichment after `ServiceVersion`
+/// scanning resolves `version_hint` on open ports (PF-5+).
+///
+/// In the current release this field is always empty — the struct establishes
+/// the evidence contract between the scanner layer and the LLM `DiscoveryQuery`.
+/// The LLM must treat populated entries as prioritised exploit-path signals.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VulnerabilityCandidate {
+    /// CVE identifier, e.g. `"CVE-2021-44228"`.
+    pub cve_id: String,
+    /// CVSS base score 0.0–10.0, when available from the feed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cvss_score: Option<f32>,
+    /// Short description of the vulnerability.
+    pub description: String,
+    /// Port on which the vulnerable service was detected.
+    pub affected_port: u16,
+    /// Organism-local confidence that this target is actually vulnerable (0.0–1.0).
+    pub confidence: f32,
+    /// Origin of this vulnerability intelligence.
+    pub source: VulnerabilitySource,
+}
+
+/// How the `VulnerabilityCandidate` was obtained.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VulnerabilitySource {
+    /// `physarum-spore` enrichment against NVD/OSV feeds (PF-5+).
+    PhysarumSpore,
+    /// Locally cached NVD/OSV snapshot.
+    NvdFeed,
+    /// Static heuristic from the service banner or `version_hint` string.
+    BannerHeuristic,
+}
+
 // ── Pattern evidence summary ──────────────────────────────────────────────────
 
 /// Condensed evidence from physarum-sporangium HTTP pattern probing.
@@ -93,6 +131,13 @@ pub struct PatternFindingSummary {
     /// True when severity >= Low and confidence >= 0.7.
     /// Signals that the LLM should treat this finding as actionable evidence.
     pub is_actionable: bool,
+    /// CVE / vulnerability candidates linked to this finding.
+    ///
+    /// Populated by `physarum-spore` NVD/OSV enrichment in PF-5+.
+    /// Empty in current release — field preserved for forward compatibility.
+    /// When non-empty the LLM should weight exploit-aware propagation paths higher.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vulnerability_candidates: Vec<VulnerabilityCandidate>,
 }
 
 // ── Discovery query ───────────────────────────────────────────────────────────

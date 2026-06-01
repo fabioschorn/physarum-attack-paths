@@ -74,8 +74,7 @@ pub use scanner::{ScanResult, Scanner};
 pub use sensing::{
     result_from_open_port, service_guess_from_port, EvidenceSource, NextProbeHint, OsHint,
     OsHintSource, PortState, ProfileParams, SchemeHint, SensingProfile, SensingResult,
-    TransportProtocol, VulnerabilityCandidate, VulnerabilitySource, DEEP_PORTS,
-    STARTUP_SWEEP_PORTS, STIMULUS_PORTS, TOP_PORTS,
+    TransportProtocol, DEEP_PORTS, STARTUP_SWEEP_PORTS, STIMULUS_PORTS, TOP_PORTS,
 };
 
 /// Explicit list of ports to scan.

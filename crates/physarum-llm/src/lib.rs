@@ -22,5 +22,6 @@ pub use types::{
     ExecutionResultSummary, ExpectedResult, HttpMethod, LineageSummary, LlmAttemptEvidence,
     NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyRejectionReason,
     PortScan, PortState, PropagationMethod, PropagationMethodClass, PropagationStrategy,
-    RejectedStrategy, SecretRef, SecretSource, SshAuth, TransportProtocol,
+    RejectedStrategy, SecretRef, SecretSource, SshAuth, TransportProtocol, VulnerabilityCandidate,
+    VulnerabilitySource,
 };

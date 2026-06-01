@@ -19,6 +19,8 @@ The query includes:
   - `pattern_findings`: structured HTTP pattern evidence from physarum-sporangium.
     Each finding includes check_id, name, severity, confidence, matched_summary, and extracted values.
     Findings with is_actionable=true have severity >= low and confidence >= 0.7 — prioritise these.
+    Each finding may include `vulnerability_candidates`: CVE entries from NVD/OSV enrichment.
+    When non-empty, use cve_id, cvss_score, and confidence to prioritise exploit-aware propagation paths.
   - `os_hint`: best-effort OS fingerprint (may be absent).
   - `lineage_summary`: organism propagation state.
   - `rejected_strategies`: previously rejected strategies — do NOT re-propose these.
