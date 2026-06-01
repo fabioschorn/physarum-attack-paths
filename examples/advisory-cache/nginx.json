@@ -1,0 +1,70 @@
+[
+  {
+    "advisory_id": "CVE-2021-23017",
+    "fixed_version": "1.21.0",
+    "affected_range": "< 1.21.0",
+    "cvss_score": 7.7,
+    "severity": "High",
+    "description": "Off-by-one in the nginx resolver allows a DNS-forged-UDP attacker to overwrite 1 byte of heap memory — worker crash or potential code execution (nginx < 1.21.0).",
+    "impact": "Worker crash or potential code execution via DNS-forged UDP response targeting the nginx resolver.",
+    "exploit_class": "MemoryCorruption",
+    "preconditions": [
+      "nginx resolver enabled (use_resolver directive in nginx.conf)",
+      "attacker can forge DNS UDP responses to the nginx resolver"
+    ],
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2021-23017",
+      "https://nginx.org/en/security_advisories.html"
+    ]
+  },
+  {
+    "advisory_id": "CVE-2019-9511",
+    "fixed_version": "1.17.3",
+    "affected_range": "< 1.17.3",
+    "cvss_score": 7.5,
+    "severity": "High",
+    "description": "HTTP/2 Data Dribble: WINDOW_UPDATE frames with small increments allow remote CPU exhaustion (nginx < 1.17.3 with ngx_http_v2_module).",
+    "impact": "Remote CPU exhaustion via HTTP/2 WINDOW_UPDATE flood, causing denial of service.",
+    "exploit_class": "DoS",
+    "preconditions": [
+      "ngx_http_v2_module compiled and active",
+      "HTTP/2 listen directive enabled on the vhost"
+    ],
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2019-9511"
+    ]
+  },
+  {
+    "advisory_id": "CVE-2019-9516",
+    "fixed_version": "1.17.3",
+    "affected_range": "< 1.17.3",
+    "cvss_score": 6.5,
+    "severity": "Medium",
+    "description": "HTTP/2 zero-length headers cause unbounded memory growth — remote memory exhaustion (nginx < 1.17.3 with ngx_http_v2_module).",
+    "impact": "Remote memory exhaustion via zero-length HTTP/2 headers, causing denial of service.",
+    "exploit_class": "DoS",
+    "preconditions": [
+      "ngx_http_v2_module compiled and active",
+      "HTTP/2 listen directive enabled on the vhost"
+    ],
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2019-9516"
+    ]
+  },
+  {
+    "advisory_id": "CVE-2013-2028",
+    "fixed_version": "1.5.0",
+    "affected_range": "< 1.5.0",
+    "cvss_score": 7.5,
+    "severity": "High",
+    "description": "Stack-based buffer overflow in the ngx_http_parse_chunked function in http/ngx_http_parse.c in nginx 1.3.9 through 1.4.0 allows remote attackers to cause a denial of service (worker process crash) or execute arbitrary code via a crafted chunked transfer encoding request.",
+    "impact": "Remote code execution or crash via crafted chunked transfer encoding.",
+    "exploit_class": "StackOverflow",
+    "preconditions": [
+      "HTTP chunked transfer encoding requests are processed"
+    ],
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2013-2028"
+    ]
+  }
+]

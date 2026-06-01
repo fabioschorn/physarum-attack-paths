@@ -29,8 +29,8 @@ use physarum_scanner::{
 };
 use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
-use crate::cve_heuristic;
 use crate::lineage::Lineage;
+use crate::vuln_intel::VulnerabilityIntelService;
 
 pub enum LlmOutcome {
     /// Bootstrap succeeded — lineage extended with new hop + evidence recorded.
@@ -52,6 +52,7 @@ pub async fn run(
     lineage: &mut Lineage,
     client: &dyn LlmClient,
     gate: &PolicyGate,
+    intel: &VulnerabilityIntelService,
 ) -> Result<LlmOutcome> {
     tracing::info!(%target, stimulus, "LLM reasoning loop started");
 
@@ -71,9 +72,15 @@ pub async fn run(
     // Enrich with physarum-sporangium pattern evidence on web-like services.
     // Runs once before the attempt loop — findings are stable across retries.
     let raw_findings = enrich_with_patterns(target, &sensing_results).await;
+
+    // Dynamic vulnerability intelligence: offline advisory cache first,
+    // online OSV query on miss. One call per finding, bounded concurrency.
+    let vuln_candidates = intel.enrich_findings(&raw_findings).await;
+
     let pattern_summaries: Vec<PatternFindingSummary> = raw_findings
         .iter()
-        .map(pattern_finding_to_summary)
+        .zip(vuln_candidates)
+        .map(|(f, candidates)| pattern_finding_to_summary(f, candidates))
         .collect();
 
     tracing::info!(
@@ -868,9 +875,13 @@ async fn enrich_with_patterns(
 /// Convert a `PatternFinding` into the condensed `PatternFindingSummary` that
 /// travels inside `DiscoveryQuery` to the LLM.
 ///
-/// Only the fields relevant to propagation reasoning are included.
+/// `candidates` are pre-computed by `VulnerabilityIntelService::enrich_findings()`
+/// so this function is synchronous — async enrichment is done in a separate pass.
 /// Raw response bodies are never forwarded.
-fn pattern_finding_to_summary(f: &PatternFinding) -> PatternFindingSummary {
+fn pattern_finding_to_summary(
+    f: &PatternFinding,
+    candidates: Vec<physarum_llm::VulnerabilityCandidate>,
+) -> PatternFindingSummary {
     let severity = match f.severity_hint {
         SeverityHint::Info => "info",
         SeverityHint::Low => "low",
@@ -894,7 +905,7 @@ fn pattern_finding_to_summary(f: &PatternFinding) -> PatternFindingSummary {
         matched_summary: f.matched_condition_summary.clone(),
         extracted,
         is_actionable: f.is_actionable(),
-        vulnerability_candidates: cve_heuristic::enrich_finding(f),
+        vulnerability_candidates: candidates,
     }
 }
 

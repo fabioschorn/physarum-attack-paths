@@ -1,6 +1,6 @@
-# physarum-maze Docker Lab — PF-5.1 CVE-aware spore enrichment (Issue #128)
+# physarum-maze Docker Lab — PF-5.2 dynamic vulnerability intelligence pipeline (Issue #131)
 #
-# Three-target lab validating the full CVE-aware evidence pipeline:
+# Three-target lab validating the full dynamic advisory pipeline:
 #
 #   host-a (physarum-maze + LLM enabled)
 #     │  senses host-b/c/d via /24 periodic discovery
@@ -126,6 +126,12 @@ services:
       LLM_API_KEY: "${LLM_API_KEY:-}"
       # Set to true for lab evidence capture (logs full prompt + raw LLM response)
       PHYSARUM_LLM_LOG_PROMPTS: "${PHYSARUM_LLM_LOG_PROMPTS:-false}"
+      # Vulnerability intelligence mode: auto (offline+online fallback) | offline | online-required
+      PHYSARUM_VULN_INTEL_MODE: "${PHYSARUM_VULN_INTEL_MODE:-auto}"
+      # Timeout for online OSV advisory queries (ms)
+      PHYSARUM_VULN_INTEL_TIMEOUT_MS: "${PHYSARUM_VULN_INTEL_TIMEOUT_MS:-3000}"
+      # Path to offline advisory cache relative to working directory
+      PHYSARUM_VULN_INTEL_CACHE_DIR: "/advisory-cache"
     command: >
       --mode seed
       --interface eth0
@@ -135,4 +141,5 @@ services:
       --discovery-interval-secs 5
       --stimulus-timeout-secs 90
     volumes:
-      - ./lineage:/tmp   # lineage JSON written here for inspection
+      - ./lineage:/tmp                                     # lineage JSON written here for inspection
+      - ../examples/advisory-cache:/advisory-cache:ro     # offline advisory cache (read-only)

