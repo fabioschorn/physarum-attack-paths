@@ -743,7 +743,9 @@ mod tests {
     fn startup_local_discovery_does_not_skip_host_discovery() {
         let p = SensingProfile::StartupLocalDiscovery.params();
         assert!(!p.skip_host_discovery);
-        let subset = p.port_subset.expect("StartupLocalDiscovery must have port_subset");
+        let subset = p
+            .port_subset
+            .expect("StartupLocalDiscovery must have port_subset");
         assert!(subset.contains(&80));
         assert!(subset.contains(&7777));
     }
@@ -787,9 +789,20 @@ mod tests {
     #[test]
     fn service_version_profile_uses_deep_ports_and_skips_discovery() {
         let p = SensingProfile::ServiceVersion.params();
-        assert!(p.skip_host_discovery, "ServiceVersion must skip ICMP host discovery");
-        let subset = p.port_subset.expect("ServiceVersion must have a port subset");
-        assert!(subset.len() > TOP_PORTS.len(), "ServiceVersion must probe more ports than TOP_PORTS");
-        assert!(p.timeout_ms >= 2_000, "ServiceVersion needs long timeout for banner capture");
+        assert!(
+            p.skip_host_discovery,
+            "ServiceVersion must skip ICMP host discovery"
+        );
+        let subset = p
+            .port_subset
+            .expect("ServiceVersion must have a port subset");
+        assert!(
+            subset.len() > TOP_PORTS.len(),
+            "ServiceVersion must probe more ports than TOP_PORTS"
+        );
+        assert!(
+            p.timeout_ms >= 2_000,
+            "ServiceVersion needs long timeout for banner capture"
+        );
     }
 }

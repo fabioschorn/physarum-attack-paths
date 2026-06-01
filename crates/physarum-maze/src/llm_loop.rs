@@ -267,12 +267,7 @@ async fn fingerprint(
     profile: SensingProfile,
 ) -> Vec<physarum_scanner::SensingResult> {
     let params = profile.params();
-    let port_list = PortList::explicit(
-        params
-            .port_subset
-            .unwrap_or(STIMULUS_PORTS)
-            .to_vec(),
-    );
+    let port_list = PortList::explicit(params.port_subset.unwrap_or(STIMULUS_PORTS).to_vec());
     match Scanner::new(vec![IpAddr::V4(target)], port_list)
         .batch_size(params.batch_size)
         .timeout_ms(params.timeout_ms)

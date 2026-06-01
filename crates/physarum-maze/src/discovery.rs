@@ -29,7 +29,11 @@ pub async fn startup_sweep(local_ip: Ipv4Addr) -> Vec<Ipv4Addr> {
             open.into_iter()
                 .filter_map(|sa| match sa.ip() {
                     IpAddr::V4(ip) => {
-                        if seen.insert(ip) { Some(ip) } else { None }
+                        if seen.insert(ip) {
+                            Some(ip)
+                        } else {
+                            None
+                        }
                     }
                     _ => None,
                 })
