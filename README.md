@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-> **Bio-inspired attack-path organism for adaptive security graph discovery.** `physarum-attack-paths` is a Rust research prototype that turns distributed network evidence into a living attack-path graph. It combines adaptive edge scoring (`Q_ij → q_ema → D_ij`), active probing, eBPF/packet-level stimulus observation, native discovery through `physarum-scanner`, structured sensing profiles, LLM-assisted lab reasoning, and controlled lab propagation. PF-1 and PF-2 validated the current organism model in real AWS VPC labs: one seed expanded through an unknown maze, re-sensed new structure, recognized an already-colonized node, and preserved a secondary conduit.
+> **Bio-inspired attack-path organism for controlled security research.** `physarum-attack-paths` is a Rust research prototype that turns local network observations, adaptive sensing, pattern evidence, LLM reasoning, policy decisions, and lineage memory into a living attack-path discovery organism.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
@@ -8,52 +8,68 @@
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](https://github.com/fabioschorn/physarum-attack-paths/releases)
 [![CI](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml/badge.svg)](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml)
 
-`physarum-attack-paths` is a distributed system for discovering, validating, and continuously refining cybersecurity attack paths across heterogeneous environments. It replaces a static, scanner-centric view of the network with a **living topology**: local observations, bounded discovery, validation outcomes, and structured evidence reinforce useful paths while unused or blocked paths decay.
+`physarum-attack-paths` studies how a distributed organism can discover and prioritize viable security paths in changing environments. Instead of treating a scan as a static snapshot, the system collects evidence from ports, banners, HTTP patterns, packet/eBPF stimuli, runtime observations, LLM recommendations, policy-gate decisions, and lineage history.
 
-The project is inspired by *Physarum polycephalum*, a slime mold that forms efficient transport networks without central control. In this project, the network graph is **observed**, not declared. Layer assignment, path preference, and drift emerge from behavior.
+The project is inspired by *Physarum polycephalum*, a slime mold that reinforces useful paths and abandons weak ones. This repository does **not** simulate slime mold biology. It borrows the reinforcement/decay intuition and applies it to controlled attack-path research.
 
 ---
 
 ## Safety and scope
 
-This repository is a **controlled research prototype**. The propagation labs are designed for owned, isolated, authorized environments only.
+This repository is a **controlled research prototype**. It is intended for owned, isolated, authorized labs only.
 
 ```text
-Allowed scope: local labs, Docker labs, and owned AWS lab VPCs.
-Not allowed: public targets, Internet scanning, production deployment, or unbounded propagation.
+Allowed scope:
+  - local labs
+  - Docker labs
+  - owned AWS lab VPCs
+  - controlled research environments
+
+Not allowed:
+  - public targets
+  - Internet scanning
+  - production deployment
+  - unbounded propagation
+  - unauthorized exploitation
 ```
 
-PF-1/PF-2 use intentionally weak lab conditions, including empty-password SSH, to validate organism behavior in a closed environment. That is not a production deployment pattern. `physarum-llm` and the Docker LLM lab are disabled unless explicitly configured. Secure identity, mTLS, signed lineage, and stronger trust controls remain planned for Gate N after the LLM/evidence loop stabilizes.
+LLM-assisted behavior is **lab-only**, policy-gated, and disabled unless explicitly configured. CVE-aware reasoning is treated as evidence and proposal generation, not automatic exploitation. `PolicyGate` remains the local decision boundary.
+
+Secure identity, mTLS, signed lineage, and stronger trust controls are planned for Gate N. No production security guarantees are claimed before that gate.
 
 ---
 
 ## Current status
 
-**Research prototype** — the adaptive graph, sensing, discovery, PF organism labs, structured scanner evidence, and initial LLM Docker Lab loop are implemented and validated in controlled environments.
+The current project focus is the `physarum-maze` organism path: adaptive sensing, structured evidence, real LLM Docker validation, and lineage-recorded policy decisions.
 
 | Area | State |
 |---|---|
-| Shared protocol types (`physarum-protocol`) | ✔ implemented |
-| Coordinator and peer-probing agent (`physarum-server`, `physarum-agent`) | ✔ implemented |
-| Flow and packet observation (`physarum-ebpf-observer`, `physarum-packet-observer`) | ✔ implemented — AWS EC2 validated, kernel 6.18 |
-| Native discovery engine (`physarum-scanner`) | ✔ implemented — Gate L |
-| Structured scanner sensing (`SensingProfile`, `SensingResult`) | ✔ implemented — Issue #114 |
-| Probe execution library (`physarum-probe`) | ✔ implemented |
-| Role-fluid runtime (`physarum-node`, `physarum-node-runtime`) | ✔ implemented — Gate M/M.4 |
-| Self-propagating maze organism (`physarum-maze`) | ✔ implemented — PF-1/PF-2 |
-| `physarum-llm` contracts, mock/client, and maze hook | ✔ implemented — Issue #106 phases 1–3/initial integration |
-| Two-container LLM Docker Lab | ✔ implemented — lab-only, mock-first validation |
-| Flow observations API (`POST/GET /flow-observations`) | ✔ implemented — Gate I |
-| Adaptive path scoring (`GET /paths`) | ✔ implemented — Gate K.1 |
-| TLA+ formal models (`formal/tla`) | ✔ implemented — single-edge, multi-agent, negative-log |
-| Local and Docker labs | ✔ implemented |
-| AWS Mode 1 / Mode 2 / Gate K/K.1 labs | ✔ validated |
-| AWS PF-1 organic expansion maze | ✔ validated — 7-node autonomous propagation lab |
-| AWS PF-2 adaptive re-routing | ✔ validated — 9-node lateral discovery + TCP stimulus + secondary conduit lab |
-| `physarum-sporangium` native Nuclei-inspired evidence engine | next — Issue #115 |
-| Gate N secure organism identity | planned after Issue #106 stabilizes |
+| Rust workspace / protocol foundations | ✔ implemented |
+| Adaptive graph scoring (`Q_ij`, `q_ema`, `D_ij`, `/paths`) | ✔ implemented and validated in earlier gates |
+| Packet and flow observation (`physarum-ebpf`, packet observers) | ✔ implemented for lab research |
+| Native scanner (`physarum-scan` / `physarum-scanner`) | ✔ implemented |
+| Structured sensing (`SensingProfile`, `SensingResult`, `PortScan`) | ✔ implemented |
+| Adaptive service classification (`ConfirmedWeb`, `LikelyWeb`, `UnknownNeedsMoreSensing`, `ConfirmedNonWeb`) | ✔ implemented |
+| Nuclei-inspired native evidence engine (`physarum-spore` / `physarum-sporangium`) | ✔ implemented as native Rust pattern evidence layer |
+| Maze organism (`physarum-maze`) | ✔ primary active binary |
+| LLM contracts and OpenAI-compatible client (`physarum-llm`) | ✔ implemented and Docker-validated |
+| Real LLM Docker Lab | ✔ PF-4 validated |
+| Adaptive startup/runtime sensing profiles | ✔ PF-5 / Issue #126 validated after PR #127 merge |
+| CVE-aware spore enrichment and LLM exploit-path proposal evidence | next — Issue #128 |
+| AWS Lab with real LLM | planned after Docker evidence gates |
+| Gate N secure identity / mTLS / signed lineage | planned after LLM/evidence loop stabilizes |
 
-See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the canonical architecture and [General-Docs/QUALITY_GATE.md](./General-Docs/QUALITY_GATE.md) for gate definitions and acceptance criteria. Longer-term research ideas live in [General-Docs/INSIGHTS_AND_BRAINSTORM.md](./General-Docs/INSIGHTS_AND_BRAINSTORM.md).
+The current release line uses these primary binaries:
+
+```text
+physarum-maze       # organism runtime / evidence loop / lineage
+physarum-scan       # native scanner binary
+physarum-spore      # native Nuclei-inspired evidence-pattern binary
+physarum-sporangium # pattern runner / evidence engine crate
+```
+
+Older coordinator-oriented crates still exist for graph research and historical gates, but the active organism work now centers on `physarum-maze` and its embedded sensing/evidence/LLM loop.
 
 ---
 
@@ -61,125 +77,189 @@ See [General-Docs/ARCHITECTURE.md](./General-Docs/ARCHITECTURE.md) for the canon
 
 - [Safety and scope](#safety-and-scope)
 - [Current status](#current-status)
-- [Motivation](#motivation)
 - [Conceptual model](#conceptual-model)
 - [Architecture](#architecture)
+- [Evidence pipeline](#evidence-pipeline)
+- [LLM and PolicyGate](#llm-and-policygate)
 - [Mathematical core](#mathematical-core)
 - [Repository layout](#repository-layout)
 - [Labs](#labs)
 - [Quick start](#quick-start)
 - [Development workflow](#development-workflow)
 - [Roadmap](#roadmap)
-- [Planned evolution](#planned-evolution)
 - [References](#references)
-
----
-
-## Motivation
-
-Traditional attack-path analysis often fails in three ways.
-
-The **single-vantage-point problem**: scanners see what they can reach from one location, not necessarily what exists across NAT, cloud segmentation, Kubernetes policies, on-prem firewalls, and zero-trust boundaries.
-
-The **declarative-topology problem**: assets may claim to belong to a layer or zone, but real reachability can drift because of security group changes, permissive firewall rules, forgotten routes, or broken network policies.
-
-The **stale-snapshot problem**: many attack graphs are computed once from scanner output and then treated as truth, even though the environment changes before validation or remediation happens.
-
-`Physarum` addresses these problems by treating attack-path topology as an emergent property of distributed agent activity. There is no single declared layer map and no permanently frozen `P(e)`. There is a reinforcement-decay process across observed edges, and the graph that survives is the graph supported by evidence.
 
 ---
 
 ## Conceptual model
 
-The biological *Physarum polycephalum* forms efficient transport networks by reinforcing tubes that carry flow and weakening tubes that do not. This project maps that idea onto security-path discovery.
+The organism follows two principles.
 
-| Biological concept | Security interpretation |
-|---|---|
-| Inoculation point | Externally reachable asset or known starting host |
-| Food source | Crown jewel, high-criticality asset, or protected core |
-| Tube between nodes | Candidate attack edge between hosts or agents |
-| Tube thickness `D_ij` | Edge conductivity; dynamic replacement for static edge probability |
-| Cytoplasm flow `Q_ij` | Evidence from probes, observations, and validation outcomes |
-| Reinforcement | Successful, stable, low-cost reachability |
-| Decay | Lack of evidence, blocked reachability, or weak path quality |
+First, the network is **observed**, not assumed. A host becomes interesting because the agent sees evidence: an open port, a banner, a service fingerprint, an ICMP/TCP/eBPF stimulus, a pattern finding, or a prior lineage result.
 
-The system does **not** simulate slime mold. It borrows the mathematical shape of reinforcement and decay because that shape is useful for adaptive path-finding.
+Second, the agent separates **evidence**, **proposal**, and **decision**.
+
+```text
+Evidence:
+  SensingResult, PortScan, PatternFindingSummary, VulnerabilityCandidate
+
+Proposal:
+  LLM-generated PropagationStrategy or exploit-path proposal
+
+Decision:
+  PolicyGate accepted/rejected result
+
+Memory:
+  LlmAttemptEvidence and lineage
+```
+
+This keeps the LLM useful for reasoning without making it the authority. The LLM proposes. `PolicyGate` decides. Lineage remembers.
 
 ---
 
 ## Architecture
 
-### Current prototype
-
-The implemented prototype now has four cooperating layers.
+### Current organism path
 
 ```text
-1. Adaptive graph layer
-   physarum-server + physarum-agent
-   -> registration, peer probing, ProbeReport ingest, /graph, /paths
-
-2. Sensing and discovery layer
-   physarum-ebpf-observer
-   physarum-packet-observer
-   physarum-scanner
-   physarum-probe
-   -> TCP/ICMP stimulus capture, structured scanner evidence, probe execution
-
-3. Organism runtime layer
-   physarum-node
-   physarum-node-runtime
-   physarum-maze
-   -> runtime consolidation, autonomous maze propagation, lineage memory
-
-4. Reasoning and evidence layer
-   physarum-llm
-   physarum-sporangium (next)
-   -> policy-gated reasoning over structured sensing and vulnerability-pattern evidence
+┌──────────────────────────────────────────────────────────────┐
+│                         physarum-maze                        │
+│                                                              │
+│  startup_sensing / ICMP / TCP-eBPF stimulus                  │
+│        │                                                     │
+│        ▼                                                     │
+│  embedded physarum-scan / physarum-scanner                   │
+│        │                                                     │
+│        ▼                                                     │
+│  SensingResult / PortScan                                    │
+│        │                                                     │
+│        ▼                                                     │
+│  physarum-spore / physarum-sporangium                        │
+│        │                                                     │
+│        ▼                                                     │
+│  PatternFindingSummary / vulnerability_candidates            │
+│        │                                                     │
+│        ▼                                                     │
+│  DiscoveryQuery                                              │
+│        │                                                     │
+│        ▼                                                     │
+│  physarum-llm                                                │
+│        │                                                     │
+│        ▼                                                     │
+│  PropagationStrategy / exploit-path proposal                 │
+│        │                                                     │
+│        ▼                                                     │
+│  PolicyGate                                                  │
+│        │                                                     │
+│        ▼                                                     │
+│  LlmAttemptEvidence / lineage                                │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-At the graph layer, agents produce evidence and the coordinator turns that evidence into adaptive edge conductivity:
+### Component roles
+
+| Component | Role |
+|---|---|
+| `physarum-maze` | Main organism runtime, seed/propagated behavior, evidence loop, policy-gated propagation, lineage |
+| `physarum-scan` / `physarum-scanner` | Native scanning and structured sensing profiles |
+| `physarum-spore` / `physarum-sporangium` | Native evidence-pattern engine inspired by Nuclei concepts |
+| `physarum-llm` | Provider-neutral contracts, OpenAI-compatible client, mock client, `DiscoveryQuery`, `PropagationStrategy`, evidence records |
+| `physarum-ebpf` / observers | Runtime packet/flow stimuli for controlled labs |
+| `physarum-probe` | Probe execution primitives used by earlier graph layers |
+| `physarum-agent` / `physarum-server` | Earlier adaptive graph/coordinator research components |
+| `formal/tla` | Formal models for scoring and path-safety properties |
+
+### Adaptive sensing profiles
+
+PF-5 introduced trigger-aware sensing profiles:
+
+| Trigger | Profile | Semantic equivalent |
+|---|---|---|
+| Startup seed behavior | `StartupLocalDiscovery` | local `/24`, SYN-style discovery semantics, focused service port list |
+| ICMP stimulus | `RuntimeIcmpFast` | fast common-port profile, conceptual `-T4 -F` |
+| TCP/eBPF stimulus | `RuntimeTcpEbpfFast` | fast common-port no-discovery profile, conceptual `-T4 -F -Pn` |
+| Service/version enrichment | `ServiceVersion` | conceptual `-sV`, currently a hook/stub for deeper enrichment |
+
+The startup path is important: the Docker lab should not require an external ping harness for the organism to begin sensing. Runtime stimulus paths remain validated separately.
+
+---
+
+## Evidence pipeline
+
+The evidence pipeline is intentionally layered.
 
 ```text
-agents register -> agents probe -> reports arrive -> Q_ij -> q_ema -> D_ij -> /paths
+1. Startup or runtime stimulus
+2. Adaptive scanner profile
+3. Open ports, banners, service guesses, version hints
+4. HTTP/TLS/web-like classification and targeted re-sensing
+5. physarum-spore pattern evidence
+6. Optional CVE/vulnerability candidate enrichment
+7. DiscoveryQuery to LLM
+8. LLM proposal
+9. PolicyGate decision
+10. Lineage record
 ```
 
-At the sensing layer, nodes can discover candidate corridors instead of relying only on a predeclared peer list:
+### CVE-aware enrichment
+
+Issue #128 tracks the next step: CVE-aware spore enrichment and LLM exploit-path proposal evidence.
+
+The expected model is:
 
 ```text
-TCP/ICMP/eBPF stimulus -> candidate host -> SensingProfile -> SensingResult -> edge evidence
+service/version/banner evidence
+  -> physarum-spore CVE enrichment
+  -> vulnerability_candidates in DiscoveryQuery
+  -> LLM identifies likely CVE/path
+  -> LLM proposes exploit-path strategy
+  -> agent logs proposal in LlmAttemptEvidence / lineage
+  -> PolicyGate remains final decision boundary
 ```
 
-At the organism layer, `physarum-maze` validated the current pre-final behavior in AWS:
+For this milestone, exploit execution does **not** need to be validated. The Docker Lab must prove that the LLM receives CVE-enriched evidence and returns a structured proposal that is recorded by the agent.
+
+---
+
+## LLM and PolicyGate
+
+`physarum-llm` supports mock and OpenAI-compatible client paths. The Docker Lab can run with mock behavior or a real LLM endpoint.
+
+Environment variables used by the Docker Lab include:
+
+```env
+PHYSARUM_LLM_ENDPOINT=https://api.openai.com
+PHYSARUM_LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=...
+PHYSARUM_LLM_LOG_PROMPTS=false
+PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS=false
+```
+
+Sensitive local files should live under `examples/*/sensitive-info/` and must not be committed. The repository should only commit placeholders such as `.env.example` and README files.
+
+LLM logging is guarded:
 
 ```text
-PF-1: one seed expands through a 7-node maze and records lineage.
-PF-2: the organism re-senses new structure, handles TCP stimulus, avoids duplicate propagation into an already-colonized node, and records a secondary conduit.
+PHYSARUM_LLM_LOG_PROMPTS=false/default:
+  log metadata only
+
+PHYSARUM_LLM_LOG_PROMPTS=true/lab-only:
+  allow full prompt/raw response logs for validation evidence
 ```
 
-At the reasoning layer, `physarum-llm` now provides lab-only contracts, a mock/client path, and a Docker Lab hook for the Causal Continuity Paradox: what should the organism do when it can sense a host but cannot cross it through the validated SSH/SCP path?
-
-The current architecture is therefore no longer only a fixed server/client prototype. It is a research organism composed of graph memory, local senses, bounded discovery, structured evidence, lab-only reasoning, propagation, and lineage.
-
-### Current limitations
-
-The current organism is intentionally constrained:
+Policy rule:
 
 ```text
-propagation is lab-only
-SSH-based propagation remains the only AWS-validated propagation path
-LLM-assisted behavior is lab-only and disabled by default
-Nuclei-inspired evidence enrichment is next, not yet integrated
-lineage is structured but not yet cryptographically signed
-node identity is not yet mTLS-backed
+LLM proposes.
+PolicyGate decides.
+Lineage records.
 ```
-
-These limitations are deliberate and tracked in the roadmap.
 
 ---
 
 ## Mathematical core
 
-The adaptive edge pipeline is implemented in `physarum-agent` and `physarum-server` and is used as the foundation for path scoring.
+The adaptive graph layer uses a Physarum-inspired reinforcement/decay model. It remains relevant for path scoring and future graph memory even while the active organism work focuses on `physarum-maze`.
 
 ### Stimulus signal (`Q_ij`)
 
@@ -198,27 +278,12 @@ Q_ij = clamp(0.7 · success_rate + 0.3 · latency_score, 0, 1)   otherwise
 q_ema(t+1) = 0.3 · Q_ij + 0.7 · q_ema(t)
 ```
 
-`α = 0.3` gives quick response to improvement while smoothing short-term noise.
-
-### Sigmoid growth drive (`f`)
-
-```text
-f(x) = x² / (1 + x²)
-```
-
-This saturates growth and prevents runaway reinforcement.
-
 ### Edge conductivity (`D_ij`)
 
 ```text
+f(x) = x² / (1 + x²)
+
 D_ij(t+1) = clamp(D_ij(t) + f(q_ema) · (1 - D_ij) - 0.1 · D_ij, 0, 1)
-```
-
-Where:
-
-```text
-f(q_ema) · (1 - D_ij)  -> growth term
-0.1 · D_ij             -> decay term
 ```
 
 Under sustained successful probes:
@@ -227,32 +292,29 @@ Under sustained successful probes:
 D* = f(1) / (f(1) + 0.1) = 0.5 / 0.6 ≈ 0.833
 ```
 
-The TLA+ models in `formal/tla/` verify that `q_ema` and `D_ij` remain in `[0, 1]` and that the negative-log path model preserves expected scoring properties.
+The TLA+ models in `formal/tla/` verify that the scoring variables remain bounded and that the negative-log path model preserves expected scoring properties.
 
 ---
 
 ## Repository layout
 
-This is a high-level map of the repository. It is intentionally not exhaustive; the GitHub tree is the source of truth for exact files.
-
 ```text
 crates/
-  Rust workspace crates for protocol types, coordinator APIs, agents, observers,
-  scanners, structured sensing, probe execution, node runtime, LLM contracts,
-  and the maze organism. The next native evidence-pattern crate is planned as
-  crates/physarum-sporangium.
+  Rust workspace crates for protocol types, agents, scanners, observers,
+  pattern evidence, LLM contracts, node runtime, and the maze organism.
 
 examples/
-  Local, Docker, and AWS validation labs, including the PF-1/PF-2 organism labs.
+  Local, Docker, and AWS validation labs. Sensitive local lab files should use
+  sensitive-info/ directories with committed examples only.
 
 formal/
   TLA+ models for adaptive edge scoring and path-safety properties.
 
 General-Docs/
-  Canonical architecture, quality gates, design notes, and research/backlog ideas.
+  Architecture, quality gates, design notes, and research/backlog ideas.
 
 Utilities/
-  Developer build, validation, distribution, Docker Lab, and release helper scripts.
+  Developer build, validation, Docker Lab, release, and helper scripts.
 
 .github/
   CI and release automation.
@@ -266,12 +328,15 @@ Local upstream source clones used for analysis, such as `nuclei/`, are ignored b
 
 | Lab | What it validates | Status |
 |---|---|---|
-| `examples/local-lab` | A/B/C coordinator and agents on localhost | ✔ implemented |
-| `examples/docker-lab` | A/B/C/D agent graph in Docker Compose | ✔ implemented |
-| `docker/docker-compose-lab.yml` + `Utilities/docker-lab.sh` | Two-container `physarum-maze` + mock LLM Docker Lab | ✔ implemented |
+| `examples/local-lab` | Earlier coordinator/agent graph behavior | ✔ implemented |
+| `examples/docker-lab` | Earlier A/B/C/D graph lab in Docker Compose | ✔ implemented |
+| `docker/docker-compose-lab.yml` + `Utilities/docker-lab.sh` | `physarum-maze`, adaptive sensing, mock/real LLM, lineage evidence | ✔ PF-4/PF-5 validated |
+| `examples/pf-4-real-llm-lab` | Local sensitive-info process and real LLM configuration | ✔ implemented |
 | `examples/aws-lab/terraform` | EC2/VPC Mode 1, Mode 2, tc/netem, Gate K/K.1 | ✔ validated |
 | `examples/aws-lab/terraform-pf1` | 7-node autonomous expansion maze | ✔ validated |
 | `examples/aws-lab/terraform-pf2` | 9-node adaptive re-routing with TCP stimulus and secondary conduits | ✔ validated |
+| Future Docker CVE Lab | CVE-aware spore enrichment and LLM proposal evidence | next — Issue #128 |
+| Future AWS LLM Lab | Real LLM reasoning in owned AWS lab | planned after Docker evidence gates |
 | `formal/tla` | Formal models checked with TLC | ✔ implemented |
 
 ---
@@ -285,41 +350,74 @@ Local upstream source clones used for analysis, such as `nuclei/`, are ignored b
 - Rust 1.86 or later; the repository pins Rust 1.86.0 through `rust-toolchain.toml`
 - Docker Desktop ≥ 4.25 or Docker Engine ≥ 24 with Compose v2
 - `curl` and `jq`
-- macOS or Linux on x86_64 / ARM64
+- Linux or macOS development host
 
-### Docker lab
-
-Classic A/B/C/D graph lab:
+### Build and test
 
 ```bash
-cd examples/docker-lab
-docker compose up --build
+./Utilities/check-env.sh
+./Utilities/build.sh
+./Utilities/build.sh --release
+cargo test --workspace
 ```
 
-Wait for the agents to register, then validate:
-
-```bash
-bash check-docker-lab.sh
-```
-
-Stop and clean up:
-
-```bash
-docker compose down
-```
-
-### LLM Docker lab
-
-Two-container lab for the `physarum-maze` + mock LLM reasoning path:
+### Docker Maze Lab: default organic startup sensing
 
 ```bash
 ./Utilities/docker-lab.sh --clean
 ./Utilities/docker-lab.sh
 ```
 
-This lab is controlled and mock-first. It validates the policy-gated reasoning loop without enabling production behavior.
+Default behavior:
 
-### Local lab
+```text
+PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS=false
+```
+
+The seed agent should run startup sensing organically, discover Docker lab targets, build `DiscoveryQuery`, call the configured mock/real LLM path, pass through `PolicyGate`, and record `LlmAttemptEvidence` in lineage.
+
+### Docker Maze Lab: runtime ICMP stimulus path
+
+```bash
+PHYSARUM_ENABLE_DOCKER_ICMP_HARNESS=true ./Utilities/docker-lab.sh
+```
+
+This explicitly validates the runtime ICMP stimulus path. It should not be required for startup sensing.
+
+### Docker Maze Lab with real LLM
+
+Create a local env file from the committed example, then run the lab:
+
+```bash
+cd examples/pf-4-real-llm-lab/sensitive-info
+cp .env.example .env.local
+# edit .env.local with your local provider key
+source .env.local
+cd ../../../..
+./Utilities/docker-lab.sh
+```
+
+Expected env example:
+
+```env
+PHYSARUM_LLM_ENDPOINT=https://api.openai.com
+PHYSARUM_LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=replace_me
+PHYSARUM_LLM_LOG_PROMPTS=false
+```
+
+Never commit `.env.local` or any real API key.
+
+### Classic graph Docker lab
+
+```bash
+cd examples/docker-lab
+docker compose up --build
+bash check-docker-lab.sh
+docker compose down
+```
+
+### Local graph lab
 
 Run each process in a separate terminal:
 
@@ -353,14 +451,6 @@ curl -s http://127.0.0.1:8080/graph | jq
 curl -s 'http://127.0.0.1:8080/paths?source=agent-b&target=agent-d' | jq
 ```
 
-### Verify and build
-
-```bash
-./Utilities/check-env.sh
-./Utilities/build.sh
-./Utilities/build.sh --release
-```
-
 ---
 
 ## Development workflow
@@ -374,7 +464,7 @@ The `Utilities/` directory standardizes environment checks, builds, tests, Docke
 ./Utilities/build.sh --clippy
 ```
 
-Every pull request runs:
+Every pull request should satisfy:
 
 ```text
 cargo fmt --all -- --check
@@ -395,73 +485,45 @@ Git helper scripts live under `git-scripts/`:
 
 ## Roadmap
 
-The current prototype has completed the component gates through Gate M, the PF-1/PF-2 organism labs, the initial `physarum-llm` Docker Lab path, and Issue #114 structured scanner sensing.
-
-| Phase | Focus | State |
+| Phase / issue | Focus | State |
 |---|---|---|
-| 0 | Protocol + coordinator scaffold + CI | ✔ done |
-| 1 | Agent probing + A/B/C local/Docker lab + TLA+ edge model | ✔ done |
-| 2 | Agent D + `/paths` endpoint + AWS Mode 1/2 validation | ✔ done |
-| Gate I | FlowObservation model and API | ✔ done |
-| Gate J/J.1 | eBPF TCP state observation on AWS EC2 | ✔ done |
-| Gate K/K.1 | Segmented adaptive path selection and negative-log scoring | ✔ done |
-| Gate L/L.1/L.2/L.3 | `physarum-scanner` discovery and TCP/ICMP stimulus sensing | ✔ done |
-| Gate M/M.4 | `physarum-node` runtime convergence and probe consolidation | ✔ done |
-| PF-1 | Organic expansion maze | ✔ done |
-| PF-2 | Adaptive re-routing and secondary conduits | ✔ done |
-| Issue #106 | LLM-aware reasoning for the Causal Continuity Paradox | active — contracts, mock/client, maze hook, Docker Lab |
-| Issue #114 | Organism-native scanner sensing layer | ✔ done |
-| Issue #115 | `physarum-sporangium`: native Nuclei-inspired evidence engine | next |
-| Gate N.0 / Issue #89 | Secure organism identity, mTLS, and lineage threat model | planned after #106 stabilizes |
+| Phase 0–2 | Protocol, coordinator, agents, local/Docker graph labs | ✔ done |
+| Gate I–K | Flow observations, eBPF observation, adaptive path scoring | ✔ done |
+| Gate L | Native scanner and TCP/ICMP stimulus sensing | ✔ done |
+| Gate M | Runtime convergence and node consolidation | ✔ done |
+| PF-1 | AWS organic expansion maze | ✔ done |
+| PF-2 | AWS adaptive re-routing and secondary conduits | ✔ done |
+| Issue #106 | DiscoveryQuery evidence loop and LLM-aware reasoning | ✔ implemented through PF-4/PF-5 work |
+| Issue #114 | Structured scanner sensing layer | ✔ done |
+| Issue #115 | Native Nuclei-inspired evidence engine | ✔ implemented as `physarum-spore` / `physarum-sporangium` |
+| Issue #126 | Adaptive sensing profiles for startup, ICMP, TCP/eBPF | ✔ ready/complete after PR #127 merge |
+| Issue #128 | CVE-aware spore enrichment and LLM exploit-path proposal evidence | next |
+| AWS LLM Lab | Real LLM in owned AWS lab | planned after Docker #128 proof |
+| Gate N | Secure organism identity, mTLS, signed lineage | planned |
 
 ---
 
 ## Planned evolution
 
-### Issue #115 — physarum-sporangium
+### Issue #128 — CVE-aware evidence and LLM proposal
 
-After Issue #114, the next sensing layer is a native Nuclei-inspired evidence engine named `physarum-sporangium`.
-
-The goal is to study useful Nuclei concepts and port the relevant behavior into native Rust, not to vendor or permanently shell out to an upstream clone.
+The next Docker proof should demonstrate:
 
 ```text
-Nuclei-inspired capability -> physarum-sporangium native Rust evidence patterns
+service/version/banner evidence
+  -> vulnerability_candidates
+  -> DiscoveryQuery
+  -> LLM identifies likely CVE/path
+  -> LLM returns exploit-path proposal
+  -> PolicyGate evaluates
+  -> lineage records
 ```
 
-The local upstream Nuclei clone, if present, is analysis material only and must not be committed. The expected path is:
-
-```text
-analyze Nuclei architecture -> port concepts to Rust -> emit PatternFinding -> feed DiscoveryQuery -> remove local clone
-```
-
-Initial focus:
-
-```text
-template model
-matcher model
-extractor model
-severity hints
-structured PatternFinding output
-bounded runner interfaces
-Docker Lab / mock evidence first
-```
-
-### Issue #106 — Causal Continuity Paradox
-
-The organism is currently AWS-validated through the SSH/SCP lab propagation path. If a host is reachable only through a non-SSH service, the organism may observe the host but needs a policy-gated reasoning loop to decide what kind of controlled lab action is allowed.
-
-Issue #106 now has implemented contracts, a mock/client path, schema tests, an initial `physarum-maze` hook, and a two-container Docker Lab. The next step is to make `physarum-llm` consume richer evidence:
-
-```text
-SensingResult from physarum-scanner
-PatternFinding from physarum-sporangium
-```
-
-All LLM-driven behavior remains lab-only, bounded, policy-gated, and disabled by default.
+This is a reasoning/evidence milestone. It does not require exploit execution.
 
 ### Gate N — secure organism identity
 
-After Issue #106 clarifies the future propagation surface, Gate N will define and implement the secure identity model:
+After the LLM/evidence loop stabilizes, Gate N will define and implement:
 
 ```text
 mTLS node identity
@@ -470,8 +532,6 @@ anti-replay controls
 capability-aware authorization
 clear lab mode vs secure mode separation
 ```
-
-No production security guarantees are claimed before Gate N.
 
 ---
 
@@ -484,7 +544,7 @@ No production security guarantees are claimed before Gate N.
 
 For Rust-side dependencies of architectural significance:
 
-- `axum` — HTTP framework for the coordinator
+- `axum` — HTTP framework for earlier coordinator/API components
 - `tokio` — async runtime
 - `petgraph` — graph data structures
 - `aya` — pure-Rust eBPF library
