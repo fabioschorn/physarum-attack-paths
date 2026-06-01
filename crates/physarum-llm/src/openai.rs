@@ -128,8 +128,13 @@ impl OpenAiCompatibleClient {
             debug!(raw_response = %content, "LLM raw response");
         }
         let strategy: PropagationStrategy = serde_json::from_str(&content).map_err(|e| {
-            warn!(raw = %content, error = %e, "LLM response did not parse as PropagationStrategy");
-            anyhow!("LLM response JSON parse error: {e} — raw: {content}")
+            if self.log_prompts {
+                warn!(raw = %content, error = %e, "LLM response did not parse as PropagationStrategy");
+                anyhow!("LLM response JSON parse error: {e} — raw: {content}")
+            } else {
+                warn!(error = %e, "LLM response did not parse as PropagationStrategy");
+                anyhow!("LLM response JSON parse error: {e}")
+            }
         })?;
 
         Ok(strategy)
