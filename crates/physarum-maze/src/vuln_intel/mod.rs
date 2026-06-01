@@ -266,10 +266,8 @@ impl VulnerabilityIntelService {
 
         const MAX_INTEL_CONCURRENCY: usize = 4;
 
-        let inputs: Vec<Option<VulnerabilityIntelInput>> = findings
-            .iter()
-            .map(build_intel_input)
-            .collect();
+        let inputs: Vec<Option<VulnerabilityIntelInput>> =
+            findings.iter().map(build_intel_input).collect();
 
         stream::iter(inputs.into_iter().enumerate().map(|(i, maybe_input)| {
             let svc = self;
@@ -284,13 +282,10 @@ impl VulnerabilityIntelService {
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .fold(
-            vec![vec![]; findings.len()],
-            |mut acc, (i, candidates)| {
-                acc[i] = candidates;
-                acc
-            },
-        )
+        .fold(vec![vec![]; findings.len()], |mut acc, (i, candidates)| {
+            acc[i] = candidates;
+            acc
+        })
     }
 }
 

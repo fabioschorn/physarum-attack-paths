@@ -10,7 +10,10 @@
 use physarum_llm::types::VulnerabilityCandidate;
 use serde::{Deserialize, Serialize};
 
-use super::{VulnerabilityIntelInput, cache::{to_candidate, AdvisoryEntry}};
+use super::{
+    cache::{to_candidate, AdvisoryEntry},
+    VulnerabilityIntelInput,
+};
 
 const OSV_QUERY_URL: &str = "https://api.osv.dev/v1/query";
 

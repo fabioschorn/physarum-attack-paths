@@ -131,7 +131,6 @@ impl LocalAdvisoryCache {
             .map(|a| to_candidate(a, input, false))
             .collect()
     }
-
 }
 
 // ── Semver comparison ─────────────────────────────────────────────────────────

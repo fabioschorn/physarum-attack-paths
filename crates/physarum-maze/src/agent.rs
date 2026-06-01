@@ -298,7 +298,16 @@ async fn handle_candidate(
 
     // ── Path A: LLM reasoning (all stimuli when LLM is configured) ────────
     if let Some(cfg) = llm {
-        match llm_loop::run(src_ip, stimulus, lineage, cfg.client.as_ref(), &cfg.gate, intel).await? {
+        match llm_loop::run(
+            src_ip,
+            stimulus,
+            lineage,
+            cfg.client.as_ref(),
+            &cfg.gate,
+            intel,
+        )
+        .await?
+        {
             LlmOutcome::Propagated => {
                 tracing::info!(%src_ip, "LLM propagation succeeded");
                 lineage.save()?;

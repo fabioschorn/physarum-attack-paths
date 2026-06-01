@@ -8,9 +8,9 @@ mod ebpf;
 mod icmp;
 mod lineage;
 mod llm_loop;
-mod vuln_intel;
 mod propagation;
 mod tcp;
+mod vuln_intel;
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum Mode {
