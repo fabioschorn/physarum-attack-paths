@@ -9,7 +9,8 @@
 #     ├─ host-b :80  nginx/1.18.0 (server_tokens on — exposes version)
 #     │    Layer 1 → ConfirmedWeb
 #     │    spore: server-version-exposed fires → extracted "nginx/1.18.0"
-#     │    CVE heuristic → CVE-2021-23017 (CVSS 7.7), CVE-2019-9511 (CVSS 7.5)
+#     │    CVE heuristic → CVE-2021-23017 (CVSS 7.7, nginx < 1.21.0)
+#     │      note: CVE-2019-9511 / CVE-2019-9516 require nginx < 1.17.3; 1.18.0 is patched
 #     │    DiscoveryQuery carries vulnerability_candidates (non-empty)
 #     │    LLM references CVE in reasoning_summary
 #     │
@@ -40,14 +41,14 @@ services:
   # ── Host B — nginx/1.18.0 on port 80 (CVE-aware enrichment target) ──────────
   #
   # nginx 1.18.0 is affected by:
-  #   CVE-2021-23017 — resolver off-by-one (CVSS 7.7, nginx < 1.21.0)
-  #   CVE-2019-9511  — HTTP/2 Data Dribble DoS (CVSS 7.5, nginx < 1.17.3)
-  #   CVE-2019-9516  — HTTP/2 0-length headers memory leak (CVSS 6.5, nginx < 1.17.3)
+  #   CVE-2021-23017 — resolver off-by-one (CVSS 7.7, nginx < 1.21.0)      ← applies
+  #   CVE-2019-9511  — HTTP/2 Data Dribble DoS (CVSS 7.5, nginx < 1.17.3)  ← NOT applicable (1.18.0 >= 1.17.3)
+  #   CVE-2019-9516  — HTTP/2 0-length headers (CVSS 6.5, nginx < 1.17.3)  ← NOT applicable (1.18.0 >= 1.17.3)
   #
   # nginx default configuration has server_tokens on — the Server response header
   # exposes "nginx/1.18.0", which the server-version-exposed spore template extracts.
-  # The CVE heuristic enricher in physarum-maze maps this to VulnerabilityCandidate
-  # entries, making vulnerability_candidates non-empty in the DiscoveryQuery.
+  # The CVE heuristic enricher in physarum-maze maps this to a VulnerabilityCandidate
+  # for CVE-2021-23017 only, making vulnerability_candidates non-empty in the DiscoveryQuery.
   host-b:
     image: nginx:1.18.0
     container_name: physarum-host-b

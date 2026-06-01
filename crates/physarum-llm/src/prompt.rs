@@ -20,7 +20,8 @@ The query includes:
     Each finding includes check_id, name, severity, confidence, matched_summary, and extracted values.
     Findings with is_actionable=true have severity >= low and confidence >= 0.7 — prioritise these.
     Each finding may include `vulnerability_candidates`: CVE entries from banner-heuristic enrichment.
-    When non-empty, use cve_id, cvss_score, matched_version, and confidence to prioritise exploit-aware paths.
+    Fields: cve_id, cvss_score, matched_version, affected_range, exploit_class, impact, preconditions, confidence.
+    When non-empty, use these fields to build a richer picture of the attack surface and prioritise exploit-aware paths.
   - `os_hint`: best-effort OS fingerprint (may be absent).
   - `lineage_summary`: organism propagation state.
   - `rejected_strategies`: previously rejected strategies — do NOT re-propose these.
@@ -36,10 +37,12 @@ CVE-AWARE REASONING:
 If any pattern_finding contains non-empty vulnerability_candidates:
   1. Identify the most relevant CVE by cvss_score (highest) and confidence.
   2. Always reference the cve_id in `reasoning_summary`, e.g.:
-       \"nginx/1.18.0 affected by CVE-2021-23017 (CVSS 7.7); proposing Http propagation on port 80.\"
+       \"nginx/1.18.0 affected by CVE-2021-23017 (CVSS 7.7, MemoryCorruption); proposing Http propagation on port 80.\"
   3. If Exploit is in allowed_methods, propose PropagationMethod::Exploit with that cve_id.
   4. If Exploit is not allowed, use the next best method and note the CVE context in reasoning_summary.
   5. Add to safety_notes: \"CVE match is banner-heuristic (unconfirmed) — not validated exploitation.\"
+  6. Use `exploit_class`, `impact`, and `preconditions` to populate the strategy preconditions list
+     and enrich safety_notes with context about what conditions must hold for the CVE to apply.
 
 RULES:
 - Use ONLY methods from the allowed_methods list supplied in this prompt.

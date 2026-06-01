@@ -71,10 +71,10 @@ pub enum OsHintSource {
 
 /// CVE / vulnerability candidate associated with a service fingerprint finding.
 ///
-/// Populated by `physarum-spore` banner-heuristic enrichment (Issue #128) and
-/// future NVD/OSV feed enrichment. The LLM must treat populated entries as
-/// prioritised exploit-path signals and reference the `cve_id` in its
-/// `reasoning_summary`.
+/// Populated by `physarum-maze::cve_heuristic` banner-heuristic enrichment
+/// (Issue #128) and future NVD/OSV feed enrichment. The LLM must treat
+/// populated entries as prioritised exploit-path signals and reference the
+/// `cve_id` in its `reasoning_summary`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VulnerabilityCandidate {
     /// CVE identifier, e.g. `"CVE-2021-23017"`.
@@ -102,6 +102,21 @@ pub struct VulnerabilityCandidate {
     /// `true` when the version match is exact; `false` for range or heuristic match.
     #[serde(default)]
     pub is_confirmed: bool,
+    /// Affected version range string derived from the CVE advisory (e.g. `"< 1.21.0"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub affected_range: Option<String>,
+    /// Broad exploit class: `"MemoryCorruption"`, `"DoS"`, `"InfoDisclosure"`, etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exploit_class: Option<String>,
+    /// Short impact description for LLM reasoning context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<String>,
+    /// Conditions that must be true for the CVE to be exploitable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preconditions: Vec<String>,
+    /// CVE advisory and NVD reference URLs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<String>,
 }
 
 /// How the `VulnerabilityCandidate` was obtained.
@@ -143,9 +158,9 @@ pub struct PatternFindingSummary {
     pub is_actionable: bool,
     /// CVE / vulnerability candidates linked to this finding.
     ///
-    /// Populated by `physarum-spore` NVD/OSV enrichment in PF-5+.
-    /// Empty in current release — field preserved for forward compatibility.
-    /// When non-empty the LLM should weight exploit-aware propagation paths higher.
+    /// Populated by `physarum-maze::cve_heuristic` banner-heuristic enrichment
+    /// (Issue #128); future NVD/OSV feed enrichment in `physarum-spore` (PF-5+).
+    /// When non-empty the LLM weights exploit-aware propagation paths higher.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vulnerability_candidates: Vec<VulnerabilityCandidate>,
 }
@@ -377,6 +392,18 @@ pub struct LlmAttemptEvidence {
     pub next_action: NextAction,
     /// Stable identifier for the strategy (e.g. sha256 of the JSON).
     pub strategy_id: String,
+    /// LLM-assigned confidence for the proposed strategy (0.0–1.0).
+    /// Zero when the LLM returned an error or NoPath.
+    #[serde(default)]
+    pub strategy_confidence: f32,
+    /// TCP port targeted by the proposed strategy (e.g. 80 for Http, 22 for Ssh).
+    /// Absent when the LLM returned an error or NoPath.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_port: Option<u16>,
+    /// CVE identifiers present in the DiscoveryQuery at the time of this attempt.
+    /// Empty when no CVE candidates were enriched for this target.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cve_candidate_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

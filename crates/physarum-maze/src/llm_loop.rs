@@ -84,6 +84,12 @@ pub async fn run(
         "evidence bundle ready"
     );
 
+    // Stable across all attempts — computed once from the enriched pattern summaries.
+    let cve_ids = extract_cve_ids(&pattern_summaries);
+    if !cve_ids.is_empty() {
+        tracing::info!(%target, ?cve_ids, "CVE candidates in DiscoveryQuery");
+    }
+
     let mut rejected: Vec<RejectedStrategy> = Vec::new();
 
     for attempt_number in 1..=MAX_ATTEMPTS {
@@ -123,6 +129,9 @@ pub async fn run(
                     reasoning_summary: format!("LLM query error on attempt {attempt_number}: {e}"),
                     next_action: NextAction::RetryWithLlm,
                     strategy_id: String::new(),
+                    strategy_confidence: 0.0,
+                    target_port: None,
+                    cve_candidate_ids: cve_ids.clone(),
                 });
                 continue;
             }
@@ -149,6 +158,9 @@ pub async fn run(
                 reasoning_summary: strategy.reasoning_summary.clone(),
                 next_action: NextAction::MarkDeadEnd,
                 strategy_id,
+                strategy_confidence: strategy.confidence,
+                target_port: None,
+                cve_candidate_ids: cve_ids.clone(),
             });
             return Ok(LlmOutcome::DeadEnd);
         }
@@ -180,6 +192,9 @@ pub async fn run(
                 reasoning_summary: strategy.reasoning_summary.clone(),
                 next_action: NextAction::RetryWithLlm,
                 strategy_id,
+                strategy_confidence: strategy.confidence,
+                target_port: method_port(&strategy.method),
+                cve_candidate_ids: cve_ids.clone(),
             });
             continue;
         }
@@ -211,6 +226,9 @@ pub async fn run(
             reasoning_summary: strategy.reasoning_summary.clone(),
             next_action,
             strategy_id,
+            strategy_confidence: strategy.confidence,
+            target_port: method_port(&strategy.method),
+            cve_candidate_ids: cve_ids.clone(),
         });
 
         if succeeded {
@@ -1077,4 +1095,24 @@ fn strategy_fingerprint(strategy: &physarum_llm::PropagationStrategy) -> String 
     let mut h = DefaultHasher::new();
     json.hash(&mut h);
     format!("hash:{:016x}", h.finish())
+}
+
+/// Extract the TCP port implied by a propagation method for lineage evidence.
+fn method_port(method: &PropagationMethod) -> Option<u16> {
+    match method {
+        PropagationMethod::Ssh { .. } => Some(22),
+        PropagationMethod::Http { port, .. } => *port,
+        _ => None,
+    }
+}
+
+/// Collect deduplicated CVE IDs from all pattern-finding candidates.
+/// Computed once before the attempt loop; stable across retries.
+fn extract_cve_ids(summaries: &[PatternFindingSummary]) -> Vec<String> {
+    let mut ids: Vec<String> = summaries
+        .iter()
+        .flat_map(|f| f.vulnerability_candidates.iter().map(|c| c.cve_id.clone()))
+        .collect();
+    ids.dedup();
+    ids
 }

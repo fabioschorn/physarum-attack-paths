@@ -7,6 +7,15 @@
 //! This is evidence-only enrichment — no network probing, no exploit execution.
 //! Confidence is intentionally conservative (0.7) because version range matches
 //! are heuristic, not confirmed vulnerability scans.
+//!
+//! # Architecture note (bootstrap)
+//!
+//! This module lives in `physarum-maze` as a bootstrap implementation for Issue #128.
+//! Future evolution: the CVE table and enrichment logic should migrate to
+//! `physarum-spore` / `physarum-sporangium` or a dedicated vulnerability-intelligence
+//! crate capable of consuming live NVD/OSV feeds.
+//! The `cve_heuristic::enrich_finding()` call-site in `llm_loop.rs` is stable across
+//! that migration — only the module location changes.
 
 use physarum_llm::types::{VulnerabilityCandidate, VulnerabilitySource};
 use physarum_sporangium::finding::PatternFinding;
@@ -17,6 +26,11 @@ struct CveEntry {
     cve_id: &'static str,
     cvss_score: f32,
     description: &'static str,
+    affected_range: &'static str,
+    exploit_class: &'static str,
+    impact: &'static str,
+    preconditions: &'static [&'static str],
+    references: &'static [&'static str],
     /// Returns `true` when (major, minor, patch) falls in the affected range.
     applies: fn(u64, u64, u64) -> bool,
 }
@@ -28,6 +42,17 @@ static NGINX_CVES: &[CveEntry] = &[
         description: "Off-by-one in the nginx resolver allows a DNS-forged-UDP attacker to \
                        overwrite 1 byte of heap memory — worker crash or potential code execution \
                        (nginx < 1.21.0)",
+        affected_range: "< 1.21.0",
+        exploit_class: "MemoryCorruption",
+        impact: "worker crash or potential code execution via DNS-forged UDP response",
+        preconditions: &[
+            "nginx resolver enabled (use_resolver directive in nginx.conf)",
+            "attacker can forge DNS UDP responses to the nginx resolver",
+        ],
+        references: &[
+            "https://nvd.nist.gov/vuln/detail/CVE-2021-23017",
+            "https://nginx.org/en/security_advisories.html",
+        ],
         applies: |major, minor, _patch| major == 1 && minor < 21,
     },
     CveEntry {
@@ -35,6 +60,14 @@ static NGINX_CVES: &[CveEntry] = &[
         cvss_score: 7.5,
         description: "HTTP/2 Data Dribble: WINDOW_UPDATE frames with small increments allow \
                        remote CPU exhaustion (nginx < 1.17.3 with ngx_http_v2_module)",
+        affected_range: "< 1.17.3",
+        exploit_class: "DoS",
+        impact: "remote CPU exhaustion via HTTP/2 WINDOW_UPDATE flood",
+        preconditions: &[
+            "ngx_http_v2_module compiled and active",
+            "HTTP/2 listen directive enabled on the vhost",
+        ],
+        references: &["https://nvd.nist.gov/vuln/detail/CVE-2019-9511"],
         applies: |major, minor, patch| major == 1 && (minor < 17 || (minor == 17 && patch < 3)),
     },
     CveEntry {
@@ -42,6 +75,14 @@ static NGINX_CVES: &[CveEntry] = &[
         cvss_score: 6.5,
         description: "HTTP/2 zero-length headers cause unbounded memory growth — \
                        remote memory exhaustion (nginx < 1.17.3 with ngx_http_v2_module)",
+        affected_range: "< 1.17.3",
+        exploit_class: "DoS",
+        impact: "remote memory exhaustion via zero-length HTTP/2 headers",
+        preconditions: &[
+            "ngx_http_v2_module compiled and active",
+            "HTTP/2 listen directive enabled on the vhost",
+        ],
+        references: &["https://nvd.nist.gov/vuln/detail/CVE-2019-9516"],
         applies: |major, minor, patch| major == 1 && (minor < 17 || (minor == 17 && patch < 3)),
     },
 ];
@@ -118,6 +159,11 @@ pub fn enrich_finding(finding: &PatternFinding) -> Vec<VulnerabilityCandidate> {
                     matched_version: Some(version.to_string()),
                     evidence: vec![format!("Server header extract: {value}")],
                     is_confirmed: false,
+                    affected_range: Some(entry.affected_range.to_string()),
+                    exploit_class: Some(entry.exploit_class.to_string()),
+                    impact: Some(entry.impact.to_string()),
+                    preconditions: entry.preconditions.iter().map(|s| s.to_string()).collect(),
+                    references: entry.references.iter().map(|s| s.to_string()).collect(),
                 });
             }
         }

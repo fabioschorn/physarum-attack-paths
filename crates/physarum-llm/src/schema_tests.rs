@@ -340,9 +340,15 @@ mod tests {
             artifact_type: ArtifactType::Script,
             policy_decision: PolicyDecision::Accepted,
             execution_result: ExecutionResultSummary::Success,
-            reasoning_summary: "HTTP exploit succeeded.".into(),
+            reasoning_summary:
+                "nginx/1.18.0 affected by CVE-2021-23017 (CVSS 7.7, MemoryCorruption); \
+                 proposing Http propagation on port 80."
+                    .into(),
             next_action: NextAction::ContinueOrganismLoop,
             strategy_id: "sha256:cafebabe".into(),
+            strategy_confidence: 0.82,
+            target_port: Some(80),
+            cve_candidate_ids: vec!["CVE-2021-23017".into()],
         });
 
         round_trip(&LlmAttemptEvidence {
@@ -361,6 +367,9 @@ mod tests {
             reasoning_summary: "SSH confidence too low.".into(),
             next_action: NextAction::RetryWithLlm,
             strategy_id: "sha256:00000000".into(),
+            strategy_confidence: 0.45,
+            target_port: Some(22),
+            cve_candidate_ids: vec![],
         });
 
         round_trip(&LlmAttemptEvidence {
@@ -376,6 +385,9 @@ mod tests {
             reasoning_summary: "No propagation path found after max attempts.".into(),
             next_action: NextAction::MaxAttemptsReached,
             strategy_id: "sha256:ffffffff".into(),
+            strategy_confidence: 0.0,
+            target_port: None,
+            cve_candidate_ids: vec![],
         });
     }
 
