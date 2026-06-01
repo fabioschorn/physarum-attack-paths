@@ -87,19 +87,33 @@ struct OsvReference {
 
 // ── Ecosystem mapping ─────────────────────────────────────────────────────────
 
+/// Confidence modifier for the OSV ecosystem mapping quality.
+///
+/// `Strong` mappings are well-known and produce reliable results.
+/// `BestEffort` mappings are educated guesses — OSV may return unrelated packages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MappingQuality {
+    Strong,
+    BestEffort,
+}
+
 /// Map service name to the most likely OSV ecosystem for a first-pass query.
 ///
-/// If no specific ecosystem is known, we omit it so OSV searches across all
-/// ecosystems — broader but slower.
-fn ecosystem_for(service: &str) -> Option<&'static str> {
+/// Returns `(ecosystem, quality)`. When no specific ecosystem is known,
+/// `ecosystem` is `None` (cross-ecosystem search) and quality is `BestEffort`.
+/// The caller uses `quality` to reduce candidate confidence for weak mappings.
+fn ecosystem_for(service: &str) -> (Option<&'static str>, MappingQuality) {
     match service {
-        "nginx" | "apache-httpd" | "lighttpd" | "caddy" => Some("Bitnami"),
-        "openssh" | "openssl" => None,
-        "tomcat" => Some("Maven"),
-        "jenkins" => Some("Maven"),
-        "redis" => Some("Bitnami"),
-        "wordpress" => Some("Packagist"),
-        _ => None,
+        "nginx" | "apache-httpd" | "lighttpd" | "caddy" => {
+            (Some("Bitnami"), MappingQuality::Strong)
+        }
+        "tomcat" | "jenkins" => (Some("Maven"), MappingQuality::Strong),
+        "wordpress" => (Some("Packagist"), MappingQuality::Strong),
+        // OpenSSH / OpenSSL have no reliable OSV ecosystem mapping;
+        // cross-ecosystem search produces noisy results.
+        "openssh" | "openssl" => (None, MappingQuality::BestEffort),
+        "redis" => (Some("Bitnami"), MappingQuality::BestEffort),
+        _ => (None, MappingQuality::BestEffort),
     }
 }
 
@@ -109,15 +123,27 @@ fn ecosystem_for(service: &str) -> Option<&'static str> {
 ///
 /// Returns at most `MAX_OSV_RESULTS` candidates. The call is bounded by the
 /// client's configured timeout set in `VulnerabilityIntelService::new()`.
+///
+/// The service→ecosystem mapping is **best-effort**: strong mappings produce
+/// reliable results while weak ones may return unrelated packages. Candidate
+/// confidence is adjusted downward for best-effort mappings.
 pub async fn query_osv(
     client: &reqwest::Client,
     input: &VulnerabilityIntelInput,
 ) -> anyhow::Result<Vec<VulnerabilityCandidate>> {
     const MAX_OSV_RESULTS: usize = 5;
 
-    // Map service name to OSV package name (some services need name adjustment)
     let package_name = osv_package_name(&input.service);
-    let ecosystem = ecosystem_for(&input.service);
+    let (ecosystem, mapping_quality) = ecosystem_for(&input.service);
+
+    tracing::debug!(
+        service = %input.service,
+        package = %package_name,
+        version = %input.version,
+        ecosystem = ?ecosystem,
+        mapping_quality = ?mapping_quality,
+        "OSV API query"
+    );
 
     let body = OsvQueryRequest {
         version: &input.version,
@@ -127,14 +153,6 @@ pub async fn query_osv(
         },
     };
 
-    tracing::debug!(
-        service = %input.service,
-        package = %package_name,
-        version = %input.version,
-        ?ecosystem,
-        "OSV API query"
-    );
-
     let resp = client
         .post(OSV_QUERY_URL)
         .json(&body)
@@ -143,12 +161,27 @@ pub async fn query_osv(
         .error_for_status()?;
 
     let osv_resp: OsvQueryResponse = resp.json().await?;
+    let result_count = osv_resp.vulns.len();
+
+    tracing::info!(
+        service = %input.service,
+        package = %package_name,
+        ecosystem = ?ecosystem,
+        mapping_quality = ?mapping_quality,
+        result_count,
+        "OSV API response received"
+    );
+
+    let base_confidence: f32 = match mapping_quality {
+        MappingQuality::Strong => 0.75,
+        MappingQuality::BestEffort => 0.50,
+    };
 
     let candidates = osv_resp
         .vulns
         .into_iter()
         .take(MAX_OSV_RESULTS)
-        .map(|v| osv_vuln_to_candidate(v, input))
+        .map(|v| osv_vuln_to_candidate(v, input, base_confidence))
         .collect();
 
     Ok(candidates)
@@ -162,7 +195,16 @@ fn osv_package_name(service: &str) -> String {
 }
 
 /// Convert an OSV `OsvVuln` to a `VulnerabilityCandidate`.
-fn osv_vuln_to_candidate(vuln: OsvVuln, input: &VulnerabilityIntelInput) -> VulnerabilityCandidate {
+///
+/// `base_confidence` reflects the mapping quality: strong ecosystem mappings
+/// yield 0.75; best-effort mappings yield 0.50.
+fn osv_vuln_to_candidate(
+    vuln: OsvVuln,
+    input: &VulnerabilityIntelInput,
+    base_confidence: f32,
+) -> VulnerabilityCandidate {
+    use physarum_llm::types::VulnerabilitySource;
+
     let cvss_score = extract_cvss_score(&vuln.severity);
     let fixed_version = extract_fixed_version(&vuln.affected);
     let affected_range = fixed_version
@@ -172,9 +214,9 @@ fn osv_vuln_to_candidate(vuln: OsvVuln, input: &VulnerabilityIntelInput) -> Vuln
 
     let references: Vec<String> = vuln.references.iter().map(|r| r.url.clone()).collect();
 
-    // Build an AdvisoryEntry-like structure and reuse to_candidate
     let entry = AdvisoryEntry {
         advisory_id: vuln.id.clone(),
+        ranges: vec![],
         fixed_version: fixed_version.unwrap_or_default(),
         affected_range,
         cvss_score: cvss_score.unwrap_or(0.0),
@@ -190,7 +232,11 @@ fn osv_vuln_to_candidate(vuln: OsvVuln, input: &VulnerabilityIntelInput) -> Vuln
         references,
     };
 
-    to_candidate(&entry, input, true)
+    // Build candidate manually to control source + confidence
+    let mut candidate = to_candidate(&entry, input);
+    candidate.source = VulnerabilitySource::OsvFeed;
+    candidate.confidence = base_confidence;
+    candidate
 }
 
 /// Extract the CVSS base score from OSV severity array.

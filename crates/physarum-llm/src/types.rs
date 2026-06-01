@@ -120,13 +120,28 @@ pub struct VulnerabilityCandidate {
 }
 
 /// How the `VulnerabilityCandidate` was obtained.
+///
+/// Each variant maps 1-to-1 to the data source that produced the candidate,
+/// so the LLM reasoning loop and the lineage record can correctly attribute
+/// confidence and provenance.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VulnerabilitySource {
-    /// `physarum-spore` enrichment against NVD/OSV feeds (PF-5+).
-    PhysarumSpore,
-    /// Locally cached NVD/OSV snapshot.
+    /// Matched from an offline advisory JSON file loaded at startup
+    /// (`advisory-cache/<service>.json`).  Highest-trust source — curator-reviewed.
+    LocalAdvisoryCache,
+    /// Queried live from the OSV API (`api.osv.dev/v1/query`) on a cache miss.
+    /// Confidence is reduced when the service→ecosystem mapping is best-effort.
+    OsvFeed,
+    /// Queried from the NVD REST API (future provider; not yet wired).
     NvdFeed,
+    /// Advisory from the vendor's own security bulletin
+    /// (future provider; not yet wired).
+    VendorAdvisory,
+    /// physarum-sporangium template match that itself carries CVE metadata in
+    /// the template `info` block (e.g. a CVE-specific Nuclei-style check).
+    PhysarumSpore,
     /// Static heuristic from the service banner or `version_hint` string.
+    /// Lowest-trust source — no advisory lookup performed.
     BannerHeuristic,
 }
 

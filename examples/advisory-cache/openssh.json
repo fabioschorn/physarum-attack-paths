@@ -1,8 +1,11 @@
 [
   {
     "advisory_id": "CVE-2023-38408",
-    "fixed_version": "9.3.1",
-    "affected_range": "< 9.3p2",
+    "ranges": [
+      { "introduced": "5.5", "fixed": "9.3" }
+    ],
+    "fixed_version": "9.3",
+    "affected_range": ">= 5.5, < 9.3p2",
     "cvss_score": 9.8,
     "severity": "Critical",
     "description": "Remote code execution via ssh-agent in OpenSSH before 9.3p2. A remote attacker who can establish a connection to a forwarded ssh-agent socket can force the agent to load malicious shared libraries.",
@@ -19,6 +22,9 @@
   },
   {
     "advisory_id": "CVE-2023-51385",
+    "ranges": [
+      { "introduced": "0.0.0", "fixed": "9.6" }
+    ],
     "fixed_version": "9.6",
     "affected_range": "< 9.6",
     "cvss_score": 6.5,
@@ -37,8 +43,11 @@
   },
   {
     "advisory_id": "CVE-2016-0777",
-    "fixed_version": "7.1.2",
-    "affected_range": "< 7.1p2",
+    "ranges": [
+      { "introduced": "5.4", "fixed": "7.1" }
+    ],
+    "fixed_version": "7.1",
+    "affected_range": ">= 5.4, < 7.1p2",
     "cvss_score": 6.5,
     "severity": "Medium",
     "description": "Information disclosure in OpenSSH client: roaming feature leaks private key material when connecting to a malicious server (OpenSSH 5.4–7.1).",
