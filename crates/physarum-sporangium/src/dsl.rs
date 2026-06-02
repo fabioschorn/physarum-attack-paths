@@ -123,24 +123,25 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     let mut context = HashMapContext::new();
 
     // ── Variables ─────────────────────────────────────────────────────────────
+    // evalexpr v11: a variable's type is fixed at first set_value — you cannot
+    // call set_value again with a different type.  Set numeric fields as Int
+    // directly so that `status_code == 200` (integer literal) works.
+    const NUMERIC_FIELDS: &[&str] = &["status_code", "content_length", "duration", "body_words"];
+
     for (k, v) in ctx {
         let safe_key = sanitize_key(k);
-        context
-            .set_value(safe_key.clone(), Value::String(v.clone()))
-            .map_err(|e| anyhow::anyhow!("set variable {}: {}", k, e))?;
-
-        // Also expose numeric aliases where the value is parseable as a number
-        if let Ok(n) = v.parse::<i64>() {
-            // Only override if the key is a known numeric context field
-            if matches!(
-                safe_key.as_str(),
-                "status_code" | "content_length" | "duration" | "body_words"
-            ) {
-                context
-                    .set_value(safe_key, Value::Int(n))
-                    .map_err(|e| anyhow::anyhow!("set int {}: {}", k, e))?;
+        let val = if NUMERIC_FIELDS.contains(&safe_key.as_str()) {
+            if let Ok(n) = v.parse::<i64>() {
+                Value::Int(n)
+            } else {
+                Value::String(v.clone())
             }
-        }
+        } else {
+            Value::String(v.clone())
+        };
+        context
+            .set_value(safe_key, val)
+            .map_err(|e| anyhow::anyhow!("set variable {}: {}", k, e))?;
     }
 
     // ── Helper functions ──────────────────────────────────────────────────────
@@ -175,11 +176,14 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
         }),
     )?;
 
+    // ── Single-argument functions ─────────────────────────────────────────────
+    // evalexpr v11: single-arg calls pass the value *directly* (not in a tuple).
+    // Do NOT use as_fixed_len_tuple(1) here — it expects a Value::Tuple.
+
     context.set_function(
         "len".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             Ok(Value::Int(s.len() as i64))
         }),
     )?;
@@ -187,8 +191,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "tolower".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             Ok(Value::String(s.to_lowercase()))
         }),
     )?;
@@ -196,8 +199,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "toupper".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             Ok(Value::String(s.to_uppercase()))
         }),
     )?;
@@ -205,8 +207,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "trim".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             Ok(Value::String(s.trim().to_string()))
         }),
     )?;
@@ -236,32 +237,26 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
 
     context.set_function(
         "to_number".into(),
-        Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            match &args[0] {
-                Value::Int(n) => Ok(Value::Int(*n)),
-                Value::Float(f) => Ok(Value::Float(*f)),
-                Value::String(s) => s
-                    .parse::<i64>()
-                    .map(Value::Int)
-                    .or_else(|_| s.parse::<f64>().map(Value::Float))
-                    .map_err(|_| {
-                        EvalexprError::CustomMessage(format!("cannot convert {:?} to number", s))
-                    }),
-                other => Err(EvalexprError::CustomMessage(format!(
-                    "cannot convert {:?} to number",
-                    other
-                ))),
-            }
+        Function::new(|args| match args {
+            Value::Int(n) => Ok(Value::Int(*n)),
+            Value::Float(f) => Ok(Value::Float(*f)),
+            Value::String(s) => s
+                .parse::<i64>()
+                .map(Value::Int)
+                .or_else(|_| s.parse::<f64>().map(Value::Float))
+                .map_err(|_| {
+                    EvalexprError::CustomMessage(format!("cannot convert {:?} to number", s))
+                }),
+            other => Err(EvalexprError::CustomMessage(format!(
+                "cannot convert {:?} to number",
+                other
+            ))),
         }),
     )?;
 
     context.set_function(
         "to_string".into(),
-        Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            Ok(Value::String(args[0].to_string()))
-        }),
+        Function::new(|args| Ok(Value::String(args.to_string()))),
     )?;
 
     context.set_function(
@@ -328,8 +323,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "md5".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             let digest = md5_hex(s.as_bytes());
             Ok(Value::String(digest))
         }),
@@ -338,8 +332,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "sha256".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             let mut hasher = Sha256::new();
             hasher.update(s.as_bytes());
             let digest = format!("{:x}", hasher.finalize());
@@ -350,8 +343,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "base64".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             use base64::Engine as _;
             Ok(Value::String(
                 base64::engine::general_purpose::STANDARD.encode(s.as_bytes()),
@@ -362,8 +354,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "base64_decode".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             use base64::Engine as _;
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(s.as_bytes())
@@ -375,8 +366,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "hex_encode".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             Ok(Value::String(hex::encode(s.as_bytes())))
         }),
     )?;
@@ -384,8 +374,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "hex_decode".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             let bytes = hex::decode(s.as_str())
                 .map_err(|e| EvalexprError::CustomMessage(format!("hex decode: {e}")))?;
             Ok(Value::String(String::from_utf8_lossy(&bytes).into_owned()))
@@ -395,8 +384,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "url_encode".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             Ok(Value::String(url_encode(&s)))
         }),
     )?;
@@ -404,8 +392,7 @@ pub fn build_context(ctx: &HashMap<String, String>) -> anyhow::Result<HashMapCon
     context.set_function(
         "url_decode".into(),
         Function::new(|args| {
-            let args = args.as_fixed_len_tuple(1)?;
-            let s = args[0].as_string()?;
+            let s = args.as_string()?;
             Ok(Value::String(url_decode(&s)))
         }),
     )?;
@@ -527,8 +514,9 @@ mod tests {
 
     #[test]
     fn not_expression() {
+        // HSTS header is absent → contains(...) == false → !false == true
         let c = ctx(&[("all_headers", "X-Powered-By: Apache")]);
-        assert!(!evaluate_dsl(
+        assert!(evaluate_dsl(
             "!contains(tolower(all_headers), \"strict-transport-security\")",
             &c
         )
