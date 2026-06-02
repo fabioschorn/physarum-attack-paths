@@ -19,8 +19,9 @@ The query includes:
   - `pattern_findings`: structured HTTP pattern evidence from physarum-sporangium.
     Each finding includes check_id, name, severity, confidence, matched_summary, and extracted values.
     Findings with is_actionable=true have severity >= low and confidence >= 0.7 — prioritise these.
-    Each finding may include `vulnerability_candidates`: CVE entries from NVD/OSV enrichment.
-    When non-empty, use cve_id, cvss_score, and confidence to prioritise exploit-aware propagation paths.
+    Each finding may include `vulnerability_candidates`: CVE entries from `VulnerabilityIntelService` (Issue #131) — sourced from `LocalAdvisoryCache`, `OsvFeed`, or future NVD/vendor providers.
+    Fields: cve_id, cvss_score, matched_version, affected_range, exploit_class, impact, preconditions, confidence.
+    When non-empty, use these fields to build a richer picture of the attack surface and prioritise exploit-aware paths.
   - `os_hint`: best-effort OS fingerprint (may be absent).
   - `lineage_summary`: organism propagation state.
   - `rejected_strategies`: previously rejected strategies — do NOT re-propose these.
@@ -32,6 +33,17 @@ EVIDENCE INTERPRETATION:
   with port banners and version_hints to build a coherent picture of the target.
 - An is_actionable finding is a concrete signal — weight it more heavily than port-number inference.
 
+CVE-AWARE REASONING:
+If any pattern_finding contains non-empty vulnerability_candidates:
+  1. Identify the most relevant CVE by cvss_score (highest) and confidence.
+  2. Always reference the cve_id in `reasoning_summary`, e.g.:
+       \"nginx/1.18.0 affected by CVE-2021-23017 (CVSS 7.7, MemoryCorruption); proposing Http propagation on port 80.\"
+  3. If Exploit is in allowed_methods, propose PropagationMethod::Exploit with that cve_id.
+  4. If Exploit is not allowed, use the next best method and note the CVE context in reasoning_summary.
+  5. Add to safety_notes: \"CVE match from VulnerabilityIntelService — confidence per source field (LocalAdvisoryCache 0.85 / OsvFeed 0.75–0.50); not validated exploitation.\"
+  6. Use `exploit_class`, `impact`, and `preconditions` to populate the strategy preconditions list
+     and enrich safety_notes with context about what conditions must hold for the CVE to apply.
+
 RULES:
 - Use ONLY methods from the allowed_methods list supplied in this prompt.
 - If no allowed method can reach the target, return { \"method\": { \"NoPath\": { \"reason\": \"<brief reason>\" } } }.
@@ -40,6 +52,7 @@ RULES:
 - Do NOT suggest methods outside the allowed list.
 - If `rejected_strategies` is non-empty, do NOT suggest the same method_class again.
 - `reasoning_summary` must be a single sentence suitable for lineage audit storage.
+  When CVE candidates are present, include the most relevant cve_id in this sentence.
 - `safety_notes` must list any side effects or risks of the proposed strategy.
 - PORT RULE: For Http method and HttpGet/HttpPost bootstrap steps, set `port` to the exact TCP port
   observed in the `ports` scan list. Do NOT default to 80 unless port 80 is explicitly listed.

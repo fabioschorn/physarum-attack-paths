@@ -10,6 +10,7 @@ mod lineage;
 mod llm_loop;
 mod propagation;
 mod tcp;
+mod vuln_intel;
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum Mode {

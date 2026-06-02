@@ -1,27 +1,25 @@
-# physarum-maze Docker Lab — PF-3.1 adaptive fingerprint validation
+# physarum-maze Docker Lab — PF-5.2 dynamic vulnerability intelligence pipeline (Issue #131)
 #
-# Three-target lab validating the full adaptive evidence pipeline:
+# Three-target lab validating the full dynamic advisory pipeline:
 #
 #   host-a (physarum-maze + LLM enabled)
 #     │  senses host-b/c/d via /24 periodic discovery
 #     │  port 22 closed on all targets → LLM reasoning loop fires
 #     │
-#     ├─ host-b :80  (service_guess="http")
-#     │    Layer 1 → ConfirmedWeb (service_guess starts with "http")
-#     │    banner grab: HTTP GET → scheme_hint=Http, confidence=0.85
+#     ├─ host-b :80  nginx/1.18.0 (server_tokens on — exposes version)
+#     │    Layer 1 → ConfirmedWeb
+#     │    spore: server-version-exposed fires → extracted "nginx/1.18.0"
+#     │    CVE heuristic → CVE-2021-23017 (CVSS 7.7, nginx < 1.21.0)
+#     │      note: CVE-2019-9511 / CVE-2019-9516 require nginx < 1.17.3; 1.18.0 is patched
+#     │    DiscoveryQuery carries vulnerability_candidates (non-empty)
+#     │    LLM references CVE in reasoning_summary
+#     │
+#     ├─ host-c :8080 (service_guess="http-alt", Python http.server)
+#     │    Layer 1 → ConfirmedWeb
 #     │    spore enrichment → PatternFindingSummary → DiscoveryQuery
 #     │
-#     ├─ host-c :8080 (service_guess="http-alt")
-#     │    Layer 1 → ConfirmedWeb (service_guess starts with "http")
-#     │    banner grab: HTTP GET → scheme_hint=Http, confidence=0.85
-#     │    spore enrichment → PatternFindingSummary → DiscoveryQuery
-#     │
-#     └─ host-d :7777 (no service_guess, scheme_hint=Unknown)
-#          Layer 1 → port-convention only, confidence=0.5
-#          Layer 2 banner grab → no spontaneous greeting → None
-#          Layer 3 HTTP probe → http://172.20.0.5:7777/ → 200 OK
-#                → UnknownNeedsMoreSensing resolved to ConfirmedWeb
-#          spore enrichment → PatternFindingSummary → DiscoveryQuery
+#     └─ host-d :7777 (no service_guess, UnknownNeedsMoreSensing → ConfirmedWeb)
+#          HTTP probe confirms web service → spore enrichment → DiscoveryQuery
 #
 # Trigger stimuli after lab starts:
 #   docker exec physarum-host-b sh -c "apk add --no-cache iputils -q; ping -c 3 172.20.0.2"
@@ -40,9 +38,19 @@ networks:
 
 services:
 
-  # ── Host B — HTTP on port 80 (Case 1: ConfirmedWeb via service_guess="http") ──
+  # ── Host B — nginx/1.18.0 on port 80 (CVE-aware enrichment target) ──────────
+  #
+  # nginx 1.18.0 is affected by:
+  #   CVE-2021-23017 — resolver off-by-one (CVSS 7.7, nginx < 1.21.0)      ← applies
+  #   CVE-2019-9511  — HTTP/2 Data Dribble DoS (CVSS 7.5, nginx < 1.17.3)  ← NOT applicable (1.18.0 >= 1.17.3)
+  #   CVE-2019-9516  — HTTP/2 0-length headers (CVSS 6.5, nginx < 1.17.3)  ← NOT applicable (1.18.0 >= 1.17.3)
+  #
+  # nginx default configuration has server_tokens on — the Server response header
+  # exposes "nginx/1.18.0", which the server-version-exposed spore template extracts.
+  # The CVE heuristic enricher in physarum-maze maps this to a VulnerabilityCandidate
+  # for CVE-2021-23017 only, making vulnerability_candidates non-empty in the DiscoveryQuery.
   host-b:
-    image: nginx:alpine
+    image: nginx:1.18.0
     container_name: physarum-host-b
     networks:
       physarum-lab:
@@ -118,6 +126,12 @@ services:
       LLM_API_KEY: "${LLM_API_KEY:-}"
       # Set to true for lab evidence capture (logs full prompt + raw LLM response)
       PHYSARUM_LLM_LOG_PROMPTS: "${PHYSARUM_LLM_LOG_PROMPTS:-false}"
+      # Vulnerability intelligence mode: auto (offline+online fallback) | offline | online-required
+      PHYSARUM_VULN_INTEL_MODE: "${PHYSARUM_VULN_INTEL_MODE:-auto}"
+      # Timeout for online OSV advisory queries (ms)
+      PHYSARUM_VULN_INTEL_TIMEOUT_MS: "${PHYSARUM_VULN_INTEL_TIMEOUT_MS:-3000}"
+      # Path to offline advisory cache relative to working directory
+      PHYSARUM_VULN_INTEL_CACHE_DIR: "/advisory-cache"
     command: >
       --mode seed
       --interface eth0
@@ -127,4 +141,5 @@ services:
       --discovery-interval-secs 5
       --stimulus-timeout-secs 90
     volumes:
-      - ./lineage:/tmp   # lineage JSON written here for inspection
+      - ./lineage:/tmp                                     # lineage JSON written here for inspection
+      - ../examples/advisory-cache:/advisory-cache:ro     # offline advisory cache (read-only)
