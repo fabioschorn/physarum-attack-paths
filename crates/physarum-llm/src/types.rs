@@ -71,8 +71,8 @@ pub enum OsHintSource {
 
 /// CVE / vulnerability candidate associated with a service fingerprint finding.
 ///
-/// Populated by `physarum-maze::cve_heuristic` banner-heuristic enrichment
-/// (Issue #128) and future NVD/OSV feed enrichment. The LLM must treat
+/// Populated by `VulnerabilityIntelService` (Issue #131) via `LocalAdvisoryCache`,
+/// `OsvFeed`, and future NVD/vendor providers. The LLM must treat
 /// populated entries as prioritised exploit-path signals and reference the
 /// `cve_id` in its `reasoning_summary`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,8 +173,8 @@ pub struct PatternFindingSummary {
     pub is_actionable: bool,
     /// CVE / vulnerability candidates linked to this finding.
     ///
-    /// Populated by `physarum-maze::cve_heuristic` banner-heuristic enrichment
-    /// (Issue #128); future NVD/OSV feed enrichment in `physarum-spore` (PF-5+).
+    /// Populated by `VulnerabilityIntelService` (Issue #131) via `LocalAdvisoryCache`,
+    /// `OsvFeed`, and future NVD/vendor providers.
     /// When non-empty the LLM weights exploit-aware propagation paths higher.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vulnerability_candidates: Vec<VulnerabilityCandidate>,

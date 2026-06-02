@@ -19,7 +19,7 @@ The query includes:
   - `pattern_findings`: structured HTTP pattern evidence from physarum-sporangium.
     Each finding includes check_id, name, severity, confidence, matched_summary, and extracted values.
     Findings with is_actionable=true have severity >= low and confidence >= 0.7 — prioritise these.
-    Each finding may include `vulnerability_candidates`: CVE entries from banner-heuristic enrichment.
+    Each finding may include `vulnerability_candidates`: CVE entries from `VulnerabilityIntelService` (Issue #131) — sourced from `LocalAdvisoryCache`, `OsvFeed`, or future NVD/vendor providers.
     Fields: cve_id, cvss_score, matched_version, affected_range, exploit_class, impact, preconditions, confidence.
     When non-empty, use these fields to build a richer picture of the attack surface and prioritise exploit-aware paths.
   - `os_hint`: best-effort OS fingerprint (may be absent).
@@ -40,7 +40,7 @@ If any pattern_finding contains non-empty vulnerability_candidates:
        \"nginx/1.18.0 affected by CVE-2021-23017 (CVSS 7.7, MemoryCorruption); proposing Http propagation on port 80.\"
   3. If Exploit is in allowed_methods, propose PropagationMethod::Exploit with that cve_id.
   4. If Exploit is not allowed, use the next best method and note the CVE context in reasoning_summary.
-  5. Add to safety_notes: \"CVE match is banner-heuristic (unconfirmed) — not validated exploitation.\"
+  5. Add to safety_notes: \"CVE match from VulnerabilityIntelService — confidence per source field (LocalAdvisoryCache 0.85 / OsvFeed 0.75–0.50); not validated exploitation.\"
   6. Use `exploit_class`, `impact`, and `preconditions` to populate the strategy preconditions list
      and enrich safety_notes with context about what conditions must hold for the CVE to apply.
 
