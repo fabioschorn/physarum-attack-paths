@@ -1,0 +1,26 @@
+id: dns-txt-records
+
+info:
+  name: DNS TXT Record Enumeration
+  author: projectdiscovery
+  severity: info
+  description: |
+    Fetches all TXT records for the target domain. TXT records may reveal SPF/DKIM
+    configuration, domain ownership tokens, and other metadata useful for reconnaissance.
+  tags: dns,txt,info,enum
+
+dns:
+  - name: "{{FQDN}}"
+    type: TXT
+
+    matchers:
+      - type: word
+        words:
+          - "IN\tTXT"
+          - "IN TXT"
+        condition: or
+
+    extractors:
+      - type: dsl
+        dsl:
+          - "answer"

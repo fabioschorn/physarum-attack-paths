@@ -1,0 +1,29 @@
+id: openssh-detect
+
+info:
+  name: OpenSSH Server Detection
+  author: projectdiscovery
+  severity: info
+  description: Detects OpenSSH server version via SSH banner grab on port 22.
+  tags: tech,ssh,openssh,detect
+
+network:
+  - inputs:
+      - data: "\r\n"
+
+    host:
+      - "{{Hostname}}:22"
+
+    read-size: 256
+
+    matchers:
+      - type: word
+        words:
+          - "SSH-2.0-OpenSSH"
+
+    extractors:
+      - type: regex
+        name: version
+        group: 1
+        regex:
+          - "SSH-2\\.0-OpenSSH_([0-9]+\\.[0-9]+[^ \\r\\n]*)"

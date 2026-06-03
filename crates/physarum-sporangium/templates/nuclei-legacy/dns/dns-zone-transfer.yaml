@@ -1,0 +1,25 @@
+id: dns-zone-transfer
+
+info:
+  name: DNS Zone Transfer (AXFR) Allowed
+  author: projectdiscovery
+  severity: high
+  description: |
+    The DNS server allows zone transfer (AXFR) requests from arbitrary sources.
+    This exposes the complete DNS zone data — all hostnames, IPs, and records —
+    to any requester, aiding reconnaissance.
+  remediation: Restrict AXFR to authorized secondary name servers only.
+  reference:
+    - https://owasp.org/www-community/attacks/DNS_Zone_Transfer
+  tags: dns,zone-transfer,axfr,misconfig
+
+dns:
+  - name: "{{FQDN}}"
+    type: AXFR
+
+    matchers:
+      - type: word
+        words:
+          - "IN\tSOA"
+          - "IN SOA"
+        condition: or

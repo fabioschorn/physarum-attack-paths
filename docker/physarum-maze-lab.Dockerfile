@@ -62,4 +62,11 @@ RUN apt-get update && \
 COPY --from=builder /build/target/release/physarum-maze /usr/local/bin/physarum-maze
 RUN chmod +x /usr/local/bin/physarum-maze
 
+# Nuclei-compatible template library — baked into the image so the container
+# is fully self-contained. physarum-sporangium reads from PHYSARUM_TEMPLATE_DIR
+# at runtime; filter by PHYSARUM_TEMPLATE_TAGS / _SEVERITY / _IDS per lab.
+COPY crates/physarum-sporangium/templates/nuclei-legacy /templates/nuclei-legacy
+
+ENV PHYSARUM_TEMPLATE_DIR=/templates/nuclei-legacy
+
 ENTRYPOINT ["physarum-maze"]

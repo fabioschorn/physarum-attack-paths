@@ -25,6 +25,35 @@ fn info(name: &str, description: &str, severity: SeverityHint, tags: &[&str]) ->
         severity,
         tags: tags.iter().map(|s| s.to_string()).collect(),
         references: vec![],
+        cve_id: None,
+        cvss_score: None,
+        cwe_ids: vec![],
+    }
+}
+
+#[allow(dead_code)]
+fn http_template(
+    id: &str,
+    info: TemplateInfo,
+    http_check: crate::template::HttpCheck,
+    matchers: Vec<PatternMatcher>,
+    matchers_condition: MatchCondition,
+    extractors: Vec<PatternExtractor>,
+    stop_at_first_match: bool,
+) -> PatternTemplate {
+    PatternTemplate {
+        id: id.into(),
+        info,
+        protocol: PatternProtocol::Http,
+        http_check: Some(http_check),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
+        matchers,
+        matchers_condition,
+        extractors,
+        stop_at_first_match,
     }
 }
 
@@ -99,6 +128,10 @@ fn nginx_server_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![words_header("nginx-header", &["nginx"], true)],
         matchers_condition: MatchCondition::Or,
         extractors: vec![regex_extractor(
@@ -122,6 +155,10 @@ fn apache_server_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![words_header("apache-header", &["Apache"], false)],
         matchers_condition: MatchCondition::Or,
         extractors: vec![regex_extractor(
@@ -145,6 +182,10 @@ fn iis_server_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![words_header("iis-header", &["Microsoft-IIS"], false)],
         matchers_condition: MatchCondition::Or,
         extractors: vec![regex_extractor(
@@ -168,6 +209,10 @@ fn lighttpd_server_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![words_header("lighttpd-header", &["lighttpd"], true)],
         matchers_condition: MatchCondition::Or,
         extractors: vec![regex_extractor(
@@ -191,6 +236,10 @@ fn caddy_server_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![words_header("caddy-header", &["Caddy"], false)],
         matchers_condition: MatchCondition::Or,
         extractors: vec![kval_extractor("server-value", "server")],
@@ -209,6 +258,10 @@ fn openresty_server_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![words_header("openresty-header", &["openresty"], true)],
         matchers_condition: MatchCondition::Or,
         extractors: vec![regex_extractor(
@@ -234,6 +287,10 @@ fn php_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![words_header("php-header", &["PHP"], false)],
         matchers_condition: MatchCondition::Or,
         extractors: vec![regex_extractor(
@@ -257,6 +314,10 @@ fn asp_net_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![
             words_header("powered-by", &["ASP.NET"], false),
             words_header("aspnet-version", &["X-AspNet-Version"], true),
@@ -281,6 +342,10 @@ fn node_express_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![words_header("express-header", &["Express"], false)],
         matchers_condition: MatchCondition::Or,
         extractors: vec![kval_extractor("x-powered-by", "x-powered-by")],
@@ -301,6 +366,10 @@ fn http_status_ok() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![status_matcher("status-200", &[200])],
         matchers_condition: MatchCondition::Or,
         extractors: vec![],
@@ -319,6 +388,10 @@ fn http_redirect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![status_matcher("redirect-status", &[301, 302, 307, 308])],
         matchers_condition: MatchCondition::Or,
         extractors: vec![kval_extractor("location", "location")],
@@ -337,6 +410,10 @@ fn http_auth_required() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![status_matcher("status-401", &[401])],
         matchers_condition: MatchCondition::Or,
         extractors: vec![kval_extractor("www-authenticate", "www-authenticate")],
@@ -355,6 +432,10 @@ fn http_forbidden() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![status_matcher("status-403", &[403])],
         matchers_condition: MatchCondition::Or,
         extractors: vec![],
@@ -375,6 +456,10 @@ fn json_api_detect() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![words_header(
             "content-type-json",
             &["application/json"],
@@ -397,6 +482,10 @@ fn http_page_title() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![status_matcher("status-200", &[200])],
         matchers_condition: MatchCondition::Or,
         extractors: vec![regex_extractor(
@@ -420,6 +509,10 @@ fn server_version_exposed() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![PatternMatcher {
             name: "version-regex".into(),
             matcher_type: MatcherType::Regex {
@@ -457,6 +550,10 @@ fn default_nginx_page() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![
             status_matcher("status-200", &[200]),
             words_body("welcome-nginx", &["Welcome to nginx"], false),
@@ -478,6 +575,10 @@ fn default_apache_page() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![
             status_matcher("status-200", &[200]),
             words_body(
@@ -505,6 +606,10 @@ fn missing_x_frame_options() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![
             status_matcher("status-200", &[200]),
             PatternMatcher {
@@ -535,6 +640,10 @@ fn missing_hsts() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![
             status_matcher("status-200", &[200]),
             PatternMatcher {
@@ -565,6 +674,10 @@ fn missing_csp() -> PatternTemplate {
         ),
         protocol: PatternProtocol::Http,
         http_check: Some(HttpCheck::get("/")),
+        tcp_request: None,
+        dns_request: None,
+        ssl_request: None,
+        websocket_request: None,
         matchers: vec![
             status_matcher("status-200", &[200]),
             PatternMatcher {
@@ -622,6 +735,31 @@ pub fn all_templates() -> Vec<PatternTemplate> {
     for t in &templates {
         t.validate()
             .unwrap_or_else(|e| panic!("built-in template '{}' is invalid: {e}", t.id));
+    }
+
+    templates
+}
+
+/// Returns builtin templates merged with any YAML templates found in
+/// `PHYSARUM_TEMPLATE_DIR` (default: `templates/nuclei-legacy`), filtered
+/// by `PHYSARUM_TEMPLATE_TAGS`, `PHYSARUM_TEMPLATE_SEVERITY`, and
+/// `PHYSARUM_TEMPLATE_IDS`.
+///
+/// Builtin templates always take precedence — YAML templates with duplicate
+/// IDs are skipped.
+pub fn all_templates_with_yaml() -> Vec<PatternTemplate> {
+    let mut templates = all_templates();
+    let builtin_ids: std::collections::HashSet<String> =
+        templates.iter().map(|t| t.id.clone()).collect();
+
+    let dir = crate::yaml_loader::template_dir();
+    let filter = crate::yaml_loader::TemplateFilter::from_env();
+    let yaml_templates = crate::yaml_loader::load_nuclei_templates(&dir, &filter);
+
+    for t in yaml_templates {
+        if !builtin_ids.contains(&t.id) {
+            templates.push(t);
+        }
     }
 
     templates
