@@ -132,6 +132,11 @@ services:
       PHYSARUM_VULN_INTEL_TIMEOUT_MS: "${PHYSARUM_VULN_INTEL_TIMEOUT_MS:-3000}"
       # Path to offline advisory cache relative to working directory
       PHYSARUM_VULN_INTEL_CACHE_DIR: "/advisory-cache"
+      # Nuclei YAML template loader — filter by tags, severity, or specific IDs
+      # Empty = load all templates from PHYSARUM_TEMPLATE_DIR (baked into image)
+      PHYSARUM_TEMPLATE_TAGS: "${PHYSARUM_TEMPLATE_TAGS:-}"
+      PHYSARUM_TEMPLATE_SEVERITY: "${PHYSARUM_TEMPLATE_SEVERITY:-}"
+      PHYSARUM_TEMPLATE_IDS: "${PHYSARUM_TEMPLATE_IDS:-}"
     command: >
       --mode seed
       --interface eth0
