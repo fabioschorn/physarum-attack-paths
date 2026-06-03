@@ -57,6 +57,7 @@ tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 base64     = "0.22"
 hex        = "0.4"
 serde_yaml = "0.9"
+walkdir    = "2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

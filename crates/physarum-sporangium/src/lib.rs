@@ -65,6 +65,7 @@ pub mod tcp;
 pub mod template;
 pub mod websocket;
 pub mod workflow;
+pub mod yaml_loader;
 
 // ── Flat re-exports ───────────────────────────────────────────────────────────
 
@@ -72,7 +73,10 @@ pub mod workflow;
 pub use auth::{AuthProvider, AuthStrategy};
 
 // Catalog
-pub use catalog::all_templates;
+pub use catalog::{all_templates, all_templates_with_yaml};
+
+// YAML loader
+pub use yaml_loader::{load_nuclei_templates, template_dir, TemplateFilter};
 
 // DNS
 pub use dns::run_dns;

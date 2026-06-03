@@ -739,3 +739,28 @@ pub fn all_templates() -> Vec<PatternTemplate> {
 
     templates
 }
+
+/// Returns builtin templates merged with any YAML templates found in
+/// `PHYSARUM_TEMPLATE_DIR` (default: `templates/nuclei-legacy`), filtered
+/// by `PHYSARUM_TEMPLATE_TAGS`, `PHYSARUM_TEMPLATE_SEVERITY`, and
+/// `PHYSARUM_TEMPLATE_IDS`.
+///
+/// Builtin templates always take precedence — YAML templates with duplicate
+/// IDs are skipped.
+pub fn all_templates_with_yaml() -> Vec<PatternTemplate> {
+    let mut templates = all_templates();
+    let builtin_ids: std::collections::HashSet<String> =
+        templates.iter().map(|t| t.id.clone()).collect();
+
+    let dir = crate::yaml_loader::template_dir();
+    let filter = crate::yaml_loader::TemplateFilter::from_env();
+    let yaml_templates = crate::yaml_loader::load_nuclei_templates(&dir, &filter);
+
+    for t in yaml_templates {
+        if !builtin_ids.contains(&t.id) {
+            templates.push(t);
+        }
+    }
+
+    templates
+}
