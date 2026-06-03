@@ -260,6 +260,7 @@ struct NucleiHttpRequest {
     pub extractors: Vec<NucleiExtractor>,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "UPPERCASE")]
 enum NucleiHttpMethod {
@@ -289,6 +290,7 @@ struct NucleiDnsRequest {
     pub extractors: Vec<NucleiExtractor>,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "UPPERCASE")]
 enum NucleiDnsType {
@@ -326,6 +328,7 @@ struct NucleiSslRequest {
 struct NucleiNetworkRequest {
     #[serde(default)]
     pub inputs: Vec<NucleiNetworkInput>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub host: Vec<String>,
     #[serde(rename = "read-size", default = "default_read_size")]
