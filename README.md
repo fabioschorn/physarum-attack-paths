@@ -320,7 +320,7 @@ Utilities/
   CI and release automation.
 ```
 
-Local upstream source clones used for analysis, such as `nuclei/`, are ignored by `.gitignore` and must not be committed. Native behavior should be ported into Rust workspace crates instead of vendoring external projects.
+Local upstream source clones used for analysis (e.g. `nuclei/`) are ignored by `.gitignore` and must not be committed. Native behavior is ported into Rust workspace crates — the Nuclei engine and template library are fully ported into `physarum-sporangium` as of PR #133.
 
 ---
 
