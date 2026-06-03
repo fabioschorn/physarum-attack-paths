@@ -137,7 +137,7 @@ Matching logic:
 
 3. **`OnlineRequired` mode** is appropriate for integration tests and Docker Lab validation. It guarantees fresh OSV data and prevents stale cache from masking online failures.
 
-4. **physarum-sporangium PR #133** completes the full Nuclei feature parity (all protocols, matchers, extractors, generators, auth providers, workflows). The `nuclei/` folder can be removed from the repository after PR #133 merges.
+4. **physarum-sporangium PR #133** (merged 2026-06-02) completes the full Nuclei feature parity (all protocols, matchers, extractors, generators, auth providers, workflows). The `nuclei/` folder was a gitignored local analysis clone and was never tracked in the repository; it has been removed from the development machine. The full template library is now available via `crates/physarum-sporangium/templates/nuclei-legacy/`.
 
 ---
 
