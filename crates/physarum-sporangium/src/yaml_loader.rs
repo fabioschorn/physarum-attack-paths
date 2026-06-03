@@ -460,7 +460,11 @@ where
     let s = StringOrList::deserialize(deserializer)?;
     Ok(s.into_vec()
         .into_iter()
-        .flat_map(|s| s.split(',').map(|t| t.trim().to_lowercase()).collect::<Vec<_>>())
+        .flat_map(|s| {
+            s.split(',')
+                .map(|t| t.trim().to_lowercase())
+                .collect::<Vec<_>>()
+        })
         .filter(|s| !s.is_empty())
         .collect())
 }
@@ -497,11 +501,7 @@ impl NucleiTemplate {
             references: self.info.reference.into_vec(),
             cve_id: self.info.cve_id,
             cvss_score: self.info.cvss_score,
-            cwe_ids: self
-                .info
-                .cwe_id
-                .map(|c| c.into_vec())
-                .unwrap_or_default(),
+            cwe_ids: self.info.cwe_id.map(|c| c.into_vec()).unwrap_or_default(),
         };
 
         // Pick the first supported protocol block
@@ -515,7 +515,11 @@ impl NucleiTemplate {
             return Some(ssl_template(self.id, info, ssl));
         }
         // network: and tcp: are both raw TCP
-        let net = self.network.into_iter().next().or_else(|| self.tcp.into_iter().next());
+        let net = self
+            .network
+            .into_iter()
+            .next()
+            .or_else(|| self.tcp.into_iter().next());
         if let Some(net) = net {
             return Some(network_template(self.id, info, net));
         }
@@ -545,8 +549,16 @@ fn http_template(id: String, info: TemplateInfo, req: NucleiHttpRequest) -> Patt
         _ => HttpMethod::Get,
     };
 
-    let matchers = req.matchers.into_iter().filter_map(convert_matcher).collect();
-    let extractors = req.extractors.into_iter().filter_map(convert_extractor).collect();
+    let matchers = req
+        .matchers
+        .into_iter()
+        .filter_map(convert_matcher)
+        .collect();
+    let extractors = req
+        .extractors
+        .into_iter()
+        .filter_map(convert_extractor)
+        .collect();
 
     PatternTemplate {
         id,
@@ -585,8 +597,16 @@ fn dns_template(id: String, info: TemplateInfo, req: NucleiDnsRequest) -> Patter
         NucleiDnsType::AXFR | NucleiDnsType::ANY => DnsRecordType::ANY,
     };
 
-    let matchers = req.matchers.into_iter().filter_map(convert_matcher).collect();
-    let extractors = req.extractors.into_iter().filter_map(convert_extractor).collect();
+    let matchers = req
+        .matchers
+        .into_iter()
+        .filter_map(convert_matcher)
+        .collect();
+    let extractors = req
+        .extractors
+        .into_iter()
+        .filter_map(convert_extractor)
+        .collect();
 
     PatternTemplate {
         id,
@@ -613,8 +633,16 @@ fn dns_template(id: String, info: TemplateInfo, req: NucleiDnsRequest) -> Patter
 }
 
 fn ssl_template(id: String, info: TemplateInfo, req: NucleiSslRequest) -> PatternTemplate {
-    let matchers = req.matchers.into_iter().filter_map(convert_matcher).collect();
-    let extractors = req.extractors.into_iter().filter_map(convert_extractor).collect();
+    let matchers = req
+        .matchers
+        .into_iter()
+        .filter_map(convert_matcher)
+        .collect();
+    let extractors = req
+        .extractors
+        .into_iter()
+        .filter_map(convert_extractor)
+        .collect();
 
     PatternTemplate {
         id,
@@ -651,8 +679,16 @@ fn network_template(id: String, info: TemplateInfo, req: NucleiNetworkRequest) -
         })
         .collect();
 
-    let matchers = req.matchers.into_iter().filter_map(convert_matcher).collect();
-    let extractors = req.extractors.into_iter().filter_map(convert_extractor).collect();
+    let matchers = req
+        .matchers
+        .into_iter()
+        .filter_map(convert_matcher)
+        .collect();
+    let extractors = req
+        .extractors
+        .into_iter()
+        .filter_map(convert_extractor)
+        .collect();
 
     PatternTemplate {
         id,
@@ -692,9 +728,7 @@ fn convert_matcher(m: NucleiMatcher) -> Option<PatternMatcher> {
             all_must_match: matches!(m.condition, NucleiCondition::And),
             case_insensitive: m.case_insensitive,
         },
-        NucleiMatcherType::Regex => MatcherType::Regex {
-            patterns: m.regex,
-        },
+        NucleiMatcherType::Regex => MatcherType::Regex { patterns: m.regex },
         NucleiMatcherType::Status => MatcherType::Status { codes: m.status },
         NucleiMatcherType::Dsl => MatcherType::Dsl {
             expressions: m.dsl,
