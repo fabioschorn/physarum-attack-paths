@@ -1,0 +1,32 @@
+id: openssh-version-detect
+
+info:
+  name: OpenSSH Version Detection via Banner
+  author: projectdiscovery
+  severity: info
+  description: |
+    Reads the OpenSSH banner on port 22 to determine the exact server version.
+    The version string is used by VulnerabilityIntelService to match advisory ranges.
+  tags: network,ssh,openssh,detect,tech
+
+network:
+  - inputs:
+      - data: "\r\n"
+        read: 1024
+
+    host:
+      - "{{Hostname}}:22"
+
+    read-size: 256
+
+    matchers:
+      - type: word
+        words:
+          - "SSH-2.0-OpenSSH"
+
+    extractors:
+      - type: regex
+        name: version
+        group: 1
+        regex:
+          - "SSH-2\\.0-OpenSSH_([0-9]+\\.[0-9]+[^ \\r\\n]*)"

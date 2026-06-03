@@ -1,0 +1,32 @@
+id: missing-csp
+
+info:
+  name: Missing Content-Security-Policy Header
+  author: projectdiscovery
+  severity: low
+  description: |
+    The HTTP response does not include the Content-Security-Policy (CSP) header.
+    Without CSP, the application is more susceptible to cross-site scripting (XSS)
+    and other content-injection attacks.
+  remediation: Define and deploy a Content-Security-Policy header appropriate to the application.
+  reference:
+    - https://owasp.org/www-project-secure-headers/#content-security-policy
+  tags: misconfig,headers,csp,xss
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: header
+        words:
+          - "Content-Security-Policy"
+        negative: true
+        case-insensitive: true

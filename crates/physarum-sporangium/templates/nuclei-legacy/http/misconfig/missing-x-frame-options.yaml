@@ -1,0 +1,32 @@
+id: missing-x-frame-options
+
+info:
+  name: Missing X-Frame-Options Header
+  author: projectdiscovery
+  severity: low
+  description: |
+    The HTTP response does not include the X-Frame-Options header.
+    Without this header, the page may be loaded inside an iframe, enabling
+    clickjacking attacks.
+  remediation: Add X-Frame-Options: DENY or X-Frame-Options: SAMEORIGIN to responses.
+  reference:
+    - https://owasp.org/www-project-secure-headers/#x-frame-options
+  tags: misconfig,headers,clickjacking
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: header
+        words:
+          - "X-Frame-Options"
+        negative: true
+        case-insensitive: true

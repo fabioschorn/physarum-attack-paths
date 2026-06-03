@@ -1,0 +1,24 @@
+id: tls-version-detect
+
+info:
+  name: TLS Version Detection
+  author: projectdiscovery
+  severity: info
+  description: Identifies the negotiated TLS protocol version and cipher suite.
+  tags: ssl,tls,detect,tech
+
+ssl:
+  - address: "{{Host}}:{{Port}}"
+
+    matchers:
+      - type: dsl
+        dsl:
+          - "tls_version != ''"
+
+    extractors:
+      - type: dsl
+        dsl:
+          - "tls_version"
+          - "cipher"
+          - "subject"
+          - "not_after"

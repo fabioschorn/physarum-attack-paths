@@ -1,0 +1,27 @@
+id: ssl-self-signed-certificate
+
+info:
+  name: Self-Signed SSL/TLS Certificate
+  author: projectdiscovery
+  severity: medium
+  description: |
+    The SSL/TLS certificate is self-signed (issuer equals subject). Self-signed certificates
+    are not trusted by browsers or clients by default and may indicate a development or
+    misconfigured production service.
+  remediation: Replace with a certificate issued by a trusted Certificate Authority.
+  tags: ssl,tls,cert,self-signed,misconfig
+
+ssl:
+  - address: "{{Host}}:{{Port}}"
+
+    matchers:
+      - type: dsl
+        dsl:
+          - "self_signed == true"
+
+    extractors:
+      - type: dsl
+        dsl:
+          - "subject"
+          - "issuer"
+          - "fingerprint_sha256"

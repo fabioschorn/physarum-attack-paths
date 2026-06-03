@@ -1,0 +1,32 @@
+id: missing-hsts
+
+info:
+  name: Missing Strict-Transport-Security Header
+  author: projectdiscovery
+  severity: low
+  description: |
+    The HTTP response does not include the Strict-Transport-Security (HSTS) header.
+    Without HSTS, browsers may connect via plain HTTP even if HTTPS is available,
+    exposing the connection to downgrade attacks and MITM.
+  remediation: Add the header — e.g. Strict-Transport-Security: max-age=31536000; includeSubDomains
+  reference:
+    - https://owasp.org/www-project-secure-headers/#strict-transport-security
+  tags: misconfig,headers,hsts
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: word
+        part: header
+        words:
+          - "Strict-Transport-Security"
+        negative: true
+        case-insensitive: true
