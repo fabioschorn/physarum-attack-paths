@@ -22,27 +22,32 @@ The lab is structured in two phases:
 
 ## 2. Lab Topology
 
+Container A needs two network interfaces: one to reach Container B (isolated lab subnet), and one to reach the LLM API endpoint (external). Container B is **only** on the internal network — no Internet access.
+
 ```text
-┌─────────────────────────────────────┐
-│  Docker bridge: physarum-pf6        │
-│  subnet: 172.21.0.0/24             │
-│                                     │
-│  ┌─────────────────────────────┐   │
-│  │ Container A — physarum-maze │   │
-│  │   172.21.0.2                │   │
-│  │   seed mode, LLM enabled    │   │
-│  └────────────┬────────────────┘   │
-│               │ sense / probe       │
-│  ┌────────────▼────────────────┐   │
-│  │ Container B — vuln service  │   │
-│  │   172.21.0.3                │   │
-│  │   CVE RCE-capable target    │   │
-│  │   volume: /tmp/physarum     │   │
-│  └─────────────────────────────┘   │
-└─────────────────────────────────────┘
+Internet / LLM API (api.openai.com or Ollama on host)
+         │
+         │  physarum-pf6-external (Docker bridge, no internal: true)
+         │
+┌────────┴────────────────────────────────┐
+│ Container A — physarum-maze             │
+│   eth0: 172.21.0.2  (internal lab)     │
+│   eth1: DHCP        (external/LLM)     │
+└────────┬────────────────────────────────┘
+         │ sense / probe (eth0 only)
+         │  physarum-pf6-internal (internal: true — no Internet)
+         │
+┌────────┴────────────────────────────────┐
+│ Container B — vuln service              │
+│   172.21.0.3  (internal lab only)      │
+│   CVE RCE-capable target               │
+│   volume: /tmp/physarum                │
+└─────────────────────────────────────────┘
 ```
 
 Port 22 is intentionally **not** exposed on Container B. Container A discovers it via the scan profile, not via SSH.
+
+> **Why two networks:** `internal: true` on a Docker bridge disables all external routing for every container on that network. If Container A were only on the internal network, it could not reach the LLM API. The dual-network design isolates Container B from the Internet while leaving Container A's LLM path open.
 
 ---
 
@@ -227,7 +232,7 @@ physarum-maze contact: 2026-06-xx CVE-2021-31805 propagation attempt recorded
 - No exploit weaponization or payload execution beyond the minimal file write
 - No exfiltration
 - No lateral movement beyond the isolated 172.21.0.0/24 subnet
-- No Internet access from any container
+- Container B has no Internet access (internal network only)
 - Lab is destroyed after evidence is committed
 
 ### 6.3 Phase 2 Leads to Replication Design
@@ -251,7 +256,8 @@ These invariants apply to both phases and must be enforced at container runtime:
 | Invariant | Enforcement |
 |-----------|------------|
 | `exploit_enabled=false` by default | `physarum-maze` PolicyGate flag |
-| No Internet access from any container | `internal: true` on the bridge network |
+| Container B has no Internet access | `physarum-pf6-internal` with `internal: true` — Container B on this network only |
+| Container A can reach LLM API | Container A also on `physarum-pf6-external` (regular bridge) |
 | `LLM_API_KEY` never in lineage | `llm_api_key` field stripped before lineage write |
 | Operator IP masked | `<OPERATOR_IP>` in all committed files |
 | Lab destroyed after evidence | `docker compose down -v` after commit |
@@ -263,20 +269,35 @@ These invariants apply to both phases and must be enforced at container runtime:
 
 ```yaml
 # PF-6 two-container end-to-end lab (design skeleton — not yet implemented)
+#
+# Network design:
+#   physarum-pf6-internal  — isolated bridge (internal: true)
+#                            Container B is ONLY here: no Internet access
+#                            Container A uses eth0 on this network to sense/probe B
+#
+#   physarum-pf6-external  — regular bridge (Internet access allowed)
+#                            Container A uses eth1 on this network to reach the LLM API
+#
+# Container B cannot initiate connections to the Internet.
+# Container A can call the LLM API via eth1 and still probe Container B via eth0.
+
 networks:
-  physarum-pf6:
+  physarum-pf6-internal:
     driver: bridge
-    internal: true     # no Internet access
+    internal: true     # Container B: no Internet
     ipam:
       config:
         - subnet: 172.21.0.0/24
+
+  physarum-pf6-external:
+    driver: bridge     # Container A: LLM API reachable here
 
 services:
   host-b:
     image: vulhub/struts2:s2-062
     container_name: physarum-pf6-target
     networks:
-      physarum-pf6:
+      physarum-pf6-internal:     # internal only — no Internet
         ipv4_address: 172.21.0.3
     volumes:
       - ./pf6-target-volume:/tmp/physarum
@@ -287,8 +308,9 @@ services:
     depends_on:
       - host-b
     networks:
-      physarum-pf6:
+      physarum-pf6-internal:     # eth0 — used to sense/probe Container B
         ipv4_address: 172.21.0.2
+      physarum-pf6-external:     # eth1 — used to reach LLM API
     cap_add:
       - NET_RAW
       - NET_ADMIN
