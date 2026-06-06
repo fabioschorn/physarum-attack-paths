@@ -1119,11 +1119,26 @@ fn method_port(method: &PropagationMethod) -> Option<u16> {
 
 /// Collect deduplicated CVE IDs from all pattern-finding candidates.
 /// Computed once before the attempt loop; stable across retries.
+///
+/// Two sources:
+/// 1. `vulnerability_candidates` from VulnIntel advisory-cache lookup (generic templates
+///    with version extractors → LocalAdvisoryCache → CVE).
+/// 2. `check_id` when the template itself IS a CVE-specific template (e.g. CVE-2021-31805)
+///    — the template firing is direct evidence of that CVE; no advisory lookup needed.
 fn extract_cve_ids(summaries: &[PatternFindingSummary]) -> Vec<String> {
     let mut ids: Vec<String> = summaries
         .iter()
-        .flat_map(|f| f.vulnerability_candidates.iter().map(|c| c.cve_id.clone()))
+        .flat_map(|f| {
+            let from_candidates = f.vulnerability_candidates.iter().map(|c| c.cve_id.clone());
+            let from_template_id = if f.check_id.starts_with("CVE-") {
+                Some(f.check_id.clone())
+            } else {
+                None
+            };
+            from_candidates.chain(from_template_id)
+        })
         .collect();
+    ids.sort();
     ids.dedup();
     ids
 }
