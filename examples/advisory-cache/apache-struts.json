@@ -1,0 +1,24 @@
+[
+  {
+    "advisory_id": "CVE-2021-31805",
+    "ranges": [
+      { "introduced": "2.0.0", "fixed": "2.5.30" }
+    ],
+    "fixed_version": "2.5.30",
+    "affected_range": ">= 2.0.0, < 2.5.30",
+    "cvss_score": 9.8,
+    "severity": "Critical",
+    "description": "Apache Struts S2-062: incomplete fix for CVE-2020-17530 (S2-061) allows double OGNL evaluation via forced %{...} syntax in tag attributes — unauthenticated RCE via HTTP multipart Content-Type header (Struts 2.0.0–2.5.29).",
+    "impact": "Unauthenticated remote code execution via crafted multipart POST request with OGNL expression in Content-Type header.",
+    "exploit_class": "RemoteCodeExecution",
+    "preconditions": [
+      "Apache Struts 2 application accepting multipart form requests",
+      "Developer used forced OGNL evaluation (%{...}) on tag attributes with untrusted input"
+    ],
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2021-31805",
+      "https://cwiki.apache.org/confluence/display/WW/S2-062",
+      "https://github.com/Axx8/Struts2_S2-062_CVE-2021-31805"
+    ]
+  }
+]

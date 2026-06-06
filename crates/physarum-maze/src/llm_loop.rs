@@ -815,7 +815,7 @@ async fn enrich_with_patterns(
         return vec![];
     }
 
-    let templates = physarum_sporangium::all_templates();
+    let templates = physarum_sporangium::all_templates_with_yaml();
     let policy = RunPolicy {
         allowed_check_ids: templates.iter().map(|t| t.id.clone()).collect(),
         max_response_bytes: 32_768,
