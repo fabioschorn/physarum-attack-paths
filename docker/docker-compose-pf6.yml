@@ -13,8 +13,8 @@
 # Container A calls the LLM API via eth0 (external) and probes Container B via eth1 (internal).
 # Interface selection is automatic (--llm-allowed-cidr 172.16.0.0/12 covers both subnets).
 #
-# Phase 1 gate: lineage JSON must contain CVE-2020-17530 + policy_decision=Accepted + real LLM reasoning_summary
-# Phase 2 gate: ./pf6-target-volume must contain a file written by the organism
+# Phase 1 gate: lineage JSON must contain CVE candidate + policy_decision=Accepted + real LLM reasoning_summary
+# Phase 2 gate: physarum-maze binary must be running on Container B (via OGNL → pubkey → SCP → exec)
 #               Phase 2 does NOT begin without Manager approval of Phase 1 evidence.
 #
 # Usage:
@@ -44,7 +44,12 @@ networks:
 
 services:
   host-b:
-    image: vulhub/struts2:2.5.25
+    # Custom image: Struts 2.5.25 (CVE-2020-17530) + sshd on port 22.
+    # No keys pre-planted — ephemeral pubkey injected at runtime via OGNL exploit.
+    # Build: docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
+    #          --platform linux/amd64 -f docker/physarum-target-pf6.Dockerfile \
+    #          -t physarum-target-pf6:lab --load .
+    image: physarum-target-pf6:lab
     container_name: physarum-pf6-target
     networks:
       physarum-pf6-internal:     # internal only — no Internet

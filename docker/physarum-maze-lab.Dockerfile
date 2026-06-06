@@ -53,11 +53,13 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        openssh-client \
         sshpass \
         iputils-ping \
         ca-certificates \
         curl && \
     rm -rf /var/lib/apt/lists/*
+# openssh-client provides: ssh, scp, ssh-keygen (ephemeral keypair generation for exploit path)
 
 COPY --from=builder /build/target/release/physarum-maze /usr/local/bin/physarum-maze
 RUN chmod +x /usr/local/bin/physarum-maze

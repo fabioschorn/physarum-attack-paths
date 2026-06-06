@@ -116,8 +116,14 @@ mod tests {
             port: Some(7777),
         });
         round_trip(&BootstrapAction::ScpUpload {
-            local_path: "/tmp/physarum-maze".into(),
-            remote_path: "/tmp/physarum-maze".into(),
+            local_path: "__self__".into(),
+            remote_path: "/tmp/physarum/physarum-maze".into(),
+            user: Some("root".into()),
+        });
+        round_trip(&BootstrapAction::ScpUpload {
+            local_path: "/explicit/path".into(),
+            remote_path: "/tmp/physarum/physarum-maze".into(),
+            user: None,
         });
         round_trip(&BootstrapAction::ScpPullFromSource {
             source_ip: "10.0.0.1".into(),
@@ -129,7 +135,12 @@ mod tests {
             },
         });
         round_trip(&BootstrapAction::SshCommand {
-            command: "chmod +x /tmp/physarum-maze && /tmp/physarum-maze &".into(),
+            command: "nohup /tmp/physarum/physarum-maze --mode propagated &".into(),
+            user: Some("ec2-user".into()),
+        });
+        round_trip(&BootstrapAction::SshCommand {
+            command: "id".into(),
+            user: None,
         });
         round_trip(&BootstrapAction::Custom {
             description: "custom action".into(),
@@ -310,6 +321,7 @@ mod tests {
             }],
             attempt_number: 2,
             source_ip: Some("10.0.0.1".parse().unwrap()),
+            ephemeral_pubkey: Some("ssh-ed25519 AAAA... physarum-ephemeral".into()),
             pattern_findings: vec![
                 PatternFindingSummary {
                     check_id: "nginx-server-detect".into(),
@@ -419,6 +431,7 @@ mod tests {
             attempt_number: 1,
             pattern_findings: vec![],
             source_ip: None,
+            ephemeral_pubkey: None,
         };
 
         let strategy = client.query_propagation(&query).await.unwrap();
@@ -450,6 +463,7 @@ mod tests {
             attempt_number: 2,
             pattern_findings: vec![],
             source_ip: None,
+            ephemeral_pubkey: None,
         };
 
         let strategy = client.query_propagation(&query).await.unwrap();
@@ -478,6 +492,7 @@ mod tests {
             attempt_number: 1,
             pattern_findings: vec![],
             source_ip: None,
+            ephemeral_pubkey: None,
         };
 
         let strategy = client.query_propagation(&query).await.unwrap();
@@ -540,6 +555,7 @@ mod tests {
             attempt_number: 1,
             pattern_findings: vec![],
             source_ip: None,
+            ephemeral_pubkey: None,
         };
         let json = serde_json::to_string(&q).unwrap();
         // Empty pattern_findings must be omitted — backwards compat with v0.3.0 lineage.
