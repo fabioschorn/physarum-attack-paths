@@ -42,7 +42,7 @@ networks:
 
 services:
   host-b:
-    image: vulhub/struts2:s2-062
+    image: vulhub/struts2:2.5.25
     container_name: physarum-pf6-target
     networks:
       physarum-pf6-internal:     # internal only — no Internet

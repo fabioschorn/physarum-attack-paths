@@ -109,7 +109,7 @@ The target service must:
 ### 4.2 Recommended Candidate — Apache Struts 2.5.25 (CVE-2021-31805)
 
 ```yaml
-image: vulhub/struts2:s2-062   # CVE-2021-31805, OGNL injection RCE
+image: vulhub/struts2:2.5.25   # CVE-2021-31805, OGNL injection RCE (Struts 2.5.25 < 2.5.30 fix)
 ```
 
 | Property | Value |
@@ -294,7 +294,7 @@ networks:
 
 services:
   host-b:
-    image: vulhub/struts2:s2-062
+    image: vulhub/struts2:2.5.25
     container_name: physarum-pf6-target
     networks:
       physarum-pf6-internal:     # internal only — no Internet
