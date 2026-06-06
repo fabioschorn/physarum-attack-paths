@@ -308,7 +308,10 @@ mod tests {
     fn user_prompt_with_exploit_method() {
         let prompt = build_user_prompt(
             "{}",
-            &[PropagationMethodClass::Exploit, PropagationMethodClass::NoPath],
+            &[
+                PropagationMethodClass::Exploit,
+                PropagationMethodClass::NoPath,
+            ],
             "{}",
         );
         assert!(prompt.contains("Exploit"));

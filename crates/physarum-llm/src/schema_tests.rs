@@ -104,7 +104,10 @@ mod tests {
             path: "/upload".into(),
             body: "cmd=id".into(),
             port: Some(8080),
-            headers: vec![("Content-Type".into(), "application/x-www-form-urlencoded".into())],
+            headers: vec![(
+                "Content-Type".into(),
+                "application/x-www-form-urlencoded".into(),
+            )],
             accept_any_response: true,
         });
         round_trip(&BootstrapAction::HttpGet {

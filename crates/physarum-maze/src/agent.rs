@@ -65,7 +65,10 @@ impl LlmConfig {
             Arc::new(MockLlmClient::no_path("mock mode — no real LLM"))
         } else if endpoint.starts_with("mock-http") {
             // mock-http[:<port>] — e.g. mock-http:8080 for Struts/Jetty targets
-            let port: Option<u16> = endpoint.splitn(2, ':').nth(1).and_then(|p| p.parse().ok());
+            let port: Option<u16> = endpoint
+                .split_once(':')
+                .map(|x| x.1)
+                .and_then(|p| p.parse().ok());
             Arc::new(MockLlmClient::http_probe_with_plan("/", port, 0.9))
         } else if endpoint.starts_with("mock-exploit") {
             // mock-exploit[:<port>[:<user>]] — Phase 2 SSH-first dry-run
@@ -285,6 +288,7 @@ pub async fn run(mut cli: Cli) -> Result<()> {
 /// Decision order when guards pass:
 ///   A. LLM configured → llm_loop::run (adaptive profile from stimulus).
 ///   B. LLM absent → port-22 probe → SSH/SCP propagation fallback.
+#[allow(clippy::too_many_arguments)]
 async fn handle_candidate(
     src_ip: Ipv4Addr,
     stimulus: &str,
@@ -522,7 +526,7 @@ fn resolve_interface(interface: &str, allowed_cidr: Option<&str>) -> anyhow::Res
         .collect();
 
     // Higher prefix length = more specific subnet = preferred (internal NIC).
-    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    candidates.sort_by_key(|c| std::cmp::Reverse(c.1));
 
     if let Some((name, prefix)) = candidates.into_iter().next() {
         tracing::info!(

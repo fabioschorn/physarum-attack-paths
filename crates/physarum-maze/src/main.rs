@@ -106,6 +106,7 @@ pub struct Cli {
     ///   - PolicyGate allows PropagationMethod::Exploit
     ///   - A mini HTTP server on port 8001 serves the physarum-maze binary
     ///     so the OGNL payload on the target can download and execute it.
+    ///
     /// Lab-only. Do NOT enable outside an isolated test environment.
     #[arg(long, default_value_t = false, env = "PHYSARUM_EXPLOIT_ENABLED")]
     pub exploit_enabled: bool,

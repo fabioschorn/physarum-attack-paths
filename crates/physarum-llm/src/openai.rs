@@ -7,8 +7,8 @@ use tracing::{debug, warn};
 use crate::{
     client::{QueryFuture, TemplateFuture},
     prompt::{
-        build_template_selection_prompt, build_user_prompt, STRATEGY_SCHEMA,
-        SYSTEM_PROMPT, TEMPLATE_SELECTION_SYSTEM_PROMPT,
+        build_template_selection_prompt, build_user_prompt, STRATEGY_SCHEMA, SYSTEM_PROMPT,
+        TEMPLATE_SELECTION_SYSTEM_PROMPT,
     },
     types::{
         DiscoveryQuery, PropagationMethodClass, PropagationStrategy, TemplateSelectionQuery,
@@ -116,8 +116,8 @@ impl OpenAiCompatibleClient {
         &self,
         query: &TemplateSelectionQuery,
     ) -> Result<TemplateSelectionResponse> {
-        let query_json = serde_json::to_string(query)
-            .context("failed to serialize TemplateSelectionQuery")?;
+        let query_json =
+            serde_json::to_string(query).context("failed to serialize TemplateSelectionQuery")?;
 
         let user_prompt = build_template_selection_prompt(&query_json);
 
@@ -176,7 +176,7 @@ impl OpenAiCompatibleClient {
     async fn send_request(&self, request: &ChatRequest) -> Result<String> {
         let resp = self
             .http
-            .post(&self.completions_url())
+            .post(self.completions_url())
             .bearer_auth(&self.api_key)
             .json(request)
             .timeout(self.timeout)

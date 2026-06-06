@@ -156,10 +156,11 @@ impl MockLlmClient {
                     // Step 3: execute in background
                     BootstrapStep {
                         action: crate::types::BootstrapAction::SshCommand {
-                            command: "mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze \
+                            command:
+                                "mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze \
                                      && nohup /tmp/physarum/physarum-maze --mode propagated \
                                         >/tmp/physarum/agent.log 2>&1 &"
-                                .into(),
+                                    .into(),
                             user: Some(user.clone()),
                         },
                         target: String::new(),
@@ -195,7 +196,11 @@ impl MockLlmClient {
     /// pipeline end-to-end without a real LLM. The executor performs a real HTTP
     /// GET against the target so Container B must be reachable on the specified port.
     /// `port` defaults to 80 when None; pass 8080 for Struts/Jetty targets.
-    pub fn http_probe_with_plan(path: impl Into<String>, port: Option<u16>, confidence: f32) -> Self {
+    pub fn http_probe_with_plan(
+        path: impl Into<String>,
+        port: Option<u16>,
+        confidence: f32,
+    ) -> Self {
         let p = path.into();
         let port_label = port.map(|p| p.to_string()).unwrap_or_else(|| "80".into());
         Self::new(PropagationStrategy {
@@ -222,7 +227,9 @@ impl MockLlmClient {
                 }],
             }),
             confidence,
-            reasoning_summary: format!("Mock HTTP probe: GET {p}:{port_label} — Docker Lab cycle validation."),
+            reasoning_summary: format!(
+                "Mock HTTP probe: GET {p}:{port_label} — Docker Lab cycle validation."
+            ),
             preconditions: vec![format!("Port {port_label} open")],
             validation_check: Some(format!("HTTP 200 from target:{port_label}")),
             safety_notes: vec!["Mock client — Docker Lab only.".into()],
@@ -251,9 +258,7 @@ impl LlmClient for MockLlmClient {
         Box::pin(async move {
             Ok(TemplateSelectionResponse {
                 selected_ids,
-                reasoning: format!(
-                    "Mock: selected {count} rce/cve templates from catalog."
-                ),
+                reasoning: format!("Mock: selected {count} rce/cve templates from catalog."),
             })
         })
     }

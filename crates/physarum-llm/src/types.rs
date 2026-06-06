@@ -445,9 +445,7 @@ pub enum BootstrapAction {
         user: Option<String>,
     },
     /// Must be explicitly permitted by lab policy before execution.
-    Custom {
-        description: String,
-    },
+    Custom { description: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
