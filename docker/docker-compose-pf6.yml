@@ -1,0 +1,86 @@
+# PF-6 two-container end-to-end lab
+#
+# Network design:
+#   physarum-pf6-internal  — isolated bridge (internal: true)
+#                            Container B is ONLY here: no Internet access
+#                            Container A uses eth0 on this network to sense/probe B
+#
+#   physarum-pf6-external  — regular bridge (Internet access allowed)
+#                            Container A uses eth1 on this network to reach the LLM API
+#
+# Container B cannot initiate connections to the Internet.
+# Container A can call the LLM API via eth1 and still probe Container B via eth0.
+#
+# Phase 1 gate: lineage JSON must contain CVE-2021-31805 + policy_decision=Accepted
+# Phase 2 gate: ./pf6-target-volume must contain a file written by the organism
+#               Phase 2 does NOT begin without Manager approval of Phase 1 evidence.
+#
+# Usage:
+#   LLM_API_KEY=sk-... PHYSARUM_LLM_LOG_PROMPTS=true \
+#     docker compose -f docker/docker-compose-pf6.yml up --abort-on-container-exit
+#
+# Build image first:
+#   docker buildx build \
+#     --builder cloud-expertsonline-physarum-attack-paths \
+#     --platform linux/amd64 \
+#     -f docker/physarum-maze-lab.Dockerfile \
+#     -t physarum-maze:lab --load .
+#
+# After evidence committed:
+#   docker compose -f docker/docker-compose-pf6.yml down -v
+
+networks:
+  physarum-pf6-internal:
+    driver: bridge
+    internal: true     # Container B: no Internet
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
+
+  physarum-pf6-external:
+    driver: bridge     # Container A: LLM API reachable here
+
+services:
+  host-b:
+    image: vulhub/struts2:s2-062
+    container_name: physarum-pf6-target
+    networks:
+      physarum-pf6-internal:     # internal only — no Internet
+        ipv4_address: 172.21.0.3
+    volumes:
+      - ./pf6-target-volume:/tmp/physarum
+    restart: "no"
+
+  host-a:
+    image: physarum-maze:lab
+    container_name: physarum-pf6-agent
+    depends_on:
+      - host-b
+    networks:
+      physarum-pf6-internal:     # eth0 — used to sense/probe Container B
+        ipv4_address: 172.21.0.2
+      physarum-pf6-external:     # eth1 — used to reach LLM API
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      RUST_LOG: "physarum_maze=debug,physarum_llm=debug,physarum_sporangium=info"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      PHYSARUM_LLM_LOG_PROMPTS: "${PHYSARUM_LLM_LOG_PROMPTS:-false}"
+      PHYSARUM_VULN_INTEL_MODE: "${PHYSARUM_VULN_INTEL_MODE:-auto}"
+      PHYSARUM_VULN_INTEL_CACHE_DIR: "/advisory-cache"
+      PHYSARUM_TEMPLATE_DIR: "/templates/nuclei-legacy"
+      PHYSARUM_TEMPLATE_TAGS: "${PHYSARUM_TEMPLATE_TAGS:-rce,cve}"
+      PHYSARUM_TEMPLATE_SEVERITY: "${PHYSARUM_TEMPLATE_SEVERITY:-critical,high}"
+    command: >
+      --mode seed
+      --interface eth0
+      --llm-endpoint ${PHYSARUM_LLM_ENDPOINT:-mock-http}
+      --llm-model ${PHYSARUM_LLM_MODEL:-gpt-4o-mini}
+      --llm-allowed-cidr 172.21.0.0/24
+      --discovery-interval-secs 5
+      --stimulus-timeout-secs 120
+    volumes:
+      - ./lineage:/tmp
+      - ../examples/advisory-cache:/advisory-cache:ro
+    restart: "no"
