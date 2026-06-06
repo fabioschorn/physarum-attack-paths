@@ -31,10 +31,10 @@ Internet / LLM API (api.openai.com or Ollama on host)
          │
 ┌────────┴────────────────────────────────┐
 │ Container A — physarum-maze             │
-│   eth0: 172.21.0.2  (internal lab)     │
-│   eth1: DHCP        (external/LLM)     │
+│   eth0: DHCP        (external/LLM)     │
+│   eth1: 172.21.0.2  (internal lab)    │
 └────────┬────────────────────────────────┘
-         │ sense / probe (eth0 only)
+         │ sense / probe (eth1 — internal)
          │  physarum-pf6-internal (internal: true — no Internet)
          │
 ┌────────┴────────────────────────────────┐
@@ -78,7 +78,7 @@ PHYSARUM_TEMPLATE_SEVERITY=critical,high
 Runtime command:
 ```bash
 --mode seed
---interface eth0
+--interface eth1
 --llm-endpoint ${PHYSARUM_LLM_ENDPOINT}
 --llm-model ${PHYSARUM_LLM_MODEL}
 --llm-allowed-cidr 172.21.0.0/24

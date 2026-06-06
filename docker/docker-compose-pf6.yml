@@ -74,7 +74,7 @@ services:
       PHYSARUM_TEMPLATE_SEVERITY: "${PHYSARUM_TEMPLATE_SEVERITY:-critical,high}"
     command: >
       --mode seed
-      --interface eth0
+      --interface eth1
       --llm-endpoint ${PHYSARUM_LLM_ENDPOINT:-mock-http}
       --llm-model ${PHYSARUM_LLM_MODEL:-gpt-4o-mini}
       --llm-allowed-cidr 172.21.0.0/24
