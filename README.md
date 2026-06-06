@@ -51,13 +51,15 @@ The current project focus is the `physarum-maze` organism path: adaptive sensing
 | Native scanner (`physarum-scan` / `physarum-scanner`) | ✔ implemented |
 | Structured sensing (`SensingProfile`, `SensingResult`, `PortScan`) | ✔ implemented |
 | Adaptive service classification (`ConfirmedWeb`, `LikelyWeb`, `UnknownNeedsMoreSensing`, `ConfirmedNonWeb`) | ✔ implemented |
-| Nuclei-inspired native evidence engine (`physarum-spore` / `physarum-sporangium`) | ✔ implemented as native Rust pattern evidence layer |
+| Nuclei-inspired native evidence engine (`physarum-spore` / `physarum-sporangium`) | ✔ complete Rust port — all protocols, matchers, extractors, generators (PR #133) |
+| Nuclei-legacy template library (13,264 templates baked into Docker image) | ✔ imported and YAML loader implemented (PR #133) |
 | Maze organism (`physarum-maze`) | ✔ primary active binary |
 | LLM contracts and OpenAI-compatible client (`physarum-llm`) | ✔ implemented and Docker-validated |
 | Real LLM Docker Lab | ✔ PF-4 validated |
-| Adaptive startup/runtime sensing profiles | ✔ PF-5 / Issue #126 validated after PR #127 merge |
-| CVE-aware spore enrichment and LLM exploit-path proposal evidence | next — Issue #128 |
-| AWS Lab with real LLM | planned after Docker evidence gates |
+| Adaptive startup/runtime sensing profiles | ✔ PF-5 / Issue #126 validated (PR #127) |
+| Dynamic vulnerability intelligence pipeline (LocalAdvisoryCache + OsvFeed) | ✔ PF-5.2 / Issue #131 — real LLM Docker Lab evidence committed (PR #132, #133) |
+| PF-6 — two-container end-to-end lab (CVE RCE-capable target, Phase 1 + Phase 2) | **next** — Issue #135 design complete |
+| AWS Lab with real LLM | planned after PF-6 Docker evidence gates |
 | Gate N secure identity / mTLS / signed lineage | planned after LLM/evidence loop stabilizes |
 
 The current release line uses these primary binaries:
@@ -201,23 +203,27 @@ The evidence pipeline is intentionally layered.
 10. Lineage record
 ```
 
-### CVE-aware enrichment
+### PF-5.2 — Dynamic vulnerability intelligence pipeline (completed)
 
-Issue #128 tracks the next step: CVE-aware spore enrichment and LLM exploit-path proposal evidence.
-
-The expected model is:
+Issue #131 (PR #132, #133) implemented and validated the full CVE-aware enrichment pipeline:
 
 ```text
 service/version/banner evidence
-  -> physarum-spore CVE enrichment
-  -> vulnerability_candidates in DiscoveryQuery
-  -> LLM identifies likely CVE/path
-  -> LLM proposes exploit-path strategy
-  -> agent logs proposal in LlmAttemptEvidence / lineage
-  -> PolicyGate remains final decision boundary
+  → physarum-spore extracts server version
+  → VulnerabilityIntelService (LocalAdvisoryCache 0.85 / OsvFeed 0.75–0.50)
+  → vulnerability_candidates in DiscoveryQuery
+  → LLM references CVE in reasoning_summary
+  → PolicyGate decision recorded in lineage
 ```
 
-For this milestone, exploit execution does **not** need to be validated. The Docker Lab must prove that the LLM receives CVE-enriched evidence and returns a structured proposal that is recorded by the agent.
+Evidence: `examples/lab-evidence/physarum-lineage-pf52-docker-lab.json` — real GPT-4o-mini run, CVE-2021-23017 correctly matched for nginx/1.18.0.
+
+### PF-6 — Two-container end-to-end lab (next)
+
+The next milestone proves the full organism pipeline against a genuinely vulnerable target (CVE RCE-capable service). Design: `General-Docs/PF6_TWO_CONTAINER_END_TO_END_DOCKER_LAB.md`.
+
+Phase 1 validates the dynamic pipeline (scan → spore → VulnIntel → LLM → lineage) with no hardcoded paths.
+Phase 2 begins only after Container B's volume receives a file from the organism.
 
 ---
 
@@ -335,7 +341,8 @@ Local upstream source clones used for analysis (e.g. `nuclei/`) are ignored by `
 | `examples/aws-lab/terraform` | EC2/VPC Mode 1, Mode 2, tc/netem, Gate K/K.1 | ✔ validated |
 | `examples/aws-lab/terraform-pf1` | 7-node autonomous expansion maze | ✔ validated |
 | `examples/aws-lab/terraform-pf2` | 9-node adaptive re-routing with TCP stimulus and secondary conduits | ✔ validated |
-| Future Docker CVE Lab | CVE-aware spore enrichment and LLM proposal evidence | next — Issue #128 |
+| `examples/lab-evidence/physarum-lineage-pf52-docker-lab.json` | PF-5.2 real LLM — CVE-2021-23017 enrichment, full pipeline evidence | ✔ Issue #131 (PR #132, #133) |
+| `docker/docker-compose-pf6.yml` _(pending)_ | PF-6 two-container end-to-end lab — CVE RCE-capable target, Phase 1 + Phase 2 | **next** — Issue #135 |
 | Future AWS LLM Lab | Real LLM reasoning in owned AWS lab | planned after Docker evidence gates |
 | `formal/tla` | Formal models checked with TLC | ✔ implemented |
 
@@ -497,29 +504,35 @@ Git helper scripts live under `git-scripts/`:
 | Issue #114 | Structured scanner sensing layer | ✔ done |
 | Issue #115 | Native Nuclei-inspired evidence engine | ✔ implemented as `physarum-spore` / `physarum-sporangium` |
 | Issue #126 | Adaptive sensing profiles for startup, ICMP, TCP/eBPF | ✔ ready/complete after PR #127 merge |
-| Issue #128 | CVE-aware spore enrichment and LLM exploit-path proposal evidence | next |
-| AWS LLM Lab | Real LLM in owned AWS lab | planned after Docker #128 proof |
+| Issue #131 | Dynamic vulnerability intelligence pipeline (LocalAdvisoryCache + OsvFeed) | ✔ PF-5.2 (PR #132, #133) |
+| Issue #135 | PF-6 two-container end-to-end Docker Lab design | ✔ design complete |
+| PF-6 Phase 1 | Full dynamic pipeline against CVE RCE-capable target | **next** |
+| PF-6 Phase 2 | Container B volume write — replication discussion gate | after Phase 1 proof |
+| AWS LLM Lab | Real LLM in owned AWS lab | planned after PF-6 Docker evidence gates |
 | Gate N | Secure organism identity, mTLS, signed lineage | planned |
 
 ---
 
 ## Planned evolution
 
-### Issue #128 — CVE-aware evidence and LLM proposal
+### PF-6 — Two-container end-to-end Docker Lab
 
-The next Docker proof should demonstrate:
+The next Docker proof operates against a genuinely vulnerable service (CVE RCE-capable). See `General-Docs/PF6_TWO_CONTAINER_END_TO_END_DOCKER_LAB.md` for the full design.
+
+Phase 1 must demonstrate the complete dynamic pipeline with no hardcoded paths:
 
 ```text
-service/version/banner evidence
-  -> vulnerability_candidates
-  -> DiscoveryQuery
-  -> LLM identifies likely CVE/path
-  -> LLM returns exploit-path proposal
-  -> PolicyGate evaluates
-  -> lineage records
+startup-sensing
+  → physarum-scan discovers target port
+  → physarum-spore extracts service/version
+  → VulnerabilityIntelService matches CVE from advisory cache
+  → DiscoveryQuery with vulnerability_candidates
+  → LLM reasoning references CVE
+  → PolicyGate accepts/records
+  → lineage committed as evidence
 ```
 
-This is a reasoning/evidence milestone. It does not require exploit execution.
+Phase 2 begins only after Phase 1 lineage is committed and the Manager confirms the organism left a verifiable trace on Container B's volume.
 
 ### Gate N — secure organism identity
 
