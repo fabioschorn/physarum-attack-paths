@@ -1,17 +1,19 @@
 # PF-6 two-container end-to-end lab
 #
 # Network design:
+#   physarum-pf6-external  — regular bridge (Internet access allowed)
+#                            Container A eth0 — Docker sorts alphabetically, so external=eth0
+#                            Container A reaches LLM API on this interface
+#
 #   physarum-pf6-internal  — isolated bridge (internal: true)
 #                            Container B is ONLY here: no Internet access
-#                            Container A uses eth0 on this network to sense/probe B
-#
-#   physarum-pf6-external  — regular bridge (Internet access allowed)
-#                            Container A uses eth1 on this network to reach the LLM API
+#                            Container A eth1 — used to sense/probe Container B
 #
 # Container B cannot initiate connections to the Internet.
-# Container A can call the LLM API via eth1 and still probe Container B via eth0.
+# Container A calls the LLM API via eth0 (external) and probes Container B via eth1 (internal).
+# Interface selection is automatic (--llm-allowed-cidr 172.16.0.0/12 covers both subnets).
 #
-# Phase 1 gate: lineage JSON must contain CVE-2021-31805 + policy_decision=Accepted
+# Phase 1 gate: lineage JSON must contain CVE-2020-17530 + policy_decision=Accepted + real LLM reasoning_summary
 # Phase 2 gate: ./pf6-target-volume must contain a file written by the organism
 #               Phase 2 does NOT begin without Manager approval of Phase 1 evidence.
 #
@@ -57,9 +59,9 @@ services:
     depends_on:
       - host-b
     networks:
-      physarum-pf6-internal:     # eth0 — used to sense/probe Container B
+      physarum-pf6-internal:     # eth1 — Docker sorts alphabetically: external < internal → eth0=ext, eth1=int
         ipv4_address: 172.21.0.2
-      physarum-pf6-external:     # eth1 — used to reach LLM API
+      physarum-pf6-external:     # eth0 — used to reach LLM API (external bridge)
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -74,10 +76,9 @@ services:
       PHYSARUM_TEMPLATE_SEVERITY: "${PHYSARUM_TEMPLATE_SEVERITY:-critical,high}"
     command: >
       --mode seed
-      --interface eth1
       --llm-endpoint ${PHYSARUM_LLM_ENDPOINT:-mock-http}
       --llm-model ${PHYSARUM_LLM_MODEL:-gpt-4o-mini}
-      --llm-allowed-cidr 172.21.0.0/24
+      --llm-allowed-cidr 172.16.0.0/12
       --discovery-interval-secs 5
       --stimulus-timeout-secs 120
     volumes:

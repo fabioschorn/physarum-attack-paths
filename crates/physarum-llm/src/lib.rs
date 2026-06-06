@@ -13,7 +13,7 @@ pub mod prompt;
 pub mod schema_tests;
 pub mod types;
 
-pub use client::{LlmClient, QueryFuture};
+pub use client::{LlmClient, QueryFuture, TemplateFuture};
 pub use mock::MockLlmClient;
 pub use openai::OpenAiCompatibleClient;
 pub use policy::{PolicyGate, MAX_ATTEMPTS, MIN_CONFIDENCE};
@@ -22,6 +22,6 @@ pub use types::{
     ExecutionResultSummary, ExpectedResult, HttpMethod, LineageSummary, LlmAttemptEvidence,
     NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyRejectionReason,
     PortScan, PortState, PropagationMethod, PropagationMethodClass, PropagationStrategy,
-    RejectedStrategy, SecretRef, SecretSource, SshAuth, TransportProtocol, VulnerabilityCandidate,
-    VulnerabilitySource,
+    RejectedStrategy, SecretRef, SecretSource, SshAuth, TemplateMeta, TemplateSelectionQuery,
+    TemplateSelectionResponse, TransportProtocol, VulnerabilityCandidate, VulnerabilitySource,
 };

