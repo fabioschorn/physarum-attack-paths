@@ -1,5 +1,26 @@
 [
   {
+    "advisory_id": "CVE-2020-17530",
+    "ranges": [
+      { "introduced": "2.0.0", "fixed": "2.5.26" }
+    ],
+    "fixed_version": "2.5.26",
+    "affected_range": ">= 2.0.0, < 2.5.26",
+    "cvss_score": 9.8,
+    "severity": "Critical",
+    "description": "Apache Struts S2-059: forced OGNL evaluation via %{...} syntax on tag attributes in Struts 2.0.0–2.5.25 allows unauthenticated RCE (same root cause as S2-061 and S2-062).",
+    "impact": "Unauthenticated remote code execution via forced OGNL evaluation in Struts tag attribute processing.",
+    "exploit_class": "RemoteCodeExecution",
+    "preconditions": [
+      "Apache Struts 2 application using %{...} forced evaluation on tag attributes",
+      "Attacker can control the evaluated value"
+    ],
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2020-17530",
+      "https://cwiki.apache.org/confluence/display/WW/S2-059"
+    ]
+  },
+  {
     "advisory_id": "CVE-2021-31805",
     "ranges": [
       { "introduced": "2.0.0", "fixed": "2.5.30" }
