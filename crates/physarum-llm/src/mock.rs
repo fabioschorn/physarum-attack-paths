@@ -191,24 +191,26 @@ impl MockLlmClient {
 
     /// Returns an HTTP strategy WITH a real bootstrap plan (HttpGet step).
     ///
-    /// Used by `--llm-endpoint mock-http` in the Docker Lab to prove the full
+    /// Used by `--llm-endpoint mock-http[:<port>]` in the Docker Lab to prove the full
     /// pipeline end-to-end without a real LLM. The executor performs a real HTTP
     /// GET against the target so Container B must be reachable on the specified port.
-    pub fn http_probe_with_plan(path: impl Into<String>, confidence: f32) -> Self {
+    /// `port` defaults to 80 when None; pass 8080 for Struts/Jetty targets.
+    pub fn http_probe_with_plan(path: impl Into<String>, port: Option<u16>, confidence: f32) -> Self {
         let p = path.into();
+        let port_label = port.map(|p| p.to_string()).unwrap_or_else(|| "80".into());
         Self::new(PropagationStrategy {
             method: PropagationMethod::Http {
                 path: p.clone(),
                 http_method: crate::types::HttpMethod::Get,
                 headers: vec![],
-                port: None,
+                port,
             },
             artifact_type: ArtifactType::HttpRequest,
             bootstrap_plan: Some(BootstrapPlan {
                 steps: vec![BootstrapStep {
                     action: crate::types::BootstrapAction::HttpGet {
                         path: p.clone(),
-                        port: None,
+                        port,
                     },
                     target: String::new(), // filled at runtime from target IP
                     timeout_ms: 5_000,
@@ -220,9 +222,9 @@ impl MockLlmClient {
                 }],
             }),
             confidence,
-            reasoning_summary: format!("Mock HTTP probe: GET {p} — Docker Lab cycle validation."),
-            preconditions: vec!["Port 80 open".into()],
-            validation_check: Some("HTTP 200 from target".into()),
+            reasoning_summary: format!("Mock HTTP probe: GET {p}:{port_label} — Docker Lab cycle validation."),
+            preconditions: vec![format!("Port {port_label} open")],
+            validation_check: Some(format!("HTTP 200 from target:{port_label}")),
             safety_notes: vec!["Mock client — Docker Lab only.".into()],
         })
     }

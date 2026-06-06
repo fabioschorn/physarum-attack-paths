@@ -151,8 +151,10 @@ RULES:
   When CVE candidates are present, include the most relevant cve_id in this sentence.
 - `safety_notes` must list any side effects or risks of the proposed strategy.
 - PORT RULE: For Http method and HttpGet/HttpPost bootstrap steps, set `port` to the exact TCP port
-  observed in the `ports` scan list. Do NOT default to 80 unless port 80 is explicitly listed.
-  Example: if port 8080 is open, set `\"port\": 8080` in both the method and the bootstrap step.
+  observed in the `ports` scan list. Never guess or default — look up the actual open port in the
+  discovery query and copy that integer verbatim into every port field in your response.
+  The port placeholder values shown in the schema below are NOT defaults — replace them with
+  the real port from the scan (e.g. 80, 443, 8080, 8443, or whatever the scan shows).
 
 RESPONSE FORMAT:
 Return ONLY valid JSON matching the PropagationStrategy schema.
@@ -192,7 +194,7 @@ fn method_label(m: &PropagationMethodClass) -> &'static str {
 pub const STRATEGY_SCHEMA: &str = r#"{
   "method": {
     "Ssh":     { "user": "<string>", "auth": "EmptyPassword | PrivateKey" },
-    "Http":    { "path": "<string>", "port": 80, "http_method": "Get | Post | Put", "headers": [] },
+    "Http":    { "path": "<string>", "port": "<observed_port_integer>", "http_method": "Get | Post | Put", "headers": [] },
     "Exploit": { "cve": "<CVE-ID>" },
     "Custom":  { "description": "<string>" },
     "NoPath":  { "reason": "<string>" }
@@ -205,7 +207,7 @@ pub const STRATEGY_SCHEMA: &str = r#"{
           "HttpPost": {
             "path": "<vulnerable endpoint>",
             "body": "",
-            "port": 8080,
+            "port": "<observed_port_integer>",
             "headers": [["<inject header>", "<CVE-specific payload>"]],
             "accept_any_response": true
           }

@@ -24,9 +24,9 @@ use physarum_llm::{
     RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
-    result_from_open_port, EvidenceSource as ScanEvidenceSource, NextProbeHint,
-    OsHintSource as ScanOsHintSource, PortList, Scanner, SchemeHint, SensingProfile,
-    STIMULUS_PORTS,
+    effective_stimulus_ports, result_from_open_port, EvidenceSource as ScanEvidenceSource,
+    NextProbeHint, OsHintSource as ScanOsHintSource, PortList, Scanner, SchemeHint,
+    SensingProfile,
 };
 use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
@@ -380,7 +380,12 @@ async fn fingerprint(
     profile: SensingProfile,
 ) -> Vec<physarum_scanner::SensingResult> {
     let params = profile.params();
-    let port_list = PortList::explicit(params.port_subset.unwrap_or(STIMULUS_PORTS).to_vec());
+    let port_list = PortList::explicit(
+        params
+            .port_subset
+            .map(|s| s.to_vec())
+            .unwrap_or_else(effective_stimulus_ports),
+    );
     match Scanner::new(vec![IpAddr::V4(target)], port_list)
         .batch_size(params.batch_size)
         .timeout_ms(params.timeout_ms)
@@ -866,6 +871,7 @@ async fn enrich_with_patterns(
     selected_ids: &[String],
 ) -> Vec<PatternFinding> {
     let mut web_results: Vec<(u16, Option<String>)> = Vec::new(); // (port, scheme_str)
+    let mut non_web_results: Vec<u16> = Vec::new();               // ConfirmedNonWeb ports (FTP, SMTP, …)
 
     for r in sensing_results {
         match resolve_classification(r, target).await {
@@ -896,13 +902,14 @@ async fn enrich_with_patterns(
             ServiceClassification::ConfirmedNonWeb => {
                 tracing::debug!(
                     %target, port = r.port, service_guess = ?r.service_guess,
-                    "ConfirmedNonWeb — spore skipped, forwarded to LLM via PortScan"
+                    "ConfirmedNonWeb — queued for TCP template probing"
                 );
+                non_web_results.push(r.port);
             }
         }
     }
 
-    if web_results.is_empty() {
+    if web_results.is_empty() && non_web_results.is_empty() {
         return vec![];
     }
 
@@ -941,7 +948,8 @@ async fn enrich_with_patterns(
         }
     };
 
-    let tasks: Vec<_> = web_results
+    // ── HTTP probing for web ports ────────────────────────────────────────────
+    let http_tasks: Vec<_> = web_results
         .iter()
         .flat_map(|(port, scheme)| {
             let port = *port;
@@ -960,7 +968,7 @@ async fn enrich_with_patterns(
                         Err(e) => {
                             tracing::debug!(
                                 %target, port, check_id = %template.id,
-                                err = %e, "sporangium template probe error"
+                                err = %e, "HTTP template probe error"
                             );
                             vec![]
                         }
@@ -970,13 +978,89 @@ async fn enrich_with_patterns(
         })
         .collect();
 
-    stream::iter(tasks)
+    let mut all_findings: Vec<PatternFinding> = stream::iter(http_tasks)
         .buffer_unordered(MAX_ENRICH_CONCURRENCY)
         .collect::<Vec<_>>()
         .await
         .into_iter()
         .flatten()
-        .collect()
+        .collect();
+
+    /*
+     * ─────────────────────────────────────────────────────────────────────────
+     * EXPANSION POINT — Non-web protocol probing (Attack Path expansion gate)
+     *
+     * Each `ConfirmedNonWeb` port (FTP :21, SMTP :25, POP3 :110, IMAP :143, …)
+     * is matched against every selected template that carries a `tcp_request`
+     * section (e.g. CVE-2015-3306, proftpd-server-detect, vsftpd-detect).
+     *
+     * Extending to a new protocol requires only two artefacts — NO code change
+     * here is needed:
+     *   1. A YAML template under templates/nuclei-legacy/network/… with a `tcp:`
+     *      section (parsed into `TcpRequest` by template.rs at load time).
+     *   2. An advisory-cache JSON file mapping the detected service + version to
+     *      a CVE (picked up automatically by `VulnerabilityIntelService`).
+     *
+     * The routing is intentionally protocol-agnostic: templates self-describe
+     * their check type (`http_check` vs `tcp_request`), so adding SMTP, IMAP,
+     * or any other TCP service validator is pure data — no Rust change needed.
+     * ─────────────────────────────────────────────────────────────────────────
+     */
+    if !non_web_results.is_empty() {
+        let tcp_templates: Vec<_> = templates
+            .iter()
+            .filter(|t| t.tcp_request.is_some())
+            .cloned()
+            .collect();
+
+        if !tcp_templates.is_empty() {
+            tracing::info!(
+                %target,
+                tcp_template_count = tcp_templates.len(),
+                non_web_port_count = non_web_results.len(),
+                "sporangium enrichment: TCP template probing for non-web ports"
+            );
+
+            let tcp_tasks: Vec<_> = non_web_results
+                .iter()
+                .flat_map(|port| {
+                    let port = *port;
+                    let runner = runner.clone();
+                    tcp_templates.iter().map(move |t| {
+                        let runner = runner.clone();
+                        let template = t.clone();
+                        async move {
+                            match runner
+                                .run_tcp_template(&template, IpAddr::V4(target), port)
+                                .await
+                            {
+                                Ok(findings) => findings,
+                                Err(e) => {
+                                    tracing::debug!(
+                                        %target, port, check_id = %template.id,
+                                        err = %e, "TCP template probe error"
+                                    );
+                                    vec![]
+                                }
+                            }
+                        }
+                    })
+                })
+                .collect();
+
+            let tcp_findings: Vec<PatternFinding> = stream::iter(tcp_tasks)
+                .buffer_unordered(MAX_ENRICH_CONCURRENCY)
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .flatten()
+                .collect();
+
+            all_findings.extend(tcp_findings);
+        }
+    }
+
+    all_findings
 }
 
 /// Convert a `PatternFinding` into the condensed `PatternFindingSummary` that

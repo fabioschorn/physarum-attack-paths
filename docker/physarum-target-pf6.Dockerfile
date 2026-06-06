@@ -13,7 +13,13 @@
 
 FROM vulhub/struts2:2.5.25
 
-RUN apt-get update && \
+# Debian Buster reached EOL — redirect to archive mirrors before any apt-get
+RUN sed -i \
+      -e 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' \
+      -e 's|http://security.debian.org/debian-security|http://archive.debian.org/debian-security|g' \
+      -e '/buster-updates/d' \
+    /etc/apt/sources.list && \
+    apt-get update && \
     apt-get install -y --no-install-recommends openssh-server && \
     rm -rf /var/lib/apt/lists/*
 
@@ -32,4 +38,5 @@ RUN mkdir -p /var/run/sshd && \
 EXPOSE 22 8080
 
 # Start sshd first (background), then hand off to Struts/Tomcat
-CMD ["/bin/sh", "-c", "/usr/sbin/sshd && catalina.sh run"]
+# vulhub/struts2:2.5.25 uses Maven + Jetty (not Tomcat). ENTRYPOINT is mvn-entrypoint.sh which execs "$@".
+CMD ["/bin/sh", "-c", "/usr/sbin/sshd && exec mvn jetty:run"]

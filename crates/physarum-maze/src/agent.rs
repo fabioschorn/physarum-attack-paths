@@ -63,8 +63,10 @@ impl LlmConfig {
 
         let client: Arc<dyn physarum_llm::LlmClient> = if endpoint == "mock" {
             Arc::new(MockLlmClient::no_path("mock mode — no real LLM"))
-        } else if endpoint == "mock-http" {
-            Arc::new(MockLlmClient::http_probe_with_plan("/", 0.9))
+        } else if endpoint.starts_with("mock-http") {
+            // mock-http[:<port>] — e.g. mock-http:8080 for Struts/Jetty targets
+            let port: Option<u16> = endpoint.splitn(2, ':').nth(1).and_then(|p| p.parse().ok());
+            Arc::new(MockLlmClient::http_probe_with_plan("/", port, 0.9))
         } else if endpoint.starts_with("mock-exploit") {
             // mock-exploit[:<port>[:<user>]] — Phase 2 SSH-first dry-run
             // e.g. mock-exploit:8080:root
