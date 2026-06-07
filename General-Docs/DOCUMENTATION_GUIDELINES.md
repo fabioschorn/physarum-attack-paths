@@ -20,6 +20,31 @@ then we merge
 
 If a change genuinely requires updating more than one primary file, the PR description must explicitly justify why. Exceptions are rare and should be flagged in review.
 
+### Architectural synchronization exception
+
+A cross-document synchronization PR may update multiple primary documentation files when the project state has drifted across authoritative documents.
+
+This exception is allowed only when the PR:
+
+```text
+- references the synchronization issue
+- lists every primary file touched
+- explains why the update cannot be split without preserving contradictions
+- does not change runtime code
+- does not mark unproven behavior as complete
+- keeps README, ARCHITECTURE, and QUALITY_GATE consistent
+```
+
+Example:
+
+```text
+README.md
+General-Docs/ARCHITECTURE.md
+General-Docs/QUALITY_GATE.md
+General-Docs/PF6_TWO_CONTAINER_END_TO_END_DOCKER_LAB.md
+crates/physarum-llm/DESIGN.md
+```
+
 ---
 
 ## File ownership
@@ -28,9 +53,12 @@ Each file has a single responsibility. Do not duplicate content across files —
 
 | File | Owns |
 |---|---|
-| `README.md` | Short project front door: what it is, how to run it, where to find more |
-| `General-Docs/ARCHITECTURE.md` | Full system architecture across all generations — crates, gates, math, labs |
-| `General-Docs/QUALITY_GATE.md` | Gate definitions, acceptance criteria, and evidence links |
+| `README.md` | Short project front door: what it is, current status, how to run the main labs, where to find more |
+| `General-Docs/ARCHITECTURE.md` | Full system architecture across all generations — crates, gates, math, labs, implemented LLM-aware organism path |
+| `General-Docs/QUALITY_GATE.md` | Current gate status, acceptance criteria, evidence links, and advancement decision |
+| `General-Docs/PF6_TWO_CONTAINER_END_TO_END_DOCKER_LAB.md` | PF-6 Docker lab topology, invariants, Phase 1/Phase 2 model, and evidence requirements |
+| `General-Docs/SPORANGIUM_TEMPLATE_CATALOG_AND_LLM_INTEGRATION.md` | Template catalog model and how `physarum-sporangium` exposes evidence to `physarum-maze` and the LLM |
+| `crates/physarum-llm/DESIGN.md` | LLM contract decisions, schema boundaries, secret handling, two-turn reasoning flow, and phase status |
 | `General-Docs/INSIGHTS_AND_BRAINSTORM.md` | Research ideas, future concepts, speculative notes |
 | `General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md` | Role-fluid agent design intent and eBPF stage sequence |
 | `General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md` | eBPF Stage 0 design decisions — historical reference |
@@ -46,13 +74,23 @@ Each file has a single responsibility. Do not duplicate content across files —
 ## What each file must not contain
 
 **`README.md`** must not contain:
-- Detailed milestone history (that belongs in GitHub Issues/PRs)
-- Step-by-step lab runbooks (those belong in `examples/*/README.md`)
-- Long implementation notes (those belong in `General-Docs/`)
+
+- detailed milestone history that belongs in GitHub Issues/PRs
+- long step-by-step lab runbooks that belong in `examples/*/README.md` or `docker/*.sh`
+- long implementation notes that belong in `General-Docs/`
+- claims that active gates are complete before evidence exists
 
 **Lab READMEs** must not contain:
-- Cross-lab content (each lab README covers only its own lab)
-- Architecture explanations (those belong in `README.md`)
+
+- cross-lab architecture content
+- full project roadmap duplication
+- speculative status not linked to the authoritative gate document
+
+**`QUALITY_GATE.md`** must not contain:
+
+- full PR narratives
+- speculative design notes
+- implementation details beyond gate evidence and advancement criteria
 
 ---
 
@@ -60,9 +98,21 @@ Each file has a single responsibility. Do not duplicate content across files —
 
 Documentation must describe what is currently implemented, not what we hope will be implemented.
 
-- Future or planned items must be clearly labeled as `planned` or `future`.
+```text
+present tense -> implemented behavior
+past tense    -> historical gates/labs
+future tense  -> planned AWS/Gate N/future work
+active         -> current work with an open issue/gate
+```
+
+Rules:
+
+- Future or planned items must be clearly labeled as `planned`, `future`, or `active`.
 - Do not update the status table in `README.md` until the corresponding PR is merged.
-- Do not mark a gate as completed in `QUALITY_GATE.md` until the corresponding PR is merged.
+- Do not mark a gate as completed in `QUALITY_GATE.md` until the corresponding evidence exists and the PR is merged.
+- Do not describe closed issues as active or next.
+- Do not describe PF-6 Phase 2 as complete until Issue #141 has real evidence.
+- Do not describe AWS validation as complete until the controlled AWS Lab has evidence.
 
 ---
 
@@ -70,10 +120,14 @@ Documentation must describe what is currently implemented, not what we hope will
 
 When two documents need to reference the same content, the secondary document links to the primary. It does not reproduce the content.
 
-**Example:**
-- `README.md` mentions the Docker lab with a one-line description and a link to `examples/docker-lab/README.md`.
-- `examples/docker-lab/README.md` contains the full runbook.
-- `General-Docs/QUALITY_GATE.md` references the gate milestone with a one-line status entry and evidence link.
+Example:
+
+```text
+README.md -> short current status and links
+ARCHITECTURE.md -> full system design
+QUALITY_GATE.md -> advancement decision
+GitHub Issues/PRs -> detailed delivery history and evidence
+```
 
 ---
 
@@ -83,19 +137,22 @@ When two documents need to reference the same content, the secondary document li
 
 ```text
 Full system architecture across all generations
-Crate layout, mathematical model, gate progression summary
-Causal Continuity Paradox and planned physarum-llm design
+Crate layout, mathematical model, and current organism path
+Implemented LLM-aware architecture
+PF-6 Phase 1 / Phase 2 design boundaries
+Historical PF-1/PF-2 mechanisms versus current PF-6 mechanisms
 ```
 
 `QUALITY_GATE.md` covers:
 
 ```text
-Current gate status (completed / in progress / planned)
+Current gate status
+Completed / active / planned gate rows
 Acceptance criteria and evidence links per gate
 Known risks and gate advancement rules
 ```
 
-Neither file covers detailed per-issue history — GitHub Issues and PRs are the authoritative record.
+Neither file should become a detailed per-issue archive. GitHub Issues and PRs are the permanent detailed record.
 
 ---
 
@@ -103,16 +160,26 @@ Neither file covers detailed per-issue history — GitHub Issues and PRs are the
 
 Every PR that touches documentation should verify:
 
-- [ ] The change is in the correct primary file (per the ownership table above)
-- [ ] No content is duplicated — cross-links are used instead
-- [ ] Nothing is marked as implemented that is not yet merged
-- [ ] Future/planned items are clearly labeled
-- [ ] The root `README.md` remains a short front door (not a detailed runbook)
+- [ ] The change is in the correct primary file per the ownership table.
+- [ ] No content is duplicated unnecessarily; cross-links are used where appropriate.
+- [ ] Nothing is marked as implemented that is not yet merged or evidenced.
+- [ ] Future/planned items are clearly labeled.
+- [ ] The root `README.md` remains a short front door.
+- [ ] Closed issues are not described as active or next.
+- [ ] PF-6 Phase 1 and PF-6 Phase 2 terminology is used consistently.
+- [ ] No runtime behavior is changed by a documentation PR.
+
+For synchronization PRs, also verify:
+
+- [ ] The PR references the synchronization issue.
+- [ ] The PR body lists every primary document changed.
+- [ ] README, ARCHITECTURE, and QUALITY_GATE agree on the active gate.
+- [ ] Any exception to the one-primary-document rule is explicitly justified.
 
 ---
 
 ## GitHub Issues and PRs as the historical record
 
-Detailed milestone tracking — who did what, when, what was validated, what the output was — lives in GitHub Issues and PR bodies and comments. This is the authoritative, searchable, permanent record.
+Detailed milestone tracking — who did what, when, what was validated, what output was produced — lives in GitHub Issues and PR bodies/comments.
 
-`QUALITY_GATE.md` is a living gate status document, not an archive. `ARCHITECTURE.md` is the authoritative design reference.
+`QUALITY_GATE.md` is the living advancement-status document. `ARCHITECTURE.md` is the authoritative design reference. `README.md` is the project front door.
