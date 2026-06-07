@@ -1,195 +1,116 @@
 # Quality Gate — Physarum Attack Paths
 
-**Current gate:** PF-2 — Adaptive Re-routing — COMPLETE  
-**Overall status:** GREEN through PF-2  
-**Last updated:** 2026-05-25
+**Current gate:** PF-6 Phase 2 — ephemeral-key SCP propagation and lineage continuation  
+**Active issue:** #141  
+**Overall status:** YELLOW — Phase 1 is complete; Phase 2 execution proof is active  
+**Last updated:** 2026-06-07
 
-> GREEN = ready to advance · YELLOW = usable, follow-up required · RED = blocked or unstable · FUTURE = planned, not blocking current gate
+> GREEN = validated and ready to advance · YELLOW = active or usable with follow-up required · RED = blocked · FUTURE = planned, not blocking the current gate
 
 ---
 
 ## Current decision
 
-The project has completed the component gates through Gate M and the pre-final organism labs PF-1/PF-2.
+The project has completed the architecture and evidence gates through PF-6 Phase 1.
 
 ```text
-Gate M      COMPLETE — physarum-node runtime convergence
-Gate M.4    COMPLETE — probe/discovery consolidation and scoring adapter
-PF-1        COMPLETE — organic expansion maze
-PF-2        COMPLETE — adaptive re-routing, TCP stimulus, AlreadyColonized, secondary conduits
+PF-4    COMPLETE — real LLM Docker validation
+PF-5    COMPLETE — adaptive startup/runtime sensing
+PF-5.2  COMPLETE — dynamic vulnerability intelligence
+PF-6.0  COMPLETE — design and documentation
+PF-6.1  COMPLETE — multi-target Phase 1 evidence
+PF-6.2  ACTIVE   — ephemeral-key SCP propagation and lineage continuation
 ```
 
-The next implementation/design direction is intentionally narrow:
-
-```text
-1. Issue #106 — physarum-llm design/safety review for the Causal Continuity Paradox
-2. Issue #89 / Gate N.0 — secure organism identity, mTLS, and signed lineage after #106
-```
+The project must not advance to the controlled AWS LLM Lab until Issue #141 proves the complete Docker propagation path without hardcoded success conditions.
 
 ---
 
-## Gate checklist
+## Current gate checklist
 
 | Area | Status | Evidence | Notes |
 |---|---|---|---|
-| Build / test health | GREEN | CI / cargo workspace tests | Workspace builds and tests pass at completed gate points |
-| Documentation workflow | GREEN | PR/issue templates + ownership guidelines | Documentation ownership model merged |
-| Formal model — single edge | GREEN | `PhysarumEdgeModel.tla` | TypeOK + Safety verified |
-| B/C/D TLA+ path-selection model | GREEN | PR #56 | TypeOK + Safety + PathSelectionSafety verified |
-| Gate I — FlowObservation model and API | GREEN | PR #68 | `POST /flow-observations`, `GET /flow-observations`, bounded buffer, tests |
-| Gate J — eBPF observer runtime | GREEN | Issue #69 | AWS EC2 kernel 6.18; tracepoint attached; metadata-only observation |
-| Gate J.1 — eBPF observer agent-flow correlation | GREEN | Issue #72 | 5-tuple confirmed for physarum probe flow |
-| Gate K — segmented adaptive flow-path lab | GREEN | Issue #76 | 5-node AWS lab, q_ema degradation/recovery, FlowObservation evidence |
-| Gate K.1 — autonomous path selection | GREEN | Issue #80 / PR #82 | Negative-log scoring, selected_path, secondary_conduits |
-| Gate L — `physarum-scanner` native discovery engine | GREEN | commit `ce2b537` | Native async discovery, CIDR/DNS resolution, port ordering, resource-limit handling |
-| Gate L.1 — eBPF-triggered adaptive discovery | GREEN | `ebpf-triggered-discovery-evidence.txt` | Trigger provenance and priority ordering confirmed |
-| Gate L.2 — local-interface scope + inbound eBPF discovery | GREEN | `gate-l2-local-interface-evidence.txt` | Local subnet scope and inbound host discovery validated |
-| Gate L.3 — ICMP packet-level stimulus sensing | GREEN | Issue #87 | `physarum-packet-observer` ICMP stimulus evidence |
-| Gate M — `physarum-node` runtime | GREEN | `gate-m-node-runtime-evidence.txt` | `physarum-node` supervises agent and observer children |
-| Gate M.4 — scoring adapter / probe consolidation | GREEN | PR #102 | probe/discovery internalized through `physarum-probe`; agent wrapper retained |
-| PF-1 — organic expansion maze | GREEN | PR #104 / `ansible-pf1/` | 7-node AWS lab, autonomous SCP+SSH propagation, lineage |
-| PF-2 — adaptive re-routing | GREEN | PR #104 / `ansible-pf2/` | 9-node AWS lab, lateral discovery, TCP stimulus, AlreadyColonized, secondary conduits |
-| `physarum-llm` | FUTURE | Issue #106 | Planned research/design track |
-| Gate N.0 — secure organism identity | FUTURE | Issue #89 | Planned after Issue #106 |
-| Security hardening / API auth | FUTURE | — | Coordinator API remains unauthenticated; lab access must stay restricted |
+| Build / test health | GREEN | CI and workspace checks | Current merged heads pass CI |
+| Documentation synchronization | YELLOW | Issue #142 / PR #143 | README, architecture, quality gate, PF-6, and LLM design are being synchronized |
+| PF-4 real LLM Docker validation | GREEN | PR #124 and PF-4 lineage evidence | OpenAI-compatible endpoint, real prompt/response path, PolicyGate, lineage |
+| PF-5 adaptive sensing | GREEN | Issue #126 / PR #127 | Startup, ICMP, and TCP/eBPF profiles validated |
+| PF-5.2 vulnerability intelligence | GREEN | Issue #131 / PR #132 | LocalAdvisoryCache, OsvFeed, affected ranges, vulnerability candidates |
+| Nuclei-compatible sporangium engine | GREEN | PR #133 | Rust engine, matchers, extractors, protocols, workflows, template catalog |
+| PF-6 design/documentation | GREEN | PR #138 | Multi-stage lab and template/LLM integration documented |
+| PF-6 template wiring / compose | GREEN | PR #139 | YAML templates active in maze; advisory cache and compose added |
+| PF-6 Phase 1 multi-target evidence | GREEN | PR #140 | Two-turn LLM flow, HTTP/TCP probing, automatic interface selection, lineage evidence |
+| PF-6 Phase 2 ephemeral-key SCP | YELLOW | Issue #141 | Active execution gate |
+| Controlled AWS LLM Lab | FUTURE | — | Starts only after #141 |
+| Gate N secure identity | FUTURE | Issue #89 | mTLS, signed lineage, anti-replay, capability authorization |
 
 ---
 
-## PF-2 final evidence summary
+## PF-6 Phase 2 advancement criteria
 
-**GREEN** for PF-2 — Adaptive Re-routing.
-
-Validated topology:
+AWS work may begin only after Issue #141 proves all of the following in the existing PF-6 Docker lab:
 
 ```text
-A      seed, front subnet 10.60.10.0/24
-A.1    lateral node, same subnet as A, appears after delay
-B/C    layer-1 subnet 10.60.20.0/24
-D/E/F  layer-2 subnet 10.60.30.0/24
-G      layer-3 milestone 10.60.40.0/24
-X      cross-subnet node 10.60.50.0/24, appears after delay
+1. The Phase 1 pipeline remains unchanged in essence.
+2. host-b and host-c are discovered dynamically.
+3. The intended internal interface is selected automatically.
+4. LLM Turn 1 receives compact template metadata.
+5. Turn 1 selected template IDs are recorded.
+6. Selected HTTP/TCP templates are actually executed.
+7. Pattern findings reach VulnerabilityIntelService.
+8. vulnerability_candidates are derived from observed evidence.
+9. LLM Turn 2 returns an ordered typed strategy.
+10. PolicyGate accepts only when Phase 2 is explicitly enabled.
+11. host-a generates a temporary SSH keypair.
+12. Only the public key is introduced on the selected target.
+13. SCP transfers the current `__self__` physarum-maze binary.
+14. SSH starts the target in propagated mode.
+15. The propagated node continues the original lineage.
+16. `colonized` is recorded only after real execution success.
+17. Temporary key material is removed.
+18. No target IP, CVE, template, finding, policy result, or success state is hardcoded.
 ```
 
-Validated adaptive behaviors:
-
-```text
-1. A discovers A.1 through /24 physarum-scanner discovery.
-2. X sends TCP SYN stimulus to A.1:22 through bash /dev/tcp.
-3. A.1 captures the TCP stimulus, discovers X, and propagates to X.
-4. X detects G as already colonized.
-5. G is not re-deployed.
-6. X records X→G as a secondary conduit.
-7. Terraform destroy completed; no persistent AWS lab resources remain.
-```
-
-Live-run fixes documented in PR #104:
-
-```text
-nc replaced with bash /dev/tcp because nc was absent on AL2023
-ICMP verification changed to journal-based evidence because SG rules are directional
-operator IP masked as <OPERATOR_IP>
-```
+A marker file alone is not sufficient proof.
 
 ---
 
-## PF-1 final evidence summary
-
-**GREEN** for PF-1 — Organic Expansion Maze.
-
-Validated behavior:
-
-```text
-single seed starts at Host A
-organism discovers candidates from bounded stimuli
-organism propagates through the maze by SCP + SSH in the controlled AWS lab
-lineage JSON records origin, path, hops, visited nodes, scores, and colonized hosts
-G is reached without predefining G as a final target
-```
-
-Validated path:
-
-```text
-A → C → E → F → G
-```
-
-Dead-end behavior:
-
-```text
-D scored as a dead end and decayed through the per-edge multiplier model
-```
-
----
-
-## Gate progression summary
+## Historical completed gates
 
 | Gate | Description | Status |
 |---|---|---|
-| A | S3 artifact delivery + EC2 bootstrap design | COMPLETED |
-| B | S3 delivery + IAM role + user_data | COMPLETED |
+| A | S3 artifact delivery and bootstrap design | COMPLETED |
+| B | S3 delivery, IAM role, and user data | COMPLETED |
 | C | AWS Mode 1 full mesh runtime | COMPLETED |
-| D | Phase identity (`lab_phase` variable) | COMPLETED |
-| E | AWS Mode 2 segmented B→C→D | COMPLETED |
-| F | B/C/D TLA+ path-selection model | COMPLETED |
+| D | Phase identity | COMPLETED |
+| E | AWS Mode 2 segmented topology | COMPLETED |
+| F | TLA+ path-selection model | COMPLETED |
 | G | Docker weighted competing paths | COMPLETED |
-| H | AWS tc/netem weighted competing paths | COMPLETED |
-| I | FlowObservation model + POST/GET endpoints | COMPLETED |
-| J | eBPF observer runtime on AWS EC2 | COMPLETED |
-| J.1 | eBPF observer agent-flow correlation | COMPLETED |
-| K | Segmented adaptive flow-path lab | COMPLETED |
-| K.1 | Autonomous path selection with negative-log scoring | COMPLETED |
-| L | `physarum-scanner` native discovery engine | COMPLETED |
-| L.1 | eBPF-triggered adaptive discovery | COMPLETED |
-| L.2 | Local-interface scope + inbound eBPF discovery | COMPLETED |
-| L.3 | ICMP packet-level stimulus sensing | COMPLETED |
-| M | `physarum-node` runtime convergence | COMPLETED |
-| M.4 | Probe/discovery consolidation and scoring adapter | COMPLETED |
+| H | AWS `tc/netem` weighted paths | COMPLETED |
+| I | FlowObservation model and API | COMPLETED |
+| J / J.1 | eBPF runtime and agent-flow correlation | COMPLETED |
+| K / K.1 | Adaptive flow paths and autonomous selection | COMPLETED |
+| L / L.1 / L.2 / L.3 | Native scanning and runtime stimulus sensing | COMPLETED |
+| M / M.4 | Node runtime convergence and probe consolidation | COMPLETED |
 | PF-1 | Organic expansion maze | COMPLETED |
-| PF-2 | Adaptive re-routing | COMPLETED |
-| Issue #106 | LLM-aware adaptive propagation design | PLANNED |
-| Gate N.0 / Issue #89 | Secure organism identity, mTLS, and lineage threat model | PLANNED |
+| PF-2 | Adaptive re-routing and secondary conduits | COMPLETED |
+| PF-4 | Real LLM Docker validation | COMPLETED |
+| PF-5 | Adaptive sensing profiles | COMPLETED |
+| PF-5.2 | Dynamic vulnerability intelligence | COMPLETED |
+| PF-6.0 | Design/documentation | COMPLETED |
+| PF-6.1 | Multi-target Phase 1 evidence | COMPLETED |
+| PF-6.2 | Ephemeral-key SCP propagation | ACTIVE |
 
 ---
 
-## Active gate
-
-No active implementation gate.
-
-The active planning sequence is:
+## Open blockers and risks
 
 ```text
-Issue #106 first
-Gate N.0 / Issue #89 after #106
-```
-
-Reason:
-
-```text
-Issue #106 may change the organism's future propagation surface.
-Gate N.0 must model secure identity, mTLS, and signed lineage after that surface is clarified.
-```
-
----
-
-## Open blockers
-
-```text
-coordinator API remains unauthenticated
-operator_cidr must remain a narrow /32 in AWS labs
-node identity is not yet mTLS-backed
-lineage is structured but not yet cryptographically signed
-```
-
----
-
-## Known risks
-
-```text
-AWS work may introduce infrastructure complexity if started before scope is agreed
-documentation can drift if QUALITY_GATE.md or ARCHITECTURE.md start accumulating issue history (that belongs in GitHub Issues/PRs)
-operator_cidr must remain a narrow /32 until coordinator API authentication is added
-arm64 binary cross-compilation requires additional CI/toolchain setup if Graviton is revisited
-latency-based quality discrimination requires real network or tc/netem; Docker localhost RTTs are too similar
-future LLM-assisted propagation must stay lab-only and safety-gated unless separately approved
+- PF-6 Phase 2 has not yet produced successful SCP/SSH/propagated-mode lineage evidence.
+- Node identity is not yet mTLS-backed.
+- Lineage is structured but not cryptographically signed.
+- Coordinator-era APIs remain historical and are not production-hardened.
+- AWS adaptation must not introduce a second, simplified path that bypasses the Docker evidence contracts.
+- Documentation drift must be prevented by keeping README, ARCHITECTURE, and QUALITY_GATE aligned.
 ```
 
 ---
@@ -197,14 +118,15 @@ future LLM-assisted propagation must stay lab-only and safety-gated unless separ
 ## Project quality rules
 
 ```text
-Design before implementation
-Runtime validation before merge
-Docs describe only what is currently implemented
-One primary doc file per feature PR
-GitHub Issues/PRs are the detailed historical record
+Design before implementation.
+Runtime validation before completion.
+Docs describe what is actually merged and proven.
+The LLM proposes; PolicyGate decides.
+No hardcoded success paths.
+Detailed delivery history lives in GitHub Issues and PRs.
 ```
 
-See [General-Docs/DOCUMENTATION_GUIDELINES.md](DOCUMENTATION_GUIDELINES.md) for the full documentation ownership model.
+See `General-Docs/DOCUMENTATION_GUIDELINES.md` for ownership and synchronization rules.
 
 ---
 
@@ -213,10 +135,10 @@ See [General-Docs/DOCUMENTATION_GUIDELINES.md](DOCUMENTATION_GUIDELINES.md) for 
 This page answers: **are we ready for the next phase?**
 
 ```text
-All relevant rows GREEN  -> advance
-Any row YELLOW           -> close follow-up before advancing
-Any row RED              -> stop and fix the blocker first
-FUTURE rows              -> visible but non-blocking
+All required rows GREEN -> advance.
+Any required row YELLOW -> finish the active gate first.
+Any required row RED -> stop and fix the blocker.
+FUTURE rows -> visible but non-blocking.
 ```
 
-For detailed validation output, issue history, and delivery notes, use the linked GitHub Issues and PRs. For the current system description, use [General-Docs/ARCHITECTURE.md](ARCHITECTURE.md).
+Current answer: **not yet ready for AWS; complete Issue #141 first.**
