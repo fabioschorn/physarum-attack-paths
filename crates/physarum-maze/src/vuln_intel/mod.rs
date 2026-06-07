@@ -336,9 +336,16 @@ impl VulnerabilityIntelService {
 ///
 /// Returns `None` when the finding carries no extractable service/version
 /// (e.g. a security-header absence check has no version string).
+///
+/// Two-pass extraction strategy:
+///   1. Primary — scan `extracted_facts` for "service/version" or "service_version" strings.
+///   2. Fallback — derive service from `check_id` (e.g. "proftpd-server-detect" → "proftpd")
+///      and use the first extracted value as the raw version.  Covers TCP detection templates
+///      that emit just the version number (e.g. ProFTPD extractor → "1.3.5").
 pub fn build_intel_input(
     finding: &physarum_sporangium::PatternFinding,
 ) -> Option<VulnerabilityIntelInput> {
+    // Primary: structured "service/version" or "service_version" in extracted facts.
     for fact in &finding.extracted_facts {
         for value in &fact.values {
             if let Some((service, version)) = parse_service_version(value) {
@@ -351,6 +358,46 @@ pub fn build_intel_input(
                     });
                 }
             }
+        }
+    }
+
+    // Fallback: derive service from the detection template's check_id convention
+    // ("proftpd-server-detect" → "proftpd", "wing-ftp-detect" → "wing-ftp") and
+    // treat the first non-empty extracted value as the version number.
+    if let Some(service) = service_from_check_id(&finding.check_id) {
+        if let Some(raw_ver) = finding
+            .extracted_facts
+            .iter()
+            .flat_map(|f| &f.values)
+            .find(|v| !v.is_empty())
+        {
+            let version = strip_non_semver_suffix(raw_ver);
+            if !version.is_empty() {
+                return Some(VulnerabilityIntelInput {
+                    service,
+                    version,
+                    port: finding.port,
+                    banner_evidence: vec![format!("Banner extract: {raw_ver}")],
+                });
+            }
+        }
+    }
+
+    None
+}
+
+/// Derive an advisory-cache service key from a detection template's check_id.
+///
+/// Strips standard detection suffixes so the result matches the advisory JSON
+/// filename stem:
+///   "proftpd-server-detect"   → Some("proftpd")
+///   "wing-ftp-service-detect" → Some("wing-ftp")
+///   "wing-ftp-detect"         → Some("wing-ftp")
+///   "CVE-2015-3306"           → None  (CVE templates don't follow this convention)
+fn service_from_check_id(check_id: &str) -> Option<String> {
+    for suffix in &["-server-detect", "-service-detect", "-detect"] {
+        if let Some(stem) = check_id.strip_suffix(suffix) {
+            return Some(stem.to_string());
         }
     }
     None

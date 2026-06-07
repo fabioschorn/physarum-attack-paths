@@ -1,0 +1,25 @@
+[
+  {
+    "advisory_id": "CVE-2015-3306",
+    "ranges": [
+      { "introduced": "1.3.5", "fixed": "1.3.5.1" }
+    ],
+    "fixed_version": "1.3.5.1",
+    "affected_range": "= 1.3.5",
+    "cvss_score": 10.0,
+    "severity": "Critical",
+    "description": "ProFTPD 1.3.5 with mod_copy enabled allows unauthenticated remote code execution via SITE CPFR and SITE CPTO commands. An unauthenticated attacker can copy arbitrary files on the server without authentication, enabling file write to web roots or authorized_keys — leading to RCE.",
+    "impact": "Unauthenticated remote code execution via mod_copy abuse — arbitrary file copy including SSH keys, PHP/webshells, or cron jobs.",
+    "exploit_class": "RemoteCodeExecution",
+    "preconditions": [
+      "ProFTPD version 1.3.5 with mod_copy module loaded",
+      "FTP port (default 21) reachable from attacker",
+      "No authentication required for SITE CPFR/CPTO in vulnerable version"
+    ],
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2015-3306",
+      "https://www.exploit-db.com/exploits/36742",
+      "https://github.com/t0kx/exploit-CVE-2015-3306"
+    ]
+  }
+]

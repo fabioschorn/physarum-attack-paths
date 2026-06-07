@@ -100,6 +100,29 @@ impl PatternRunner {
         ))
     }
 
+    /// Run a TCP template against a non-web port. Returns findings (empty = no match or no tcp_request).
+    ///
+    /// Delegates to `tcp::run_tcp()` — handles raw byte exchange, banner grabbing,
+    /// matchers, and extractors. Use for `ConfirmedNonWeb` ports (FTP, SMTP, POP3, IMAP, …)
+    /// where HTTP probing is not applicable. Connection and exchange timeouts are
+    /// taken from `RunPolicy::request_timeout_ms`.
+    pub async fn run_tcp_template(
+        &self,
+        template: &PatternTemplate,
+        target_ip: IpAddr,
+        port: u16,
+    ) -> Result<Vec<PatternFinding>> {
+        self.policy.check_allowed(&template.id)?;
+        crate::tcp::run_tcp(
+            template,
+            target_ip,
+            port,
+            &Default::default(),
+            self.policy.request_timeout_ms,
+        )
+        .await
+    }
+
     async fn execute_http(
         &self,
         check: &crate::template::HttpCheck,

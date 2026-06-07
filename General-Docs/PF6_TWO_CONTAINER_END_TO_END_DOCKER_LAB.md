@@ -271,12 +271,13 @@ These invariants apply to both phases and must be enforced at container runtime:
 # PF-6 two-container end-to-end lab (design skeleton — not yet implemented)
 #
 # Network design:
+#   physarum-pf6-external  — regular bridge (Internet access allowed)
+#                            Container A eth0 (Docker alphabetical sort: external < internal)
+#                            Used to reach LLM API
+#
 #   physarum-pf6-internal  — isolated bridge (internal: true)
 #                            Container B is ONLY here: no Internet access
-#                            Container A uses eth0 on this network to sense/probe B
-#
-#   physarum-pf6-external  — regular bridge (Internet access allowed)
-#                            Container A uses eth1 on this network to reach the LLM API
+#                            Container A eth1 — used to sense/probe Container B
 #
 # Container B cannot initiate connections to the Internet.
 # Container A can call the LLM API via eth1 and still probe Container B via eth0.
@@ -308,9 +309,9 @@ services:
     depends_on:
       - host-b
     networks:
-      physarum-pf6-internal:     # eth0 — used to sense/probe Container B
+      physarum-pf6-internal:     # eth1 — alphabetical sort: external=eth0, internal=eth1
         ipv4_address: 172.21.0.2
-      physarum-pf6-external:     # eth1 — used to reach LLM API
+      physarum-pf6-external:     # eth0 — used to reach LLM API
     cap_add:
       - NET_RAW
       - NET_ADMIN
@@ -324,7 +325,7 @@ services:
       PHYSARUM_TEMPLATE_SEVERITY: "${PHYSARUM_TEMPLATE_SEVERITY:-critical,high}"
     command: >
       --mode seed
-      --interface eth0
+      --interface eth1
       --llm-endpoint ${PHYSARUM_LLM_ENDPOINT:-mock-http}
       --llm-model ${PHYSARUM_LLM_MODEL:-gpt-4o-mini}
       --llm-allowed-cidr 172.21.0.0/24
@@ -339,16 +340,28 @@ services:
 
 ## 9. Implementation Order
 
-1. Add advisory cache entry for selected CVE (CVE-2021-31805 or Manager-approved alternative)
-2. Confirm nuclei-legacy contains a template matching the target service (tag: `struts`, `rce`, `cve`)
-3. Wire `all_templates_with_yaml()` into the physarum-maze template runner (currently uses `all_templates()` — catalog.rs builtins only)
-4. Create `docker/docker-compose-pf6.yml` from the skeleton above
-5. Run Phase 1 lab — capture lineage and prompt logs
-6. Commit evidence to `examples/lab-evidence/`
-7. Get Manager approval before proceeding to Phase 2
+| Step | Status | Notes |
+|------|--------|-------|
+| 1. Advisory cache for CVE-2020-17530 | ✅ Done | `examples/advisory-cache/apache-struts.json` — both CVE-2020-17530 and CVE-2021-31805 |
+| 2. Nuclei template confirmed | ✅ Done | CVE-2020-17530.yaml and CVE-2021-31805.yaml present in nuclei-legacy |
+| 3. Wire `all_templates_with_yaml()` | ✅ Done | `llm_loop.rs` — `extract_cve_ids` also reads CVE from `check_id` |
+| 4. `docker-compose-pf6.yml` | ✅ Done | eth1=internal (alphabetical Docker sort), image=`vulhub/struts2:2.5.25` |
+| 5. Phase 1 dry-run (mock-http) | ✅ Done | 2105 templates, 74 CVEs, CVE-2020-17530 in candidates, policy=Accepted |
+| 6a. Dry-run evidence committed | ✅ Done | `examples/lab-evidence/physarum-lineage-pf6-phase1-dryrun-docker-lab.json` |
+| 6b. Phase 1 final run (real LLM) | ⏳ Pending | Requires `LLM_API_KEY`; must produce `reasoning_summary` referencing CVE |
+| 6c. Final evidence committed | ⏳ Pending | `examples/lab-evidence/physarum-lineage-pf6-phase1-docker-lab.json` |
+| 7. Manager approval → Phase 2 | ⏳ Pending | Phase 2 does NOT start without explicit approval |
 
-Step 3 is the only code change required. Steps 1, 2, 4–7 are config and validation.
+### Phase 1 Final Run Command
+
+```bash
+LLM_API_KEY=sk-... \
+PHYSARUM_LLM_LOG_PROMPTS=true \
+PHYSARUM_LLM_ENDPOINT=https://api.openai.com \
+PHYSARUM_LLM_MODEL=gpt-4o-mini \
+docker compose -f docker/docker-compose-pf6.yml up --abort-on-container-exit --timeout 300
+```
 
 ---
 
-*End of document. Implementation begins after Manager review of this design.*
+*Phase 1 dry-run complete (2026-06-06). Awaiting real LLM run and Manager Phase 1 approval before Phase 2.*

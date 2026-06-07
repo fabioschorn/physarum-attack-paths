@@ -35,8 +35,11 @@ pub struct Cli {
     #[arg(long, default_value = "seed")]
     pub mode: Mode,
 
-    /// Network interface to capture ICMP/TCP on (must match the maze subnet iface)
-    #[arg(long, default_value = "eth0", env = "PHYSARUM_IFACE")]
+    /// Network interface to capture ICMP/TCP on.
+    /// Use "auto" (default) to detect automatically from --llm-allowed-cidr:
+    /// picks the interface whose IP is in the CIDR with the most specific prefix length.
+    /// Fall back: first non-loopback IPv4 interface when CIDR is absent.
+    #[arg(long, default_value = "auto", env = "PHYSARUM_IFACE")]
     pub interface: String,
 
     /// Propagated mode: base64-encoded lineage JSON from parent host
@@ -90,11 +93,23 @@ pub struct Cli {
     #[arg(long, default_value_t = false, env = "PHYSARUM_LLM_LOG_PROMPTS")]
     pub llm_log_prompts: bool,
 
-    /// CIDR allowed for LLM-assisted propagation attempts (e.g. 10.0.0.0/8).
+    /// CIDR allowed for LLM-assisted propagation attempts.
+    /// Use a broad range (e.g. 172.16.0.0/12 or 10.0.0.0/8) so that any
+    /// Docker or AWS subnet in that range is accepted without reconfiguration.
     /// Must be set when --llm-endpoint is active; targets outside this CIDR
     /// are rejected by the policy gate regardless of LLM recommendation.
     #[arg(long, env = "PHYSARUM_LLM_ALLOWED_CIDR")]
     pub llm_allowed_cidr: Option<String>,
+
+    /// Enable exploit-class propagation (CVE RCE → binary copy).
+    /// Off by default. Requires --llm-endpoint. When enabled:
+    ///   - PolicyGate allows PropagationMethod::Exploit
+    ///   - A mini HTTP server on port 8001 serves the physarum-maze binary
+    ///     so the OGNL payload on the target can download and execute it.
+    ///
+    /// Lab-only. Do NOT enable outside an isolated test environment.
+    #[arg(long, default_value_t = false, env = "PHYSARUM_EXPLOIT_ENABLED")]
+    pub exploit_enabled: bool,
 }
 
 #[tokio::main]

@@ -5,9 +5,15 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 use crate::{
-    client::QueryFuture,
-    prompt::{build_user_prompt, STRATEGY_SCHEMA, SYSTEM_PROMPT},
-    types::{DiscoveryQuery, PropagationMethodClass, PropagationStrategy},
+    client::{QueryFuture, TemplateFuture},
+    prompt::{
+        build_template_selection_prompt, build_user_prompt, STRATEGY_SCHEMA, SYSTEM_PROMPT,
+        TEMPLATE_SELECTION_SYSTEM_PROMPT,
+    },
+    types::{
+        DiscoveryQuery, PropagationMethodClass, PropagationStrategy, TemplateSelectionQuery,
+        TemplateSelectionResponse,
+    },
     LlmClient,
 };
 
@@ -16,11 +22,9 @@ use crate::{
 /// Works with any backend that implements the `/v1/chat/completions` API:
 /// OpenAI, Ollama, Groq, vLLM, LM Studio, etc.
 ///
-/// `allowed_methods` mirrors the `PolicyGate` configuration — injected into
-/// every prompt so the LLM only proposes methods the policy will accept.
-///
-/// The API key is injected at runtime from `$LLM_API_KEY` — never stored
-/// in lineage or config files.
+/// Implements the two-turn LLM protocol:
+///   Turn 1 — `select_templates`: compact catalog → selected IDs
+///   Turn 2 — `query_propagation`: enriched findings → propagation strategy
 pub struct OpenAiCompatibleClient {
     endpoint: String,
     model: String,
@@ -29,7 +33,6 @@ pub struct OpenAiCompatibleClient {
     allowed_methods: Vec<PropagationMethodClass>,
     http: Client,
     /// When true, log the full prompt and raw LLM response at DEBUG level.
-    /// Lab-only (PHYSARUM_LLM_LOG_PROMPTS=true) — keep false in production.
     log_prompts: bool,
 }
 
@@ -58,7 +61,7 @@ impl OpenAiCompatibleClient {
         })
     }
 
-    async fn query(&self, query: &DiscoveryQuery) -> Result<PropagationStrategy> {
+    async fn query_propagation_inner(&self, query: &DiscoveryQuery) -> Result<PropagationStrategy> {
         let query_json =
             serde_json::to_string(query).context("failed to serialize DiscoveryQuery")?;
 
@@ -80,26 +83,102 @@ impl OpenAiCompatibleClient {
             max_tokens: 1024,
         };
 
-        let url = format!(
-            "{}/v1/chat/completions",
-            self.endpoint.trim_end_matches('/')
-        );
+        let url = self.completions_url();
 
         debug!(
             url = %url,
             model = %self.model,
             attempt = query.attempt_number,
-            "sending DiscoveryQuery to LLM"
+            "sending DiscoveryQuery to LLM (Turn 2)"
         );
         if self.log_prompts {
-            debug!(user_prompt = %user_prompt, "LLM request body");
+            debug!(user_prompt = %user_prompt, "LLM Turn 2 request body");
         }
 
+        let content = self.send_request(&request).await?;
+
+        if self.log_prompts {
+            debug!(raw_response = %content, "LLM Turn 2 raw response");
+        }
+
+        serde_json::from_str::<PropagationStrategy>(&content).map_err(|e| {
+            if self.log_prompts {
+                warn!(raw = %content, error = %e, "LLM response did not parse as PropagationStrategy");
+                anyhow!("LLM response JSON parse error: {e} — raw: {content}")
+            } else {
+                warn!(error = %e, "LLM response did not parse as PropagationStrategy");
+                anyhow!("LLM response JSON parse error: {e}")
+            }
+        })
+    }
+
+    async fn query_templates_inner(
+        &self,
+        query: &TemplateSelectionQuery,
+    ) -> Result<TemplateSelectionResponse> {
+        let query_json =
+            serde_json::to_string(query).context("failed to serialize TemplateSelectionQuery")?;
+
+        let user_prompt = build_template_selection_prompt(&query_json);
+
+        let request = ChatRequest {
+            model: self.model.clone(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".into(),
+                    content: TEMPLATE_SELECTION_SYSTEM_PROMPT.into(),
+                },
+                ChatMessage {
+                    role: "user".into(),
+                    content: user_prompt.clone(),
+                },
+            ],
+            temperature: 0.1, // Low temperature — deterministic selection
+            max_tokens: 2048, // IDs can be numerous
+        };
+
+        let url = self.completions_url();
+
+        debug!(
+            url = %url,
+            model = %self.model,
+            catalog_size = query.available_templates.len(),
+            "sending TemplateSelectionQuery to LLM (Turn 1)"
+        );
+        if self.log_prompts {
+            debug!(user_prompt = %user_prompt, "LLM Turn 1 request body");
+        }
+
+        let content = self.send_request(&request).await?;
+
+        if self.log_prompts {
+            debug!(raw_response = %content, "LLM Turn 1 raw response");
+        }
+
+        serde_json::from_str::<TemplateSelectionResponse>(&content).map_err(|e| {
+            if self.log_prompts {
+                warn!(raw = %content, error = %e, "LLM response did not parse as TemplateSelectionResponse");
+                anyhow!("LLM template-selection JSON parse error: {e} — raw: {content}")
+            } else {
+                warn!(error = %e, "LLM response did not parse as TemplateSelectionResponse");
+                anyhow!("LLM template-selection JSON parse error: {e}")
+            }
+        })
+    }
+
+    fn completions_url(&self) -> String {
+        format!(
+            "{}/v1/chat/completions",
+            self.endpoint.trim_end_matches('/')
+        )
+    }
+
+    async fn send_request(&self, request: &ChatRequest) -> Result<String> {
         let resp = self
             .http
-            .post(&url)
+            .post(self.completions_url())
             .bearer_auth(&self.api_key)
-            .json(&request)
+            .json(request)
             .timeout(self.timeout)
             .send()
             .await
@@ -116,34 +195,22 @@ impl OpenAiCompatibleClient {
             .await
             .context("failed to deserialise LLM response")?;
 
-        let content = chat_resp
+        chat_resp
             .choices
             .into_iter()
             .next()
-            .ok_or_else(|| anyhow!("LLM returned empty choices"))?
-            .message
-            .content;
-
-        if self.log_prompts {
-            debug!(raw_response = %content, "LLM raw response");
-        }
-        let strategy: PropagationStrategy = serde_json::from_str(&content).map_err(|e| {
-            if self.log_prompts {
-                warn!(raw = %content, error = %e, "LLM response did not parse as PropagationStrategy");
-                anyhow!("LLM response JSON parse error: {e} — raw: {content}")
-            } else {
-                warn!(error = %e, "LLM response did not parse as PropagationStrategy");
-                anyhow!("LLM response JSON parse error: {e}")
-            }
-        })?;
-
-        Ok(strategy)
+            .ok_or_else(|| anyhow!("LLM returned empty choices"))
+            .map(|c| c.message.content)
     }
 }
 
 impl LlmClient for OpenAiCompatibleClient {
+    fn select_templates<'a>(&'a self, query: &'a TemplateSelectionQuery) -> TemplateFuture<'a> {
+        Box::pin(self.query_templates_inner(query))
+    }
+
     fn query_propagation<'a>(&'a self, query: &'a DiscoveryQuery) -> QueryFuture<'a> {
-        Box::pin(self.query(query))
+        Box::pin(self.query_propagation_inner(query))
     }
 }
 

@@ -1,0 +1,25 @@
+[
+  {
+    "advisory_id": "CVE-2025-47812",
+    "ranges": [
+      { "introduced": "0.0.0", "fixed": "7.4.4" }
+    ],
+    "fixed_version": "7.4.4",
+    "affected_range": "< 7.4.4",
+    "cvss_score": 9.8,
+    "severity": "Critical",
+    "description": "Wing FTP Server <= 7.4.3 unauthenticated RCE via NULL byte injection in the username parameter during login. Improper NULL byte handling allows Lua code injection into session files, which are executed on authenticated endpoint access (/dir.html). Anonymous login must be enabled.",
+    "impact": "Unauthenticated remote code execution with elevated privileges when anonymous login is enabled on Wing FTP Server.",
+    "exploit_class": "RemoteCodeExecution",
+    "preconditions": [
+      "Wing FTP Server version <= 7.4.3",
+      "Anonymous login enabled on the server",
+      "Web administration interface reachable (default port 5466)"
+    ],
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-47812",
+      "https://www.rcesecurity.com/2025/06/what-the-null-wing-ftp-server-rce-cve-2025-47812/",
+      "https://github.com/4m3rr0r/CVE-2025-47812-poc"
+    ]
+  }
+]

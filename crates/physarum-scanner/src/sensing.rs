@@ -168,7 +168,9 @@ impl SensingProfile {
                 batch_size: 200,
                 timeout_ms: 2_000,
                 tries: 2,
-                port_subset: Some(STIMULUS_PORTS),
+                // None here — resolved at runtime via effective_stimulus_ports()
+                // so PHYSARUM_STIMULUS_PORTS env var can extend coverage without recompile.
+                port_subset: None,
                 skip_host_discovery: true,
             },
             Self::NoDiscovery => ProfileParams {
@@ -240,6 +242,27 @@ pub const DEEP_PORTS: &[u16] = &[
 /// registered service name. It exercises the `UnknownNeedsMoreSensing → HTTP
 /// probe → ConfirmedWeb` adaptive fingerprint path (PF-3.1 validation).
 pub const STIMULUS_PORTS: &[u16] = &[22, 80, 443, 7777, 8080, 8443, 3000, 5000, 9000];
+
+/// Returns the effective stimulus port list for the current process.
+///
+/// Reads `PHYSARUM_STIMULUS_PORTS` (comma-separated u16 values) when set;
+/// falls back to the compiled-in `STIMULUS_PORTS` constant otherwise.
+/// This lets Docker Compose and AWS launch configs extend the scan scope
+/// (e.g. add :21 for FTP, :25 for SMTP) without recompiling the agent.
+///
+/// Example env: `PHYSARUM_STIMULUS_PORTS=21,22,80,443,8080`
+pub fn effective_stimulus_ports() -> Vec<u16> {
+    if let Ok(raw) = std::env::var("PHYSARUM_STIMULUS_PORTS") {
+        let ports: Vec<u16> = raw
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        if !ports.is_empty() {
+            return ports;
+        }
+    }
+    STIMULUS_PORTS.to_vec()
+}
 
 /// Port set for `StartupLocalDiscovery` — /24 first-pass sweep on agent startup.
 ///
