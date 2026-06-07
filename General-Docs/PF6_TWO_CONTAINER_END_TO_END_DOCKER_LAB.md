@@ -1,367 +1,312 @@
-# PF-6 — Two-Container End-to-End Docker Lab
+# PF-6 — End-to-End Multi-Target Docker Lab
 
-**Issue:** #135  
-**Status:** Design — pending implementation  
-**Author:** Dev Lead (AI-assisted)  
-**Date:** 2026-06-05
+> Historical note: this document originated as the two-container PF-6 design. The implemented lab now uses one organism container and two target containers.
+
+**Status:** Phase 1 implemented and evidenced; Phase 2 active through Issue #141  
+**Current topology:** `host-a` + `host-b` + `host-c`  
+**Primary implementation PRs:** #139 and #140
 
 ---
 
 ## 1. Purpose
 
-PF-6 is the first end-to-end Docker Lab where `physarum-maze` operates against a **genuinely vulnerable container** (not a passive HTTP fixture). The goal is to prove that every skill absorbed by the organism — scan, spore enrichment, LLM reasoning, policy gate, lineage — fires dynamically without any hardcoded path, and that the organism can write evidence of contact onto the target volume.
+PF-6 validates the complete `physarum-maze` organism loop in Docker before adapting the same design to the controlled AWS Lab.
 
-The lab is structured in two phases:
-
-| Phase | Gate condition | Scope |
-|-------|---------------|-------|
-| Phase 1 | Lineage proves full dynamic pipeline | Scan → Spore → VulnIntel → LLM → PolicyGate → lineage |
-| Phase 2 | Container B volume receives a file | Replication discussion begins only after Phase 1 proof |
-
----
-
-## 2. Lab Topology
-
-Container A needs two network interfaces: one to reach Container B (isolated lab subnet), and one to reach the LLM API endpoint (external). Container B is **only** on the internal network — no Internet access.
+The lab must prove real dynamic behavior rather than a scripted success path:
 
 ```text
-Internet / LLM API (api.openai.com or Ollama on host)
-         │
-         │  physarum-pf6-external (Docker bridge, no internal: true)
-         │
-┌────────┴────────────────────────────────┐
-│ Container A — physarum-maze             │
-│   eth0: DHCP        (external/LLM)     │
-│   eth1: 172.21.0.2  (internal lab)    │
-└────────┬────────────────────────────────┘
-         │ sense / probe (eth1 — internal)
-         │  physarum-pf6-internal (internal: true — no Internet)
-         │
-┌────────┴────────────────────────────────┐
-│ Container B — vuln service              │
-│   172.21.0.3  (internal lab only)      │
-│   CVE RCE-capable target               │
-│   volume: /tmp/physarum                │
-└─────────────────────────────────────────┘
+stimulus
+  -> scan
+  -> service/version evidence
+  -> LLM Turn 1 template selection
+  -> physarum-sporangium execution
+  -> PatternFindingSummary
+  -> VulnerabilityIntelService
+  -> vulnerability_candidates
+  -> LLM Turn 2 ordered strategy
+  -> PolicyGate
+  -> controlled execution
+  -> lineage
 ```
 
-Port 22 is intentionally **not** exposed on Container B. Container A discovers it via the scan profile, not via SSH.
-
-> **Why two networks:** `internal: true` on a Docker bridge disables all external routing for every container on that network. If Container A were only on the internal network, it could not reach the LLM API. The dual-network design isolates Container B from the Internet while leaving Container A's LLM path open.
+No target IP, CVE, template, finding, policy result, or colonization result may be hardcoded into the organism control path.
 
 ---
 
-## 3. Container A — physarum-maze
+## 2. Current topology
 
-The organism image is `physarum-maze:lab` (cloud-built, nuclei-legacy baked in).
-
-Capabilities required:
-```yaml
-cap_add:
-  - NET_RAW
-  - NET_ADMIN
+```text
+External LLM endpoint
+        |
+        |  regular Docker network
+        |
++-------+---------------------------------------------------+
+| host-a — physarum-maze seed                              |
+| - startup sensing                                        |
+| - automatic interface selection                          |
+| - physarum-scan / physarum-scanner                       |
+| - LLM Turn 1                                             |
+| - physarum-sporangium                                    |
+| - VulnerabilityIntelService                              |
+| - LLM Turn 2                                             |
+| - PolicyGate                                             |
+| - lineage                                                |
++-------+---------------------------------------------------+
+        |
+        |  isolated PF-6 internal network
+        |
+   +----+--------------------+
+   |                         |
++--+------------------+  +---+-----------------------------+
+| host-b              |  | host-c                          |
+| Struts service path |  | ProFTPD / Wing FTP service path|
+| SSH for Phase 2     |  | SSH for Phase 2                |
++---------------------+  +---------------------------------+
 ```
 
-Key environment variables:
+The two target containers are necessary to demonstrate that the organism is not tied to one service, one port, one CVE, or one protocol.
+
+`host-b` and `host-c` remain isolated from the Internet. Only `host-a` receives the external network path needed for the configured LLM endpoint.
+
+---
+
+## 3. Container roles
+
+### 3.1 host-a — organism controller
+
+`host-a` runs `physarum-maze` in seed mode with:
+
+```text
+- startup sensing
+- ICMP/TCP-eBPF stimulus support where applicable
+- automatic interface selection from the allowed CIDR
+- HTTP and TCP service probing
+- builtin and nuclei-legacy template access
+- real or mock OpenAI-compatible LLM support
+- vulnerability intelligence
+- PolicyGate
+- lineage persistence
+- temporary SSH key lifecycle for Phase 2
+```
+
+Representative environment variables:
+
 ```env
-PHYSARUM_LLM_ENDPOINT=https://api.openai.com      # or mock-http for dry runs
+PHYSARUM_LLM_ENDPOINT=https://api.openai.com
 PHYSARUM_LLM_MODEL=gpt-4o-mini
-LLM_API_KEY=${LLM_API_KEY:-}
-PHYSARUM_LLM_LOG_PROMPTS=true                      # required for Phase 1 evidence
+LLM_API_KEY=...
+PHYSARUM_LLM_LOG_PROMPTS=true
 PHYSARUM_VULN_INTEL_MODE=auto
 PHYSARUM_VULN_INTEL_CACHE_DIR=/advisory-cache
 PHYSARUM_TEMPLATE_DIR=/templates/nuclei-legacy
-PHYSARUM_TEMPLATE_TAGS=rce,cve                     # narrow to relevant templates
-PHYSARUM_TEMPLATE_SEVERITY=critical,high
 ```
 
-Runtime command:
-```bash
+Representative runtime behavior:
+
+```text
 --mode seed
---interface eth1
---llm-endpoint ${PHYSARUM_LLM_ENDPOINT}
---llm-model ${PHYSARUM_LLM_MODEL}
---llm-allowed-cidr 172.21.0.0/24
+--interface auto
+--llm-allowed-cidr <pf6-internal-cidr>
 --discovery-interval-secs 5
 --stimulus-timeout-secs 120
 ```
 
-Volumes:
-```yaml
-volumes:
-  - ./lineage:/tmp          # lineage JSON written here
-  - ../examples/advisory-cache:/advisory-cache:ro
-```
+### 3.2 host-b — Struts path
+
+`host-b` exposes the Struts path used by the PF-6 evidence design and an SSH service used only during the explicitly enabled Phase 2 propagation stage.
+
+The Struts CVE is lab data, not a hardcoded organism decision.
+
+### 3.3 host-c — FTP paths
+
+`host-c` exposes the ProFTPD and Wing FTP service paths plus an SSH service for Phase 2.
+
+This target exercises TCP/non-web evidence handling and prevents the lab from becoming a Struts-only demonstration.
 
 ---
 
-## 4. Container B — Intentionally Vulnerable Service
+## 4. Phase 1 — completed dynamic evidence loop
 
-### 4.1 Selection Criteria
+PF-6 Phase 1 was implemented through PR #140.
 
-The target service must:
-
-1. Expose a version string in its HTTP `Server:` header or TCP banner (for `physarum-spore` to extract)
-2. Have a known CVE with CVSS ≥ 7.0 mapped in `examples/advisory-cache/`
-3. Be available as a pre-built Docker image (no custom build required)
-4. Allow file writes to a mounted volume on successful exploitation path (Phase 2 gate)
-
-### 4.2 Recommended Candidate — Apache Struts 2.5.25 (CVE-2021-31805)
-
-```yaml
-image: vulhub/struts2:2.5.25   # CVE-2021-31805, OGNL injection RCE (Struts 2.5.25 < 2.5.30 fix)
-```
-
-| Property | Value |
-|----------|-------|
-| CVE | CVE-2021-31805 |
-| CVSS | 9.8 (Critical) |
-| Mechanism | OGNL expression injection in HTTP `Content-Type` header |
-| Server header | `Apache-Coyote/1.1` or `Apache Tomcat` |
-| Port | 8080 |
-| Phase 2 vector | POST to `/index.action` with OGNL payload writing to `/tmp/physarum/` |
-
-### 4.3 Alternative — Log4Shell (CVE-2021-44228)
-
-```yaml
-image: vulhub/log4j:2.14.1-rce   # CVE-2021-44228, Critical
-```
-
-Log4Shell is widely documented and has a clear JNDI injection path. However, it requires a secondary LDAP callback server for full exploitation, which complicates the Phase 1 flow. Prefer Struts for the initial implementation.
-
-### 4.4 Advisory Cache Entry Required
-
-Before the lab runs, `examples/advisory-cache/` must contain an entry for the selected CVE:
-
-```json
-{
-  "advisory_id": "CVE-2021-31805",
-  "description": "Apache Struts OGNL injection via Content-Type header in multipart requests",
-  "severity": "critical",
-  "cvss_score": 9.8,
-  "affected_service": "apache-struts",
-  "ranges": [
-    { "introduced": "2.0.0", "fixed": "2.5.30" }
-  ],
-  "cwe_ids": ["CWE-917"],
-  "references": ["https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-31805"]
-}
-```
-
-Volume configuration for Container B:
-```yaml
-volumes:
-  - ./pf6-target-volume:/tmp/physarum  # Phase 2 gate — organism deposits evidence here
-```
-
----
-
-## 5. Phase 1 — Full Dynamic Pipeline Validation
-
-### 5.1 What Must Fire (No Hardcoded Paths)
+Required behavior:
 
 ```text
-startup-sensing
-  ↓
-physarum-scan: discovers 172.21.0.3:8080 (service_guess="http-alt")
-  ↓
-physarum-spore: runs matching templates against 172.21.0.3:8080
-  - server-version-exposed template fires → extracted_facts["server"] = "Apache"
-  - or content-type-header template fires → extracted_facts["framework"] = "struts"
-  ↓
-VulnerabilityIntelService: (service="apache-struts", version=detected)
-  - LocalAdvisoryCache hit → CVE-2021-31805 (confidence 0.85)
-  ↓
-DiscoveryQuery: vulnerability_candidates = [CVE-2021-31805 (cvss=9.8, critical)]
-  ↓
-physarum-llm: LLM receives enriched query
-  - reasoning_summary references CVE-2021-31805
-  - proposes Http propagation on port 8080
-  ↓
-PolicyGate: Accepted (confidence ≥ 0.7 threshold)
-  ↓
-lineage: LlmAttemptEvidence recorded
-  - stimulus_source = "startup-sensing"
-  - cve_candidate_ids = ["CVE-2021-31805"]
-  - strategy_confidence = 0.85
-  - policy_decision = "Accepted"
+1. startup sensing begins without an external ping harness.
+2. host-a selects the internal interface automatically.
+3. host-b and host-c are discovered dynamically.
+4. physarum-scan records open ports and service/banner/version hints.
+5. LLM Turn 1 receives a compact template catalog.
+6. Turn 1 selects applicable template IDs dynamically.
+7. physarum-sporangium executes selected HTTP/TCP templates.
+8. PatternFindingSummary is produced from observed responses.
+9. VulnerabilityIntelService creates vulnerability_candidates.
+10. LLM Turn 2 receives the enriched DiscoveryQuery.
+11. Turn 2 returns an ordered typed strategy.
+12. PolicyGate evaluates the strategy.
+13. LlmAttemptEvidence and lineage record decisions, failures, and retries.
 ```
 
-### 5.2 Evidence Required for Phase 1 Completion
+Baseline evidence:
 
-The lineage JSON must contain:
-- `cve_candidate_ids` with `CVE-2021-31805` (or the selected CVE)
-- `reasoning_summary` that references the CVE by ID or description
-- `policy_decision = "Accepted"`
-- `strategy_confidence ≥ 0.7`
-- `stimulus_source = "startup-sensing"` (dynamic — not a manual trigger)
-
-The committed evidence file will be:
-```
-examples/lab-evidence/physarum-lineage-pf6-phase1-docker-lab.json
-```
-
-### 5.3 PHYSARUM_LLM_LOG_PROMPTS Evidence
-
-When `PHYSARUM_LLM_LOG_PROMPTS=true`, the full prompt and raw LLM response appear in container logs. The Phase 1 evidence commit must include:
-- The lineage JSON
-- A captured excerpt of the log showing the DiscoveryQuery and LLM response (operator IP masked as `<OPERATOR_IP>`)
-
----
-
-## 6. Phase 2 — Container B Volume Write (Replication Discussion Gate)
-
-Phase 2 does not begin until Phase 1 lineage is committed and validated by the Manager.
-
-### 6.1 Gate Condition
-
-Container B's volume (`./pf6-target-volume:/tmp/physarum`) must contain a file written by the organism after a successful propagation action. This proves that `physarum-maze` did not merely propose a path — it executed a verifiable interaction that left a trace on the target.
-
-The file can be as simple as:
-```
-/tmp/physarum/physarum-contact-proof.txt
-```
-
-with content:
 ```text
-physarum-maze contact: 2026-06-xx CVE-2021-31805 propagation attempt recorded
+examples/evidence/pf6-tcp-probing-dualcve-phase1.json
 ```
 
-### 6.2 What Phase 2 Does NOT Include
+Additional lineage evidence may exist under `examples/lab-evidence/`.
 
-- No exploit weaponization or payload execution beyond the minimal file write
-- No exfiltration
-- No lateral movement beyond the isolated 172.21.0.0/24 subnet
-- Container B has no Internet access (internal network only)
-- Lab is destroyed after evidence is committed
+### 4.1 Phase 1 integrity rule
 
-### 6.3 Phase 2 Leads to Replication Design
+Phase 1 is the reference behavior for Docker and future AWS adaptation.
 
-After the file write is confirmed, the Manager will define the replication model. The leading candidates at that point are:
+It must not be replaced by:
 
-| Model | Description |
-|-------|-------------|
-| SCP propagation | Organism copies itself to `/tmp/physarum/` on the target and executes |
-| HTTP upload | Organism POSTs a payload via the confirmed RCE path |
-| eBPF-guided | eBPF observer detects successful connection and triggers propagation routine |
-
-The specific mechanism is a Manager decision, not a Dev Lead decision. This document does not pre-choose.
-
----
-
-## 7. Security Invariants
-
-These invariants apply to both phases and must be enforced at container runtime:
-
-| Invariant | Enforcement |
-|-----------|------------|
-| `exploit_enabled=false` by default | `physarum-maze` PolicyGate flag |
-| Container B has no Internet access | `physarum-pf6-internal` with `internal: true` — Container B on this network only |
-| Container A can reach LLM API | Container A also on `physarum-pf6-external` (regular bridge) |
-| `LLM_API_KEY` never in lineage | `llm_api_key` field stripped before lineage write |
-| Operator IP masked | `<OPERATOR_IP>` in all committed files |
-| Lab destroyed after evidence | `docker compose down -v` after commit |
-| Container B volume is ephemeral | `./pf6-target-volume/` gitignored |
-
----
-
-## 8. docker-compose-pf6.yml Skeleton
-
-```yaml
-# PF-6 two-container end-to-end lab (design skeleton — not yet implemented)
-#
-# Network design:
-#   physarum-pf6-external  — regular bridge (Internet access allowed)
-#                            Container A eth0 (Docker alphabetical sort: external < internal)
-#                            Used to reach LLM API
-#
-#   physarum-pf6-internal  — isolated bridge (internal: true)
-#                            Container B is ONLY here: no Internet access
-#                            Container A eth1 — used to sense/probe Container B
-#
-# Container B cannot initiate connections to the Internet.
-# Container A can call the LLM API via eth1 and still probe Container B via eth0.
-
-networks:
-  physarum-pf6-internal:
-    driver: bridge
-    internal: true     # Container B: no Internet
-    ipam:
-      config:
-        - subnet: 172.21.0.0/24
-
-  physarum-pf6-external:
-    driver: bridge     # Container A: LLM API reachable here
-
-services:
-  host-b:
-    image: vulhub/struts2:2.5.25
-    container_name: physarum-pf6-target
-    networks:
-      physarum-pf6-internal:     # internal only — no Internet
-        ipv4_address: 172.21.0.3
-    volumes:
-      - ./pf6-target-volume:/tmp/physarum
-
-  host-a:
-    image: physarum-maze:lab
-    container_name: physarum-pf6-agent
-    depends_on:
-      - host-b
-    networks:
-      physarum-pf6-internal:     # eth1 — alphabetical sort: external=eth0, internal=eth1
-        ipv4_address: 172.21.0.2
-      physarum-pf6-external:     # eth0 — used to reach LLM API
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-    environment:
-      RUST_LOG: "physarum_maze=debug,physarum_llm=debug,physarum_sporangium=info"
-      LLM_API_KEY: "${LLM_API_KEY:-}"
-      PHYSARUM_LLM_LOG_PROMPTS: "${PHYSARUM_LLM_LOG_PROMPTS:-false}"
-      PHYSARUM_VULN_INTEL_MODE: "${PHYSARUM_VULN_INTEL_MODE:-auto}"
-      PHYSARUM_VULN_INTEL_CACHE_DIR: "/advisory-cache"
-      PHYSARUM_TEMPLATE_TAGS: "${PHYSARUM_TEMPLATE_TAGS:-rce,cve}"
-      PHYSARUM_TEMPLATE_SEVERITY: "${PHYSARUM_TEMPLATE_SEVERITY:-critical,high}"
-    command: >
-      --mode seed
-      --interface eth1
-      --llm-endpoint ${PHYSARUM_LLM_ENDPOINT:-mock-http}
-      --llm-model ${PHYSARUM_LLM_MODEL:-gpt-4o-mini}
-      --llm-allowed-cidr 172.21.0.0/24
-      --discovery-interval-secs 5
-      --stimulus-timeout-secs 120
-    volumes:
-      - ./lineage:/tmp
-      - ../examples/advisory-cache:/advisory-cache:ro
+```text
+- fixed target IPs in Rust logic
+- fixed CVE results
+- fixed template IDs
+- injected findings
+- forced vulnerability candidates
+- bypassed LLM turns
+- forced PolicyGate acceptance
+- predeclared colonization success
 ```
 
+Docker Compose may define the lab subnet and services. That configuration must not replace dynamic sensing and decision logic.
+
 ---
 
-## 9. Implementation Order
+## 5. Phase 2 — active, Issue #141
 
-| Step | Status | Notes |
-|------|--------|-------|
-| 1. Advisory cache for CVE-2020-17530 | ✅ Done | `examples/advisory-cache/apache-struts.json` — both CVE-2020-17530 and CVE-2021-31805 |
-| 2. Nuclei template confirmed | ✅ Done | CVE-2020-17530.yaml and CVE-2021-31805.yaml present in nuclei-legacy |
-| 3. Wire `all_templates_with_yaml()` | ✅ Done | `llm_loop.rs` — `extract_cve_ids` also reads CVE from `check_id` |
-| 4. `docker-compose-pf6.yml` | ✅ Done | eth1=internal (alphabetical Docker sort), image=`vulhub/struts2:2.5.25` |
-| 5. Phase 1 dry-run (mock-http) | ✅ Done | 2105 templates, 74 CVEs, CVE-2020-17530 in candidates, policy=Accepted |
-| 6a. Dry-run evidence committed | ✅ Done | `examples/lab-evidence/physarum-lineage-pf6-phase1-dryrun-docker-lab.json` |
-| 6b. Phase 1 final run (real LLM) | ⏳ Pending | Requires `LLM_API_KEY`; must produce `reasoning_summary` referencing CVE |
-| 6c. Final evidence committed | ⏳ Pending | `examples/lab-evidence/physarum-lineage-pf6-phase1-docker-lab.json` |
-| 7. Manager approval → Phase 2 | ⏳ Pending | Phase 2 does NOT start without explicit approval |
+Phase 2 does not redesign the organism. It extends the unchanged Phase 1 pipeline with the already-selected propagation mechanism.
 
-### Phase 1 Final Run Command
+### 5.1 Propagation sequence
+
+```text
+1. Phase 1 dynamically selects a target and strategy.
+2. PolicyGate evaluates the strategy with Phase 2 explicitly enabled.
+3. host-a generates a temporary SSH keypair.
+4. Only the temporary public key is introduced on the selected target through the approved lab path.
+5. The private key remains local to host-a.
+6. The private key is never sent to the LLM or written to lineage.
+7. SCP transfers the currently running `__self__` physarum-maze binary.
+8. SSH starts the transferred binary in propagated mode.
+9. The new node receives and continues the original lineage context.
+10. `colonized` is recorded only after SCP, SSH, and propagated startup succeed.
+11. Temporary key material is deleted after success, failure, timeout, or cleanup.
+```
+
+### 5.2 Required runner
+
+Use the existing runner:
 
 ```bash
-LLM_API_KEY=sk-... \
-PHYSARUM_LLM_LOG_PROMPTS=true \
-PHYSARUM_LLM_ENDPOINT=https://api.openai.com \
-PHYSARUM_LLM_MODEL=gpt-4o-mini \
-docker compose -f docker/docker-compose-pf6.yml up --abort-on-container-exit --timeout 300
+docker/pf6-lab.sh --phase2
 ```
+
+Phase 2 remains opt-in.
+
+### 5.3 Valid defect fixes
+
+Implementation changes are allowed only for real defects found during execution, such as:
+
+```text
+- temporary key lifecycle
+- public-key installation action
+- SCP user/path/key arguments
+- `__self__` resolution
+- SSH command construction
+- propagated-mode startup
+- lineage handoff
+- cleanup
+```
+
+Target-specific shortcuts are not valid fixes.
 
 ---
 
-*Phase 1 dry-run complete (2026-06-06). Awaiting real LLM run and Manager Phase 1 approval before Phase 2.*
+## 6. Phase 2 evidence
+
+Preserve the Phase 1 evidence and create a separate Phase 2 artifact, for example:
+
+```text
+examples/evidence/pf6-phase2-ephemeral-key-scp-lineage.json
+```
+
+The evidence must show:
+
+```text
+- dynamically selected target
+- observed ports and service hints
+- Turn 1 selected template IDs
+- templates actually executed
+- PatternFindingSummary
+- vulnerability candidate IDs and confidence
+- Turn 2 reasoning summary
+- ordered bootstrap actions
+- PolicyGate Accepted with Phase 2 enabled
+- temporary public-key path
+- SCP result = Success
+- SSH startup result = Success
+- propagated-mode startup evidence
+- lineage path/hop continuation
+- `colonized` recorded after success
+- temporary key cleanup
+```
+
+The evidence must not contain API keys, private keys, tokens, `.env.local` content, or raw secrets.
+
+A marker file alone is not sufficient evidence of propagation.
+
+---
+
+## 7. Safety invariants
+
+| Invariant | Enforcement |
+|---|---|
+| Docker-only until #141 completes | PF-6 scope |
+| target containers have no Internet path | isolated internal network |
+| LLM has no unrestricted shell authority | typed contracts and actions |
+| exploit-class behavior disabled by default | `PolicyGate` configuration |
+| Phase 2 explicitly enabled | opt-in runner/flags |
+| target must be inside allowed CIDR | `PolicyGate` |
+| private key remains local | local secret resolution |
+| lineage contains no raw secrets | serialization contract and review |
+| no hardcoded success path | code review and evidence comparison |
+| cleanup is mandatory | runner and executor lifecycle |
+
+---
+
+## 8. Completion criteria
+
+PF-6 Phase 2 is complete only when Issue #141 proves:
+
+```text
+- Phase 1 still behaves dynamically.
+- host-b and host-c remain discoverable.
+- Turn 1 and Turn 2 evidence is present.
+- selected HTTP/TCP templates actually execute.
+- PolicyGate accepts only under explicit Phase 2 policy.
+- SCP transfers the current maze binary.
+- SSH starts propagated mode.
+- lineage continues on the target.
+- colonization is recorded only after real success.
+- temporary keys are removed.
+- no hardcoded result was introduced.
+```
+
+After this gate, the same architecture and evidence contracts may be adapted to the controlled AWS Lab. AWS must not use a separate simplified implementation.
+
+---
+
+## 9. Authoritative references
+
+```text
+Issue #141
+General-Docs/ARCHITECTURE.md
+General-Docs/QUALITY_GATE.md
+General-Docs/SPORANGIUM_TEMPLATE_CATALOG_AND_LLM_INTEGRATION.md
+crates/physarum-llm/DESIGN.md
+docker/docker-compose-pf6.yml
+docker/pf6-lab.sh
+```
