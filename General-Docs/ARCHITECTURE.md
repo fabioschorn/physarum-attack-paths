@@ -1,425 +1,352 @@
 # System Architecture — Physarum Attack Paths
 
-**Status:** Living document — updated as gates are completed  
-**Last updated:** 2026-05-24  
-**Author:** Dev Lead
+**Status:** Living authoritative architecture document  
+**Last updated:** 2026-06-07  
+**Owner:** Project Architecture / Dev Lead
 
 ---
 
 ## 1. Overview
 
-`physarum-attack-paths` is a distributed system that discovers, scores, and autonomously traverses attack paths across heterogeneous computing environments. The design is modeled on the slime mold *Physarum polycephalum*: an organism with no central nervous system that nonetheless solves shortest-path problems by reinforcing productive routes and pruning dead ends.
+`physarum-attack-paths` is a Rust research prototype for discovering, evaluating, and recording viable attack paths in owned, isolated, authorized environments. The system borrows the reinforcement-and-decay intuition of *Physarum polycephalum*: useful paths are reinforced, weak or failed paths decay, and lineage preserves the organism's accumulated experience.
 
-The system has evolved through four architectural generations:
+The project has evolved through four architectural generations:
 
+```text
+Generation 1  coordinator + probing agents + adaptive graph scoring
+Generation 2  eBPF / packet observation as runtime stimulus
+Generation 3  autonomous physarum-maze propagation in controlled AWS labs
+Generation 4  evidence-driven, LLM-assisted, policy-gated organism behavior
 ```
-Generation 1   Server + Agent (Q_ij / q_ema / D_ij reinforcement model)
-Generation 2   eBPF passive flow observation (tracepoint/sock/inet_sock_set_state)
-Generation 3   Autonomous maze propagation (physarum-maze, PF-1, PF-2)
-Generation 4   LLM-aware adaptive propagation (physarum-llm — planned, Issue #106)
-```
 
-Each generation builds on the scoring foundation established in Generation 1. The scoring formula does not change — the input signals and propagation mechanisms generalize.
+Generations 1–3 remain valid historical foundations. Generation 4 is the current active architecture.
 
 ---
 
-## 2. Mathematical core
+## 2. Safety boundary
 
-### Edge reinforcement signals
+The system is intended only for:
 
-Each edge `(i, j)` carries three quantities updated continuously by the agents:
-
-```
-Q_ij     instantaneous probe quality (0..1) — success_rate, avg_rtt_ms
-q_ema    exponential moving average of Q_ij over a sliding window (WINDOW_SIZE=20)
-D_ij     conductivity — the persistent edge weight used by path selection
-```
-
-The EMA update is:
-
-```
-q_ema_new = α × Q_ij + (1 - α) × q_ema_prev     α = 1 / WINDOW_SIZE
+```text
+- local labs
+- Docker labs
+- owned AWS lab VPCs
+- explicitly authorized research environments
 ```
 
-### Path scoring (negative-log model, Gate K.1+)
+It is not intended for public targets, production deployment, Internet scanning, unauthorized exploitation, or unbounded propagation.
 
-The score for a path `p = [e1, e2, ..., ek]` is:
+The LLM is never the execution authority:
 
-```
-score(p) = exp( -(Σ -ln(max(q_ema_i, Q_EMA_FLOOR)) + HOP_WEIGHT × (k-1)) )
-```
-
-where:
-
-```
-Q_EMA_FLOOR  = 0.001   (prevents log(0))
-HOP_WEIGHT   = 0.05    (calibrated: healthy 3-hop beats degraded 1-hop when q_ema < 0.91)
+```text
+LLM proposes.
+PolicyGate decides.
+Executor performs only typed, allowed actions.
+Lineage records the result.
 ```
 
-This is the scoring model from Gate K.1 onward. Earlier gates used a simpler product formula.
-
-### Physarum-maze scoring (PF-1, PF-2)
-
-Autonomous propagation uses a per-edge multiplier model:
-
-```
-Productive hop (new node)      × 1.5   (reinforcement)
-Dead end (no further hops)     × 0.05  (rapid decay)
-Already colonized (secondary)  × 0.8   (mild penalty — occupied, not failed)
-Secondary conduit confirmed    × 1.2   (preserved, not discarded)
-```
-
-Edge scores persist in `physarum-lineage.json` under the `scores` map keyed by `"src_ip:dst_ip"`.
+Secrets remain local. API keys and SSH private keys must never appear in prompts, strategy contracts, or lineage.
 
 ---
 
-## 3. Crate layout
+## 3. Current organism architecture
 
-```
-physarum-attack-paths/
-├── crates/
-│   ├── physarum-protocol          wire types: ProbeReport, FlowObservation, GraphEdge
-│   ├── physarum-server            HTTP coordinator: /agents, /graph, /paths, /flow-observations
-│   ├── physarum-agent             peer-probing agent: probes, EMA, report dispatch
-│   ├── physarum-ebpf-observer     eBPF userspace sidecar (Aya); TCP state tracepoint
-│   ├── physarum-ebpf-observer-ebpf  eBPF bytecode (no_std)
-│   ├── physarum-packet-observer   raw-socket stimulus capture (ICMP + TCP SYN)
-│   ├── physarum-packet-observer-ebpf  eBPF bytecode for packet observer
-│   ├── physarum-scanner           native async discovery engine
-│   ├── physarum-probe             probe execution library (shared by agent and maze)
-│   ├── physarum-node              node runtime (role selection, stimulus dispatch)
-│   ├── physarum-node-runtime      node runtime library
-│   └── physarum-maze              PF-1/PF-2 self-propagating maze agent (single binary)
-└── examples/
-    ├── local-lab/                 A/B/C local process lab
-    ├── docker-lab/                A/B/C/D Docker Compose lab
-    ├── aws-lab/
-    │   ├── terraform/             AWS Modes 1, 2, tc/netem, Gate K/K.1
-    │   ├── terraform-pf1/         PF-1 organic expansion maze lab
-    │   ├── terraform-pf2/         PF-2 adaptive re-routing lab
-    │   ├── ansible/               Gate K/K.1 verification playbooks
-    │   ├── ansible-pf1/           PF-1 verification playbooks
-    │   └── ansible-pf2/           PF-2 verification playbooks
-    └── formal/tla/                TLA+ edge dynamics model
+`physarum-maze` is the organism controller and primary active binary.
+
+```text
+startup_sensing / ICMP / TCP-eBPF stimulus
+  -> physarum-scan / physarum-scanner
+  -> SensingResult / PortScan
+  -> service classification and version/banner evidence
+  -> LLM Turn 1: dynamic template selection
+  -> physarum-spore / physarum-sporangium
+  -> HTTP/TCP template execution
+  -> PatternFindingSummary
+  -> VulnerabilityIntelService
+  -> vulnerability_candidates
+  -> DiscoveryQuery
+  -> LLM Turn 2: ordered PropagationStrategy
+  -> PolicyGate
+  -> typed bootstrap executor
+  -> LlmAttemptEvidence / lineage
+  -> propagated node, only after real success
 ```
 
----
+### 3.1 Component responsibilities
 
-## 4. Generation 1 — Server + Agent
-
-### Topology
-
-```
-physarum-server     coordinator; holds the authoritative graph in memory
-physarum-agent      peer-probing agent; probes targets, reports to coordinator
-```
-
-Each agent is given a list of probe targets at launch. It probes each target at a fixed interval, computes a probe report, and POSTs it to the coordinator. The coordinator updates `q_ema` and `D_ij` for each `(agent_id, target_id)` edge.
-
-### Validated labs (Generation 1)
-
-| Lab | Gate | Result |
-|---|---|---|
-| Local A/B/C (process) | Phase 1A–1C | PASS |
-| Docker A/B/C | — | 15 passed |
-| Docker A/B/C/D | — | 34 passed |
-| TLA+ single edge model | — | TypeOK + Safety verified |
-| B/C/D TLA+ Path-Selection | Gate F | TypeOK + Safety + PathSelectionSafety; 148,877 states |
-| AWS Mode 1 (full mesh) | Gate C | failed=0 |
-| AWS Mode 2 (segmented B→C→D) | Gate E | failed=0; `/paths` routes via C only |
-| Docker weighted competing paths | Gate G | B→C→D↔B→E→D re-selection |
-| AWS tc/netem weighted paths | Gate H | Phase 1 B→C→D; Phase 2 B→E→D; Δ~5–7% |
-
----
-
-## 5. Generation 2 — eBPF passive flow observation
-
-### Motivation
-
-Active probing tells the coordinator what the agent *tried* to reach. Passive observation tells it what traffic is *actually flowing* — including connections the agent did not initiate.
-
-### Architecture
-
-```
-physarum-ebpf-observer     userspace; Aya runtime; posts FlowObservation to coordinator
-physarum-ebpf-observer-ebpf  kernel; tracepoint/sock/inet_sock_set_state; 5-tuple metadata only
-```
-
-The tracepoint fires on every TCP state change. The eBPF program extracts the 5-tuple (source IP/port, destination IP/port, protocol) and the state transition. It emits a ring-buffer event consumed by the userspace sidecar. The sidecar maps each event to a `FlowObservation` and posts it to the coordinator.
-
-**Security constraint:** metadata only. No packet payload is captured. The eBPF program reads socket fields — it does not copy sk_buff data.
-
-### FlowObservation wire type
-
-```rust
-struct FlowObservation {
-    agent_id:        String,
-    source_ip:       IpAddr,
-    source_port:     u16,
-    destination_ip:  IpAddr,
-    destination_port: u16,
-    protocol:        FlowProtocol,     // Tcp | Udp
-    direction:       FlowDirection,    // Inbound | Outbound
-    event:           FlowEvent,        // ConnectEstablished | ConnectClosed | ...
-    pid:             u32,
-    comm:            String,
-}
-```
-
-### Validated labs (Generation 2)
-
-| Lab | Gate | Result |
-|---|---|---|
-| FlowObservation model + POST/GET endpoints | Gate I | 64 tests pass |
-| eBPF observer runtime (AWS EC2, kernel 6.18) | Gate J | tracepoint attached; FlowObs posted; failed=0 |
-| eBPF observer agent-b→agent-c correlation | Gate J.1 | 5-tuple confirmed; q_ema≈1.0; failed=0 |
-| Segmented adaptive flow-path (5-node) | Gate K | q_ema>0 on B→E, C→D, D→E; degradation/recovery PASS |
-| Autonomous path selection (negative-log scoring) | Gate K.1 | Phase 1→2→3 path flip; selected_path correct; failed=0 |
-
----
-
-## 6. Generation 3 — Autonomous maze propagation
-
-### Motivation
-
-Gates A–K.1 proved the reinforcement model under controlled topologies where each node was pre-provisioned with an agent binary. Generation 3 asks the harder question: **can the organism provision itself?** The answer is yes — if the target node allows SSH and the agent has credentials.
-
-### physarum-maze binary
-
-`physarum-maze` is a single self-contained binary that:
-
-1. **Discovers** candidate hosts in the local /24 via `physarum-scanner` (native async TCP discovery, optional ICMP/UDP).
-2. **Stimulates** each candidate — raw TCP SYN socket, ICMP, and eBPF tracepoint events feed the same scoring loop.
-3. **Propagates** to the highest-scored candidate by SCP-ing the binary over empty-password SSH, then launching it on the remote node via `systemd-run`.
-4. **Records lineage** in `/tmp/physarum-lineage.json` — origin IP, propagation path, hop count, per-edge scores, visited IPs, secondary conduits.
-
-### Stimulus sources
-
-```
-TCP SYN (raw socket)          physarum-packet-observer captures inbound SYN packets; source IP = discovery signal
-ICMP echo reply               raw socket listener captures ICMP replies; source IP = live host signal
-eBPF tracepoint               tracepoint/sock/inet_sock_set_state; confirms connection-level reachability
-physarum-scanner /24 discovery enumerates reachable hosts in the local subnet
-```
-
-All four stimulus types feed the same scoring map keyed by source IP. Stronger stimulus → higher score → organism propagates there next.
-
-### Propagation mechanism
-
-```
-1. SCP physarum-maze binary to target:
-   sshpass -p '' scp -o StrictHostKeyChecking=no physarum-maze ec2-user@<target>:/tmp/
-
-2. Launch on target via systemd-run (daemonized, detached):
-   sshpass -p '' ssh ec2-user@<target> \
-     "systemd-run --unit=physarum-maze --no-ask-password /tmp/physarum-maze [flags]"
-
-3. Target node repeats from step 1 with its own discovered neighbors.
-```
-
-Empty-password SSH is enforced by `sshd_config.d/99-maze.conf` on each maze host:
-
-```
-Match Address <allowed_src_ips>
-    PasswordAuthentication yes
-    PermitEmptyPasswords yes
-    AllowUsers ec2-user
-```
-
-### Lineage JSON structure
-
-```json
-{
-  "origin":            "10.60.10.10",
-  "path":              ["10.60.10.10", "10.60.20.20", "10.60.30.20", "10.60.40.10"],
-  "hops":              3,
-  "visited":           ["10.60.10.10", "10.60.10.20", "10.60.20.10", ...],
-  "scores":            {"10.60.10.10:10.60.20.20": 1.5, "10.60.30.20:10.60.40.10": 2.25},
-  "colonized":         ["10.60.40.10"],
-  "secondary_conduits": [["10.60.50.10", "10.60.40.10"]]
-}
-```
-
-### PF-1 — Organic expansion maze
-
-**Topology:** 7 EC2 instances across three subnets.
-
-```
-front subnet    (10.60.10.0/24)   A (seed)
-layer-1 subnet  (10.60.20.0/24)   B, C
-layer-2 subnet  (10.60.30.0/24)   D, E, F
-layer-3 subnet  (10.60.40.0/24)   G (milestone)
-```
-
-**Propagation path validated:** A → C → E → F → G (55 seconds end-to-end)
-
-**Key behaviors:**
-- A propagates to whichever layer-1 node responds first (ICMP stimulus decides B vs C)
-- Layer-2 nodes D/E/F compete; organism takes the highest-scored path to G
-- Dead end D scores ×0.05, decays; organism routes around it
-- G's lineage records the full multi-hop origin chain
-
-### PF-2 — Adaptive re-routing
-
-**Topology:** PF-1 + 2 additional nodes (9 total).
-
-```
-front subnet    (10.60.10.0/24)   A (seed), A.1 (lateral — appears T+5min)
-cross subnet    (10.60.50.0/24)   X (cross-probe — appears T+5min)
-```
-
-**Three adaptive behaviors validated:**
-
-```
-1. Lateral discovery    A discovers A.1 via /24 physarum-scanner discovery
-                        A.1 (10.60.10.20) appears in A's lineage.visited
-
-2. Cross-subnet stimulus  X sends TCP SYN to A.1:22 every 30s (bash /dev/tcp built-in)
-                          A.1's raw socket captures the SYN → A.1 discovers X → propagates
-
-3. Secondary conduit    X finds G already colonized (physarum-maze binary + unit present)
-                        X records [X_IP, G_IP] in secondary_conduits (score ×0.8 × 1.2)
-                        G is NOT re-deployed — secondary conduit semantics preserved
-```
-
-**Terraform gate:** `time_sleep` resource delays A.1 and X creation by 5 minutes, simulating real-world corridor appearance during organism runtime.
-
----
-
-## 7. Generation 4 — LLM-aware adaptive propagation (planned)
-
-### The Causal Continuity Paradox of Origin and Destination
-
-The autonomous propagation mechanism described in Generation 3 has a structural constraint:
-
-> *If node A carries the agent and node B exists with SSH closed but port 80 open, the organism is confined. The agent observes B (eBPF sees port 80 traffic) but cannot propagate there — no propagation vector exists in its current repertoire.*
-
-Formally:
-
-```
-lim_{propagation_vectors→∞} P(reach | B.ssh=closed, B.port_80=open) → 1
-```
-
-As long as the propagation vector set is fixed (SSH only), the reachability probability for B is zero regardless of how many times the organism probes. The paradox: origin (A with a running agent) and destination (B with an accessible port) are causally connected by a network path that the organism cannot traverse with its current capabilities.
-
-The LLM oracle is planned to resolve this by treating the problem as a **context-aware propagation strategy query**: given a target's observed open ports, service banners, and OS hints, the oracle returns a scored propagation strategy. The full design is lab-only, safety-gated, and blocked on the threat-model review in Issue #106.
-
-### `physarum-llm` crate (Issue #106)
-
-```
-crates/physarum-llm/
-├── src/
-│   ├── lib.rs             LlmClient trait definition
-│   ├── types.rs           DiscoveryQuery, PropagationStrategy, PropagationMethod
-│   └── openai.rs          OpenAiCompatibleClient (async-openai, configurable base_url)
-└── Cargo.toml
-```
-
-**LLM-agnostic design:** the same `LlmClient` trait works with any OpenAI-compatible API:
-
-```
-Backend          base_url                       API key
-OpenAI           https://api.openai.com/v1      required
-Ollama (local)   http://localhost:11434/v1       none
-Groq             https://api.groq.com/openai/v1  required
-vLLM             http://<host>:8000/v1           optional
-```
-
-**Security constraints:**
-- `--llm-api-key` is NEVER stored in `physarum-lineage.json`
-- API key is injected locally via `$LLM_API_KEY` on each node by a bootstrap script
-- Exploit-based propagation is lab-only — `terraform-vuln/` isolated environment
-- Confidence threshold: LLM responses below 0.7 are rejected
-
-### physarum-maze CLI flags (planned)
-
-```
---llm-endpoint    http://localhost:11434/v1    OpenAI-compatible base URL
---llm-model       llama3.2                    model identifier
---llm-api-key     $LLM_API_KEY                injected at runtime, not stored
---llm-timeout-ms  10000                       per-request timeout
-```
-
-### Planned PoC lab (Issue #106)
-
-An isolated `terraform-vuln/` environment is planned to validate the paradox resolution. The lab is safety-gated: no SSH on the target host, isolated VPC, lab-only scope. Details are tracked in Issue #106 pending threat-model review.
-
----
-
-## 8. Gate progression summary
-
-| Gate | Description | Status |
-|---|---|---|
-| A | S3 artifact delivery + EC2 bootstrap design | COMPLETED |
-| B | S3 delivery + IAM role + user_data | COMPLETED |
-| C | AWS Mode 1 full mesh runtime | COMPLETED |
-| D | Phase identity (`lab_phase` variable) | COMPLETED |
-| E | AWS Mode 2 segmented B→C→D | COMPLETED |
-| F | B/C/D TLA+ Path-Selection Model | COMPLETED |
-| G | Docker weighted competing paths | COMPLETED |
-| H | AWS tc/netem weighted competing paths | COMPLETED |
-| I | FlowObservation model + POST/GET endpoints | COMPLETED |
-| J | eBPF observer runtime (AWS EC2) | COMPLETED |
-| J.1 | eBPF observer agent flow correlation | COMPLETED |
-| K | Segmented adaptive flow-path lab (5-node) | COMPLETED |
-| K.1 | Autonomous path selection (negative-log scoring) | COMPLETED |
-| L | physarum-scanner native discovery engine | COMPLETED |
-| L.2 | Local interface stimulus evidence | COMPLETED |
-| L.3 | ICMP stimulus evidence | COMPLETED |
-| M | physarum-maze node runtime (autonomous propagation) | COMPLETED |
-| M.4 | Scoring adapter / edge weighting | COMPLETED |
-| PF-1 | Organic expansion maze (7-node AWS lab) | COMPLETED |
-| PF-2 | Adaptive re-routing (9-node AWS lab + TCP/ICMP adaptive behaviors) | COMPLETED |
-| N | mTLS + Ed25519 lineage signatures | PLANNED |
-| physarum-llm | LLM-aware adaptive propagation (Issue #106) | PLANNED |
-
----
-
-## 9. Build and deployment
-
-### Rule: all production builds via Docker Build Cloud
-
-```bash
-docker buildx build \
-  --builder cloud-expertsonline-physarum-attack-paths \
-  --platform linux/amd64 \
-  --target physarum-maze \
-  -t physarum-maze:latest \
-  --output type=local,dest=./dist \
-  .
-```
-
-Local `cargo build` is acceptable for development iteration. Any binary deployed to AWS must come from Docker Build Cloud.
-
-### AWS lab lifecycle
-
-```bash
-# Deploy
-terraform -chdir=examples/aws-lab/terraform-pf2 apply -auto-approve
-
-# Verify (after ~15 minutes for full propagation)
-ansible-playbook \
-  -i examples/aws-lab/ansible-pf2/aws_ec2.yml \
-  examples/aws-lab/ansible-pf2/verify-pf2-adaptation.yml
-
-# Destroy
-terraform -chdir=examples/aws-lab/terraform-pf2 destroy -auto-approve
-```
-
-All AWS resources are destroyed after each lab run. No persistent infrastructure.
-
----
-
-## 10. Relationship between documents
-
-| Document | Purpose |
+| Component | Responsibility |
 |---|---|
-| `README.md` (root) | High-level vision, status table, quick start |
-| `General-Docs/ARCHITECTURE.md` (this file) | Full system architecture across all generations |
-| `General-Docs/QUALITY_GATE.md` | Gate definitions, acceptance criteria, evidence links |
-| `General-Docs/QUALITY_GATE.md` + GitHub Issues/PRs | Milestone history and gate evidence — authoritative record |
-| `General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md` | eBPF direction + role-fluid agent design intent |
-| `General-Docs/EBPF_FLOW_OBSERVATION_DESIGN.md` | eBPF Stage 0 design (Aya stack, tracepoint, sidecar) |
-| `General-Docs/INSIGHTS_AND_BRAINSTORM.md` | Exploratory ideas — not authoritative |
-| `General-Docs/DOCUMENTATION_GUIDELINES.md` | Documentation ownership model and contribution rules |
-| GitHub Issue #106 | physarum-llm architecture + Causal Continuity Paradox (formal spec) |
+| `physarum-maze` | Organism controller/runtime; seed and propagated modes; stimulus handling; two-turn LLM loop; policy-gated execution; lineage |
+| `physarum-scan` | Native scanner binary |
+| `physarum-scanner` | Scanner library; sensing profiles; port/service/banner/version evidence |
+| `physarum-spore` | Evidence-pattern CLI |
+| `physarum-sporangium` | Nuclei-compatible Rust evidence engine; builtin and `nuclei-legacy` templates; HTTP/TCP/DNS/SSL/WebSocket/workflow support |
+| `VulnerabilityIntelService` | Enriches findings through `LocalAdvisoryCache`, `OsvFeed`, affected-version ranges, confidence, and vulnerability sources |
+| `physarum-llm` | Provider-neutral contracts and clients; template-selection and propagation-reasoning queries; OpenAI-compatible and mock paths |
+| `PolicyGate` | Local authority boundary for CIDR, confidence, attempts, method class, and lab-only exploit controls |
+| `physarum-ebpf` / packet observers | Runtime TCP/ICMP/flow stimuli in controlled labs |
+| `physarum-probe` | Earlier graph/probe execution primitives |
+| `physarum-agent` / `physarum-server` | Historical coordinator-oriented adaptive graph architecture |
+| `formal/tla` | Formal models for scoring and path-safety properties |
+
+### 3.2 Crate layout
+
+```text
+crates/
+  physarum-protocol
+  physarum-server
+  physarum-agent
+  physarum-probe
+  physarum-node
+  physarum-node-runtime
+  physarum-scanner
+  physarum-scan
+  physarum-sporangium
+  physarum-spore
+  physarum-llm
+  physarum-maze
+  physarum-ebpf-observer
+  physarum-ebpf-observer-ebpf
+  physarum-packet-observer
+  physarum-packet-observer-ebpf
+```
+
+---
+
+## 4. Mathematical foundation
+
+The earlier graph architecture maintains per-edge signals:
+
+```text
+Q_ij   instantaneous probe quality
+q_ema  smoothed quality
+D_ij   persistent conductivity / edge weight
+```
+
+The negative-log path score used from Gate K.1 onward is:
+
+```text
+score(p) = exp(-(sum(-ln(max(q_ema_i, Q_EMA_FLOOR))) + HOP_WEIGHT * (k - 1)))
+```
+
+The autonomous maze lineage also records reinforcement and decay semantics for productive hops, dead ends, already-colonized nodes, and secondary conduits. These models remain relevant as graph memory even while the current active loop is evidence-driven.
+
+---
+
+## 5. Generation 1 — coordinator and probing agents
+
+Generation 1 established:
+
+```text
+physarum-agent -> ProbeReport -> physarum-server -> adaptive graph
+```
+
+Validated work includes local and Docker graph labs, AWS full-mesh and segmented labs, weighted competing paths, `tc/netem`, and TLA+ safety checks.
+
+This generation remains historical and is not the primary organism path.
+
+---
+
+## 6. Generation 2 — passive runtime observation
+
+Generation 2 introduced packet and eBPF observations:
+
+```text
+TCP/ICMP/flow event -> FlowObservation / stimulus -> discovery or scoring loop
+```
+
+The eBPF path captures metadata only. It does not copy packet payloads.
+
+Validated work includes Gates I, J, J.1, K, and K.1.
+
+---
+
+## 7. Generation 3 — autonomous maze propagation
+
+Generation 3 introduced `physarum-maze` and proved autonomous propagation in the controlled PF-1 and PF-2 AWS labs.
+
+### 7.1 Historical PF-1/PF-2 mechanism
+
+The PF-1/PF-2 labs used preconfigured, lab-only SSH behavior, including empty-password SSH in the isolated topology, to copy and start the binary remotely.
+
+```text
+SCP physarum-maze -> target
+SSH/systemd-run -> start remote maze
+lineage -> record path, hops, visited, colonized, scores, conduits
+```
+
+This mechanism is preserved as historical evidence. It is not the current PF-6 mechanism.
+
+### 7.2 Validated behavior
+
+PF-1 proved organic expansion through a seven-node AWS maze. PF-2 proved adaptive re-routing, delayed nodes, TCP stimulus, already-colonized handling, and secondary conduits in a nine-node topology.
+
+---
+
+## 8. Generation 4 — LLM-aware evidence-driven organism
+
+Generation 4 is implemented and active.
+
+### 8.1 PF-4 — real LLM integration
+
+PF-4 validated an OpenAI-compatible endpoint in Docker and proved:
+
+```text
+DiscoveryQuery -> real LLM -> PropagationStrategy -> PolicyGate -> lineage
+```
+
+### 8.2 PF-5 — adaptive sensing
+
+PF-5 introduced trigger-aware sensing:
+
+| Trigger | Profile | Semantics |
+|---|---|---|
+| startup | `StartupLocalDiscovery` | local subnet discovery; starts without an external ping harness |
+| ICMP | `RuntimeIcmpFast` | fast common-port profile |
+| TCP/eBPF | `RuntimeTcpEbpfFast` | fast no-host-discovery profile |
+| enrichment | `ServiceVersion` | deeper service/version evidence |
+
+Automatic interface selection now chooses the interface matching the allowed lab CIDR.
+
+### 8.3 PF-5.2 — dynamic vulnerability intelligence
+
+PF-5.2 added:
+
+```text
+PatternFinding
+  -> VulnerabilityIntelService
+  -> LocalAdvisoryCache / OsvFeed
+  -> affected-version evaluation
+  -> vulnerability_candidates
+  -> DiscoveryQuery
+```
+
+This is a first-class stage, not an optional fixture.
+
+### 8.4 Nuclei-compatible evidence engine
+
+`physarum-sporangium` contains the Rust implementation and the canonical `nuclei-legacy` template catalog. It supports the protocol, matcher, extractor, workflow, payload, and authentication capabilities documented in `SPORANGIUM_TEMPLATE_CATALOG_AND_LLM_INTEGRATION.md`.
+
+The LLM receives compact template metadata, not unrestricted template bodies or arbitrary shell authority.
+
+### 8.5 PF-6 Phase 1 — completed
+
+PR #140 completed the current multi-target Docker evidence loop:
+
+```text
+host-a  physarum-maze seed
+host-b  Struts target path
+host-c  ProFTPD / Wing FTP target paths
+```
+
+Phase 1 proved:
+
+```text
+- dynamic discovery of multiple targets
+- web and non-web service probing
+- LLM Turn 1 template selection
+- HTTP/TCP template execution
+- vulnerability-candidate enrichment
+- LLM Turn 2 ordered strategy reasoning
+- PolicyGate behavior
+- lineage evidence and retries
+```
+
+No target IP, CVE, template, finding, or policy result may be hardcoded into the organism control path.
+
+### 8.6 PF-6 Phase 2 — active, Issue #141
+
+Phase 2 reuses the unchanged Phase 1 pipeline and validates the already-selected propagation mechanism:
+
+```text
+1. host-a generates a temporary SSH keypair.
+2. Only the public key is introduced on the dynamically selected target through the approved lab path.
+3. The private key remains local to host-a and never reaches the LLM or lineage.
+4. SCP transfers the current `__self__` physarum-maze binary.
+5. SSH starts the target in propagated mode.
+6. The propagated node continues the original lineage.
+7. `colonized` is recorded only after real SCP, SSH, and startup success.
+8. Temporary key material is removed on success, failure, timeout, or cleanup.
+```
+
+Issue #141 is the authoritative acceptance gate. The Docker proof must remain generic enough to be adapted to the controlled AWS Lab without a separate fake or target-specific implementation.
+
+---
+
+## 9. LLM contracts and execution boundary
+
+The LLM flow is split into two turns.
+
+### Turn 1 — template selection
+
+Input includes observed ports, protocol/service hints, banner/version evidence, and compact template metadata.
+
+Output is a typed set of selected template IDs and selection reasoning.
+
+### Turn 2 — propagation reasoning
+
+Input includes findings, vulnerability candidates, prior rejections, source information, the temporary public key when applicable, and lineage context.
+
+Output is a typed `PropagationStrategy` with an ordered `BootstrapPlan`.
+
+### Policy and secrets
+
+```text
+- exploit-class behavior is disabled by default
+- Phase 2 must be explicitly enabled
+- CIDR allowlist and confidence thresholds remain mandatory
+- arbitrary `Custom` execution is disabled by default
+- private keys and API tokens never enter contracts or lineage
+- executor resolves local secret references at runtime
+```
+
+---
+
+## 10. Gate progression
+
+| Gate / phase | Status |
+|---|---|
+| A–K.1 | completed |
+| L / L.1 / L.2 / L.3 | completed |
+| M / M.4 | completed |
+| PF-1 | completed |
+| PF-2 | completed |
+| PF-4 | completed |
+| PF-5 | completed |
+| PF-5.2 | completed |
+| PF-6.0 documentation/design | completed via #138 |
+| PF-6.1 Phase 1 multi-target evidence | completed via #139/#140 |
+| PF-6.2 ephemeral-key SCP propagation | active — Issue #141 |
+| controlled AWS LLM Lab | planned after #141 |
+| Gate N identity/mTLS/signed lineage | planned |
+
+---
+
+## 11. Build and deployment
+
+Local `cargo` builds are acceptable for development. Lab artifacts deployed to AWS must use the project Docker Build Cloud process and must be destroyed after each controlled run.
+
+The current Docker PF-6 runner is:
+
+```bash
+docker/pf6-lab.sh
+docker/pf6-lab.sh --phase2
+```
+
+Phase 2 remains opt-in.
+
+---
+
+## 12. Documentation authority
+
+| Document | Authority |
+|---|---|
+| `README.md` | project front door and concise current status |
+| `General-Docs/ARCHITECTURE.md` | authoritative system design |
+| `General-Docs/QUALITY_GATE.md` | current advancement decision and evidence state |
+| `General-Docs/PF6_TWO_CONTAINER_END_TO_END_DOCKER_LAB.md` | PF-6 topology, invariants, and run model |
+| `General-Docs/SPORANGIUM_TEMPLATE_CATALOG_AND_LLM_INTEGRATION.md` | template engine and LLM integration model |
+| `crates/physarum-llm/DESIGN.md` | LLM contract decisions and phase state |
+| GitHub Issues/PRs | detailed historical delivery and runtime evidence |
+
+Detailed issue history belongs in GitHub, not duplicated throughout the architecture document.
