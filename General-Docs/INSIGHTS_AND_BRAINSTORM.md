@@ -4,31 +4,18 @@ This document captures exploratory ideas, research insights, and future directio
 
 It is intentionally separate from the operational prototype roadmap. The roadmap defines what we are building next. This document preserves promising ideas that may influence future architecture, research positioning, or invention framing.
 
-**Last reviewed:** 2026-05-30 — updated after `physarum-llm` contracts/client/Docker Lab work, Issue #114 structured sensing merge, Issue #115 `physarum-sporangium` / `physarum-spore` direction, and the Online/Offline Cortex brainstorm.
+**Last reviewed:** 2026-06-07 — updated after PF-6 Phase 1, Issue #141 Phase 2 planning, and the documentation synchronization pass.
 
 ---
 
 ## 1. MCPM-inspired attack-path density
 
-> **Status (2026-05-30):** All prerequisites through PF-2 and structured sensing are met. MCPM remains future work — deferred until the `physarum-llm` + evidence loop is validated with `physarum-sporangium`.
+> **Status:** Future research. MCPM remains deferred until the LLM/evidence/lineage loop is stable.
 
-### Source of the insight
-
-A media article described how a slime-mold-inspired algorithm helped astronomers map dark matter and the large-scale cosmic web.
-
-The algorithm behind that work is known as:
+A media article described how a slime-mold-inspired algorithm helped astronomers map dark matter and the large-scale cosmic web. The algorithm behind that work is known as:
 
 ```text
 Monte Carlo Physarum Machine — MCPM
-```
-
-Relevant research/software references for future review:
-
-```text
-- Revealing the Dark Threads of the Cosmic Web — Astrophysical Journal Letters, 2020
-- Monte Carlo Physarum Machine: Characteristics of Pattern Formation in Continuous Stochastic Transport Networks — Artificial Life, 2022
-- Polyphorm — MCPM-based interactive software for cosmological datasets
-- PolyPhy — newer Python/open-source MCPM-style tooling for transport-network simulation
 ```
 
 The important idea is not the astronomy domain itself. The important idea is the method: sparse input points can be transformed into an emergent transport-like network through many stochastic agents and accumulated path density.
@@ -36,17 +23,7 @@ The important idea is not the astronomy domain itself. The important idea is the
 The current project is compatible with that direction:
 
 ```text
-local observation window -> enriched ProbeReport -> Q_ij -> q_ema -> D_ij
-```
-
-Architectural interpretation:
-
-```text
-real agents = local sensory organs
-ProbeReport = stimulus
-q_ema = smoothed stimulus memory
-D_ij = adaptive edge conductivity
-server graph = long-term morphology
+local observation window -> enriched evidence -> Q_ij -> q_ema -> D_ij
 ```
 
 MCPM suggests a later extension:
@@ -70,22 +47,18 @@ Input: sparse points in 2D/3D space
 Method: many stochastic simulated particles/agents explore the domain
 Signal: accumulated trajectory density
 Output: continuous filament-like transport network
-Example use: cosmic web / dark matter / gas filament inference
 ```
 
 ### Current physarum-attack-paths prototype
 
 ```text
-Input: real agents, peer probes, local observations, structured sensing, future vulnerability-pattern evidence
-Method: distributed reports plus adaptive graph update
-Signal: Q_ij, q_ema, D_ij, SensingResult, future PatternFinding
-Output: explicit directed adaptive graph and evidence-backed reasoning loop
-Example use: cyber attack-path inference and prioritization
+Input: real agents, peer probes, local observations, structured sensing, PatternFinding evidence, vulnerability candidates, and lineage
+Method: distributed reports plus adaptive graph update and policy-gated reasoning
+Signal: Q_ij, q_ema, D_ij, SensingResult, PatternFindingSummary, VulnerabilityCandidate, LlmAttemptEvidence
+Output: explicit directed adaptive graph and evidence-backed organism loop
 ```
 
-The current system is graph-oriented and evidence-driven. MCPM is field/density-oriented and simulation-driven.
-
-A future design could combine both:
+The current system is graph-oriented and evidence-driven. MCPM is field/density-oriented and simulation-driven. A future design could combine both:
 
 ```text
 real agents provide evidence
@@ -126,14 +99,6 @@ secondary_conduits
 emergent_weak_paths
 ```
 
-Possible future endpoint family:
-
-```text
-GET /paths
-GET /path-density
-GET /conduits
-```
-
 This remains future research work, not the current implementation track.
 
 ---
@@ -155,18 +120,6 @@ assets/services/vulnerabilities = attractor points
 adaptive graph edges = possible movement channels
 simulated traversal = possible attacker movement
 trace density = probable attack-path conduit
-```
-
-Current graph fields that could feed future traversal:
-
-```text
-D_ij
-q_ema
-success_rate
-avg_rtt_ms
-jitter_ms
-sample_count
-last_seen
 ```
 
 Current and near-term evidence fields that may improve traversal:
@@ -196,7 +149,7 @@ credential_or_trust_signal
 
 A strong framing for the project:
 
-> The system does not merely compute a shortest attack path. It continuously remodels an adaptive attack-path morphology from distributed local stimuli, structured sensing evidence, and bounded validation outcomes; it may later use stochastic path-density exploration to reveal dominant and secondary attack conduits.
+> The system does not merely compute a shortest attack path. It continuously remodels an adaptive attack-path morphology from distributed local stimuli, structured sensing evidence, bounded validation outcomes, LLM proposals, PolicyGate decisions, and lineage memory; it may later use stochastic path-density exploration to reveal dominant and secondary attack conduits.
 
 This helps distinguish the project from traditional approaches:
 
@@ -210,9 +163,11 @@ this project -> distributed sensing -> adaptive morphology -> structured evidenc
 
 ## 6. Manager recommendation history
 
-> **Status (2026-05-30):** Steps 1–3 are complete. The project took a different direction for step 4 — autonomous propagation (`physarum-maze`, PF-1, PF-2), LLM-aware adaptive reasoning (`physarum-llm`, Issue #106), and native sensing/evidence modules were prioritised over MCPM. MCPM remains valid as a later research layer after the evidence loop stabilizes.
+The project took a different direction after the early graph gates: autonomous propagation (`physarum-maze`), LLM-aware adaptive reasoning (`physarum-llm`), structured sensing (`physarum-scanner`), and the Nuclei-compatible evidence engine (`physarum-sporangium`) were prioritized over MCPM.
 
-Original order, recorded for historical reference:
+MCPM remains valid as a later research layer after the current evidence loop stabilizes.
+
+Original order, retained for historical reference:
 
 ```text
 1. Keep validating A/B/C with q_ema and enriched ProbeReport.        ✔ DONE — Gates A–H
@@ -224,17 +179,11 @@ Original order, recorded for historical reference:
 Updated order:
 
 ```text
-4a. physarum-llm — LLM-aware adaptive reasoning                    → ACTIVE
-4b. physarum-scanner SensingProfile / SensingResult                ✔ DONE — Issue #114
-4c. physarum-sporangium / physarum-spore evidence engine           → ACTIVE — Issue #115
-4d. MCPM-inspired path density                                     → FUTURE
-```
-
-Reason:
-
-```text
-The Causal Continuity Paradox is a more fundamental gap than path density.
-An organism that can sense a port-80-only host needs structured evidence and a policy-gated reasoning loop before path-density research can add value.
+4a. physarum-llm — LLM-aware adaptive reasoning                    ✔ IMPLEMENTED
+4b. physarum-scanner SensingProfile / SensingResult                ✔ DONE
+4c. physarum-sporangium / physarum-spore evidence engine           ✔ ACTIVE CORE CAPABILITY
+4d. PF-6 Phase 2 ephemeral-key SCP propagation                     → ACTIVE — Issue #141
+4e. MCPM-inspired path density                                     → FUTURE
 ```
 
 ---
@@ -246,8 +195,8 @@ Possible future research scope:
 ```text
 - Review MCPM papers and available code.
 - Compare continuous MCPM with graph-based stochastic traversal.
-- Prototype a small offline simulation using a saved /graph snapshot.
-- Evaluate whether trace density adds useful prioritization beyond D_ij, SensingResult, PatternFinding, and simple path scoring.
+- Prototype a small offline simulation using a saved graph snapshot.
+- Evaluate whether trace density adds useful prioritization beyond D_ij, SensingResult, PatternFinding, and path scoring.
 ```
 
 This remains research-only until the LLM/evidence loop is stable.
@@ -256,26 +205,7 @@ This remains research-only until the LLM/evidence loop is stable.
 
 ## 8. Future Research: MCTS/Self-Play Graph Traversal for Path Prioritization
 
-> This is not part of the core architecture. The core remains Physarum polycephalum-inspired adaptive graph formation and path scoring; MCTS/self-play is recorded only as a possible future research layer for validation prioritization.
-
-> **Status (2026-05-30):** Prerequisites through PF-2 and structured sensing are now met. The active learned-prioritization role is currently being filled by `physarum-llm`, which uses an LLM oracle instead of RL. MCTS/self-play remains a valid long-term research direction and may complement the evidence loop once stable.
-
-### Source
-
-```text
-"Learning to traverse over graphs with a Monte Carlo tree search-based self-play framework"
-Engineering Applications of Artificial Intelligence, 2021
-https://www.sciencedirect.com/science/article/abs/pii/S0952197621002700
-```
-
-### Mapping to this project
-
-| Paper | This project |
-|---|---|
-| Graph = combinatorial optimization (TSP/VRP) | Graph = observed cyber reachability (`D_ij` / `q_ema`) |
-| Objective = learn efficient traversal/search policy | Objective = discover, rank, and validate attack paths |
-| Method = GAT/GRU + MCTS + RL + self-play | Method today = Physarum conductivity + adaptive path scoring + evidence loop |
-| Output = optimized tour/route | Output today = ranked paths via `/paths` and future evidence-informed choices |
+> This is not part of the core architecture. The core remains Physarum polycephalum-inspired adaptive graph formation and path scoring. MCTS/self-play is recorded only as a possible future research layer for validation prioritization.
 
 Possible future component:
 
@@ -287,8 +217,9 @@ Possible inputs:
 
 ```text
 GraphSnapshot
-EdgeSnapshot: source, target, d_ij, q_ema, sample_count
+EdgeSnapshot: source, target, D_ij, q_ema, sample_count
 SensingResult / PatternFinding evidence
+VulnerabilityCandidate evidence
 Agent metadata: layer, role, criticality, exposure, historical probe outcomes
 Target objective: crown jewel / protected node / target layer
 Recent validation outcomes
@@ -307,8 +238,6 @@ uncertainty-driven validation queue
 
 ## 9. Micromouse-inspired exploration and physarum-scanner candidate-path discovery
 
-> **Status (2026-05-30):** Gates K, K.1, L, L.2, L.3, M, M.4 are complete. PF-1 and PF-2 labs validated autonomous propagation beyond the original scope of Gate M. Issue #114 added structured sensing profiles and `SensingResult`, making the Micromouse analogy stronger at the sensory layer.
-
 Micromouse is a competitive robotics discipline in which an autonomous robot enters an unknown maze, explores it, builds an internal map, and then runs the fastest possible route to the centre.
 
 The key insight is the two-phase structure:
@@ -326,8 +255,8 @@ Mapping to this project:
 | Walls / corridors | Blocked / reachable network channels |
 | IR sensors | `physarum-scanner` + `SensingProfile` + eBPF/packet observation |
 | Maze memory | Adaptive graph / lineage memory |
-| Flood fill / route planning | Path scoring and reinforcement model (`/paths`) |
-| Fastest path, not shortest | Best path by latency, loss, jitter, stability, and flow evidence |
+| Flood fill / route planning | Path scoring and reinforcement model |
+| Fastest path, not shortest | Best path by evidence, reliability, stability, and policy outcome |
 | Single robot body | Distributed agent organism |
 
 The key difference:
@@ -337,21 +266,9 @@ Micromouse: one robot traverses a static maze.
 Physarum-attack-paths: a distributed agent organism occupies, senses, reinforces, and adapts through network paths. The maze is live and can change.
 ```
 
-### Sensing model
-
-```text
-physarum-scanner   -> candidate-path discovery and SensingResult evidence
-active probes      -> viability testing: confirm reachability and measure quality
-eBPF/packet senses -> passive or stimulus-driven confirmation without relying only on scheduled probes
-```
-
-`physarum-scanner` helps the organism identify possible next channels when no peer list is pre-declared — analogous to the Micromouse detecting a new open corridor.
-
 ---
 
 ## 10. Future agent autonomy: from local reactions to strategic organism behavior
-
-> **Status (2026-05-30):** The strategic autonomy questions listed in this section are now implemented in early form through `physarum-llm` contracts/mock/client and the Docker Lab reasoning hook. Issue #115 is the next evidence-enrichment step before deeper #106 integration.
 
 The current agent (`physarum-maze`) has moved beyond a fixed client role. It already performs bounded local autonomy:
 
@@ -359,7 +276,7 @@ The current agent (`physarum-maze`) has moved beyond a fixed client role. It alr
 observe eBPF flow cues
 filter by configured discovery scope
 apply cooldown/deduplication
-run exact-host discovery
+run startup or stimulus-targeted discovery
 promote discovered candidates to active probe targets
 record lineage evidence
 invoke lab-only reasoning when configured
@@ -369,8 +286,7 @@ This is the transition:
 
 ```text
 old model: receive a peer list -> probe peers -> report results
-current model: sense -> discover candidates -> validate -> record graph/lineage evidence
-next model: sense -> enrich evidence -> reason -> policy gate -> controlled action -> lineage
+current model: sense -> discover candidates -> validate -> enrich -> reason -> policy gate -> controlled action -> lineage
 ```
 
 Future role-fluid organism questions:
@@ -383,13 +299,6 @@ Should I propagate state to another node?
 Should I choose among multiple competing paths by myself?
 Should I abandon a weak region and reinforce another?
 Should I initiate secure mesh communication with another peer?
-```
-
-Research framing:
-
-```text
-The system is not only a coordinator that computes paths from reports.
-It is a distributed organism whose nodes can sense, validate, remember, choose, and eventually change role based on environmental conditions.
 ```
 
 The strategic autonomy questions remain the north star. `physarum-llm` is the first concrete gate that moves the organism from "react to known SSH targets" to "reason about structured evidence on any reachable host."
@@ -411,74 +320,11 @@ else:
     enter Offline Cortex Capsule Mode
 ```
 
-This split helps the organism handle two very different node classes:
+Online Cortex Mode is used when the agent can reach a configured LLM endpoint directly or through an approved relay. The LLM receives structured, bounded evidence summaries, not uncontrolled raw dumps.
 
-```text
-resource-rich node:
-  has outbound path to an LLM gateway or relay
-  can ask for richer reasoning
-  can submit graph context for evaluation
-  can receive policy-constrained plan proposals
+Offline Cortex Capsule Mode is used when the agent cannot reach the LLM, cannot reach a relay, or is running on a node with limited resources or restricted egress. The agent should not stop; it should become more conservative.
 
-resource-poor / isolated node:
-  has no Internet or no LLM route
-  may only have local network visibility
-  can still sense, record, score, and synchronize later
-  should not escalate autonomy only because external reasoning is unavailable
-```
-
-### Online Cortex Mode — LLM reachable
-
-Online Cortex Mode is used when the agent can reach a configured LLM endpoint directly or through an approved relay.
-
-Input to the LLM should be structured and bounded:
-
-```text
-SensingResult[]
-PatternFinding[]
-FlowObservation[]
-RecentLineage
-GraphSnapshot or GraphDelta summary
-AllowedLabScope
-PolicyConstraints
-KnownDeadEnds
-KnownSecondaryConduits
-```
-
-The LLM should not receive uncontrolled raw dumps. It should receive evidence summaries that are already filtered, capped, and policy-aware.
-
-Expected flow:
-
-```text
-sense
-  -> enrich evidence
-  -> update local graph delta
-  -> prepare GraphContext
-  -> call physarum-llm
-  -> receive PlanProposal
-  -> PolicyGate validation
-  -> controlled lab action only if accepted
-  -> append LineageEvent
-  -> sync graph/ledger deltas
-```
-
-In this mode, the LLM is a cortex-like advisor, not the permanent memory of the organism. The durable memory should still live in graph, lineage, and policy state.
-
-```text
-LLM = reasoning advisor
-Graph = memory
-Lineage = history
-Policy = boundary
-DNA = continuity identity
-```
-
-### Offline Cortex Capsule Mode — LLM not reachable
-
-Offline Cortex Capsule Mode is used when the agent cannot reach the LLM, cannot reach a relay, or is running on a node with limited resources or restricted egress.
-
-The agent should not stop. It should reduce autonomy and preserve continuity.
-
-Expected behavior:
+Expected offline behavior:
 
 ```text
 sense
@@ -490,103 +336,7 @@ sense
   -> wait for reconnection or operator-controlled export
 ```
 
-The offline capsule can contain:
-
-```text
-policy snapshot
-allowed scope
-trusted roots
-last known graph root
-last known lineage root
-small scoring heuristic
-template/check allowlist
-capability manifest
-parent/relay hints
-```
-
-This mode should be conservative:
-
-```text
-observe and record: yes
-enrich evidence locally: yes
-update local graph delta: yes
-sync with trusted peers if available: yes
-perform high-risk autonomous action without current policy/LLM: no
-expand scope beyond DNA/policy: no
-```
-
-### The if/else as organism behavior
-
-A future implementation could make the mode explicit inside the agent runtime:
-
-```text
-fn choose_cortex_mode(agent_context): CortexMode {
-    if llm_endpoint_reachable()
-       && policy.allows_external_reasoning()
-       && node_resources_are_sufficient() {
-        CortexMode::Online
-    } else {
-        CortexMode::OfflineCapsule
-    }
-}
-```
-
-The important point is that both branches belong to the same organism.
-
-```text
-Online mode thinks with help.
-Offline mode remembers and survives.
-```
-
-### DNA, graph, and ledger relationship
-
-The DNA idea should not be a heavyweight public blockchain. A better fit is a lightweight internal continuity ledger:
-
-```text
-Agent DNA:
-  organism_id
-  agent_id
-  parent_agent_id
-  generation
-  policy_version
-  capability_manifest
-  trusted_roots
-  last_graph_root
-  last_lineage_root
-
-Lineage Ledger:
-  append-only signed events
-  parent event hash
-  evidence hash
-  graph delta hash
-  policy version
-  action/result summary
-
-Graph Memory:
-  mergeable node/edge/service observations
-  dead ends
-  secondary conduits
-  confidence
-  conductivity
-  path-density candidates
-```
-
-This gives the organism continuity without requiring a central always-online brain.
-
-### Future naming ideas
-
-Potential component names for later consideration:
-
-```text
-physarum-dna       -> continuity identity and inherited policy roots
-physarum-ledger    -> signed append-only lineage event log
-physarum-graph     -> mergeable graph memory
-physarum-synapse   -> peer/relay synchronization between agents
-physarum-cortex    -> online/offline reasoning interface
-physarum-nucleus   -> trust roots, policy, and identity boundary
-```
-
-### Design principle
+Design principle:
 
 ```text
 The agent should not become useless without Internet.
@@ -599,8 +349,6 @@ And:
 The LLM may disappear.
 The organism memory must not.
 ```
-
-This section should remain in `INSIGHTS_AND_BRAINSTORM.md` until the release and current evidence loop are stable. No issues should be opened yet.
 
 ---
 
@@ -624,34 +372,24 @@ This should remain separate from the main README status table until there is an 
 
 ---
 
-## 13. Sensing profiles and native Rust refactoring of external security tools
+## 13. Sensing profiles, sporangium evidence, and exploit-reference enrichment
 
-> **Status (2026-05-30):** Partly implemented and partly active. Issue #114 delivered `SensingProfile` and `SensingResult` in `physarum-scanner`. Issue #115 is now active for the native Nuclei-inspired Rust port, named `physarum-sporangium`; `physarum-spore` is the corresponding CLI binary. SSRFmap-inspired work remains future/backlog.
+> **Status:** Brainstorm / design note. `physarum-scanner`, `physarum-sporangium`, `VulnerabilityIntelService`, and the two-turn LLM loop are active project capabilities. Exploit-reference enrichment is a future extension for PF-6 Phase 2 and later AWS-controlled labs.
 
-The project should avoid treating external tools as permanent subprocess dependencies. The preferred direction is to study useful behavior from mature tools and refactor the relevant concepts into native Rust components that can be incorporated into the `physarum-maze` organism, similar to how `physarum-scanner` became a native project capability.
+The project should avoid treating external tools as permanent subprocess dependencies. The preferred direction is to study useful behavior from mature tools and refactor relevant concepts into native Rust components or tightly bounded metadata lookups that can be incorporated into the `physarum-maze` organism.
 
 This preserves the core identity of the project:
 
 ```text
 not: wrapper around external scanners
-but: distributed organism with native sensory organs
+but: distributed organism with native sensory organs and bounded evidence enrichment
 ```
 
 ### Sensing profile implementation
 
-Issue #114 implemented the internal sensing profile layer.
+`SensingResult` gives the project a structured evidence envelope that can feed `physarum-llm` instead of passing only raw open ports.
 
-```text
-LowNoise
-Balanced
-Fast
-TopPorts
-Deep
-StimulusTargeted
-NoDiscovery
-```
-
-The operational inspiration was translated into project-native semantics:
+Operational scanning ideas are translated into project-native semantics:
 
 ```text
 -T4  -> Fast: speed/concurrency axis
@@ -659,102 +397,109 @@ The operational inspiration was translated into project-native semantics:
 -Pn  -> NoDiscovery: host-already-evidenced mode
 ```
 
-`SensingResult` now gives the project a structured evidence envelope that can feed `physarum-llm` instead of passing only raw open ports.
+### Nuclei-compatible capability — physarum-sporangium / physarum-spore
 
-### Native Nuclei-inspired capability — physarum-sporangium / physarum-spore
-
-`nuclei` should be considered source material for a native Rust evidence engine, not a permanent subprocess dependency.
-
-Working names:
-
-```text
-physarum-sporangium  -> crate / evidence engine
-physarum-spore       -> CLI binary / pattern-evidence runner
-```
-
-Biological framing:
-
-```text
-A sporangium produces spores.
-In this project, each template/check/finding can be treated as a controlled evidence spore released by the organism.
-```
-
-Desired direction:
-
-```text
-study Nuclei architecture
-port relevant concepts into Rust
-emit structured PatternFinding evidence
-integrate with physarum-llm DiscoveryQuery
-remove local upstream clone after native module is viable
-```
-
-Local upstream clones are analysis material only and are ignored by `.gitignore`:
-
-```text
-nuclei/
-Nuclei/
-projectdiscovery-nuclei/
-```
-
-Potential native outputs:
-
-```text
-template_or_check_id
-protocol
-service
-matched_condition_summary
-severity_hint
-confidence
-evidence_summary
-safe_request_response_metadata
-```
+`physarum-sporangium` is the native Rust evidence engine used by `physarum-maze` after sensing identifies reachable services.
 
 Role in the organism:
 
 ```text
 physarum-scanner discovers reachable services
 physarum-sporangium validates known patterns and vulnerability signals
+VulnerabilityIntelService enriches findings into vulnerability_candidates
 physarum-llm receives structured evidence rather than raw scanner noise
-policy gate decides whether any proposed action is allowed
+PolicyGate decides whether any proposed action is allowed
 ```
 
-This should be evidence-first. It should not make the LLM blindly trust a finding. It should provide structured, bounded, auditable signals.
+This should remain evidence-first. It should not make the LLM blindly trust a finding. It should provide structured, bounded, auditable signals.
 
-### Native SSRFmap-inspired capability
+### Exploit-DB / SearchSploit enrichment after sporangium
 
-`SSRFmap` should also be treated as inspiration for future native Rust capability design, not as a permanent external tool invocation.
+After `physarum-sporangium` executes applicable templates and `VulnerabilityIntelService` generates `vulnerability_candidates`, Phase 2 should make it explicit to the LLM that Exploit-DB/SearchSploit exists as an available enrichment capability.
 
-Desired direction:
+The enrichment should not silently pre-bake `DiscoveryQuery` before the LLM has reasoned over the observed evidence. The better ordering is:
 
 ```text
-study SSRFmap concepts
-extract useful SSRF discovery and validation primitives
-refactor them into Rust under project control
-integrate as a lab-only organism capability when policy permits
+physarum-maze
+  -> physarum-scanner / SensingResult
+  -> LLM Turn 1 template selection
+  -> physarum-sporangium template execution
+  -> PatternFindingSummary
+  -> VulnerabilityIntelService / vulnerability_candidates
+  -> DiscoveryQuery / LLM Turn 2
+       includes: available_enrichment_capabilities = [ExploitDB, SearchSploitLocal]
+  -> LLM requests exploit-reference enrichment when useful
+  -> physarum-maze performs Exploit-DB / SearchSploit lookup
+  -> enriched DiscoveryQuery / LLM Turn 2 continuation
+  -> LLM proposes bounded typed strategy
+  -> PolicyGate
+  -> controlled lab action
+  -> lineage update
 ```
 
-Role in the organism:
+The LLM should receive structured exploit-reference metadata, not unrestricted exploit execution authority.
+
+Potential metadata shape:
 
 ```text
-identify SSRF-like input surfaces
-validate whether the target can reach controlled internal callbacks
-produce structured callback evidence
-feed results into DiscoveryQuery / LlmAttemptEvidence
-allow physarum-llm to reason from real SSRF evidence
+exploit_reference_id
+source = ExploitDB | SearchSploitLocal
+cve_id
+product
+version_range
+platform
+exploit_type
+verified_status
+requires_auth
+requires_user_interaction
+requires_outbound_callback
+expected_effect
+safety_class
+local_path_or_url_reference
+summary
 ```
 
-This capability must remain bounded:
+The expected behavior:
+
+```text
+1. physarum-sporangium produces observed evidence.
+2. VulnerabilityIntelService proposes vulnerability_candidates.
+3. Initial DiscoveryQuery for LLM Turn 2 includes available enrichment capability metadata.
+4. LLM Turn 2 may request Exploit-DB/SearchSploit reference enrichment.
+5. physarum-maze validates the request against policy/scope.
+6. physarum-maze performs the lookup locally or through an approved online source.
+7. physarum-maze returns structured exploit-reference metadata to the LLM as a continuation/refinement input.
+8. LLM proposes a bounded strategy using typed actions only.
+9. PolicyGate decides whether the proposed action is allowed.
+10. Lineage records the chosen reference, enrichment request, policy decision, and outcome.
+```
+
+The enrichment must remain bounded:
 
 ```text
 owned lab only
 operator-defined CIDR only
-controlled callback endpoints only
-no Internet target expansion
-no default execution
-policy-gated before use
+no public target expansion
+no automatic exploit execution
+no raw exploit payload pasted into lineage by default
+no private key, API key, token, or .env.local content in prompts or evidence
+LLM does not execute SearchSploit directly
+physarum-maze executes only bounded enrichment lookups
+PolicyGate approval required before any action
 lineage/audit evidence required
 ```
+
+Online and offline modes should both be possible:
+
+```text
+Online mode:
+  query public Exploit-DB or approved advisory sources only when Internet is explicitly allowed
+
+Offline mode:
+  use a local SearchSploit database or curated exploit-reference cache
+```
+
+The important design point: Exploit-DB/SearchSploit should help the LLM rank and explain feasible lab-only validation paths after `physarum-sporangium` has already produced observed evidence. It should not replace sensing, template execution, vulnerability intelligence, PolicyGate, or lineage.
 
 ### Integration principle
 
@@ -763,25 +508,29 @@ The long-term ideal is:
 ```text
 physarum-maze
   -> native scanner / sensing profiles
-  -> native vulnerability-pattern evidence engine
-  -> native SSRF evidence engine
+  -> Nuclei-compatible vulnerability-pattern evidence engine
+  -> vulnerability intelligence
+  -> LLM-visible enrichment capabilities
+  -> LLM-requested exploit-reference enrichment
   -> physarum-llm reasoning
-  -> policy gate
-  -> controlled action
+  -> PolicyGate
+  -> controlled lab action
   -> lineage update
   -> next organism loop
 ```
 
-The organism should become more sensitive before it becomes more aggressive.
+The organism should become more evidence-rich before it becomes more aggressive.
 
 Recommended posture:
 
 ```text
-1. Expand sensing and fingerprint richness first.                  ✔ Issue #114
-2. Port vulnerability-pattern evidence into native Rust.           → Issue #115
-3. Feed more precise evidence into physarum-llm.                   → Issue #106 next integration
-4. Keep high-risk actions behind explicit policy gates.
-5. Refactor external-tool ideas into native Rust components instead of building a wrapper chain.
+1. Expand sensing and fingerprint richness first.                     ✔ Done
+2. Execute sporangium templates and produce PatternFinding evidence.  ✔ Active core
+3. Expose safe enrichment capabilities to the LLM.                    → Future/Phase 2+
+4. Let physarum-maze perform bounded enrichment when requested.       → Future/Phase 2+
+5. Feed structured evidence into physarum-llm.                        ✔ Active core
+6. Keep high-risk actions behind explicit policy gates.               ✔ Mandatory
+7. Prefer native Rust components and curated metadata over wrappers.   ✔ Direction
 ```
 
 This direction strengthens the project name: `Physarum Attack Paths` becomes an organism that senses, validates, reasons, reinforces, and propagates through attack paths — not merely a scanner or a static attack-graph generator.
