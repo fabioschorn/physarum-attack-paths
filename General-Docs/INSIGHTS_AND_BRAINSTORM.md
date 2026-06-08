@@ -415,9 +415,9 @@ This should remain evidence-first. It should not make the LLM blindly trust a fi
 
 ### Exploit-DB / SearchSploit enrichment after sporangium
 
-After `physarum-sporangium` executes applicable templates and `VulnerabilityIntelService` generates `vulnerability_candidates`, Phase 2 should make it explicit to the LLM that Exploit-DB/SearchSploit can be used as an exploit-reference enrichment source.
+After `physarum-sporangium` executes applicable templates and `VulnerabilityIntelService` generates `vulnerability_candidates`, Phase 2 should make it explicit to the LLM that Exploit-DB/SearchSploit exists as an available enrichment capability.
 
-The intended placement is:
+The enrichment should not silently pre-bake `DiscoveryQuery` before the LLM has reasoned over the observed evidence. The better ordering is:
 
 ```text
 physarum-maze
@@ -426,8 +426,12 @@ physarum-maze
   -> physarum-sporangium template execution
   -> PatternFindingSummary
   -> VulnerabilityIntelService / vulnerability_candidates
-  -> Exploit-DB / SearchSploit reference enrichment
   -> DiscoveryQuery / LLM Turn 2
+       includes: available_enrichment_capabilities = [ExploitDB, SearchSploitLocal]
+  -> LLM requests exploit-reference enrichment when useful
+  -> physarum-maze performs Exploit-DB / SearchSploit lookup
+  -> enriched DiscoveryQuery / LLM Turn 2 continuation
+  -> LLM proposes bounded typed strategy
   -> PolicyGate
   -> controlled lab action
   -> lineage update
@@ -460,11 +464,14 @@ The expected behavior:
 ```text
 1. physarum-sporangium produces observed evidence.
 2. VulnerabilityIntelService proposes vulnerability_candidates.
-3. physarum-maze enriches candidates with Exploit-DB/SearchSploit references when available.
-4. LLM Turn 2 sees both vulnerability evidence and exploit-reference metadata.
-5. LLM proposes a bounded strategy using typed actions only.
-6. PolicyGate decides whether the proposed action is allowed.
-7. Lineage records the chosen reference, policy decision, and outcome.
+3. Initial DiscoveryQuery for LLM Turn 2 includes available enrichment capability metadata.
+4. LLM Turn 2 may request Exploit-DB/SearchSploit reference enrichment.
+5. physarum-maze validates the request against policy/scope.
+6. physarum-maze performs the lookup locally or through an approved online source.
+7. physarum-maze returns structured exploit-reference metadata to the LLM as a continuation/refinement input.
+8. LLM proposes a bounded strategy using typed actions only.
+9. PolicyGate decides whether the proposed action is allowed.
+10. Lineage records the chosen reference, enrichment request, policy decision, and outcome.
 ```
 
 The enrichment must remain bounded:
@@ -476,6 +483,8 @@ no public target expansion
 no automatic exploit execution
 no raw exploit payload pasted into lineage by default
 no private key, API key, token, or .env.local content in prompts or evidence
+LLM does not execute SearchSploit directly
+physarum-maze executes only bounded enrichment lookups
 PolicyGate approval required before any action
 lineage/audit evidence required
 ```
@@ -484,7 +493,7 @@ Online and offline modes should both be possible:
 
 ```text
 Online mode:
-  query public Exploit-DB or approved advisory sources when Internet is allowed
+  query public Exploit-DB or approved advisory sources only when Internet is explicitly allowed
 
 Offline mode:
   use a local SearchSploit database or curated exploit-reference cache
@@ -501,7 +510,8 @@ physarum-maze
   -> native scanner / sensing profiles
   -> Nuclei-compatible vulnerability-pattern evidence engine
   -> vulnerability intelligence
-  -> exploit-reference enrichment
+  -> LLM-visible enrichment capabilities
+  -> LLM-requested exploit-reference enrichment
   -> physarum-llm reasoning
   -> PolicyGate
   -> controlled lab action
@@ -516,10 +526,11 @@ Recommended posture:
 ```text
 1. Expand sensing and fingerprint richness first.                     ✔ Done
 2. Execute sporangium templates and produce PatternFinding evidence.  ✔ Active core
-3. Enrich CVE candidates with advisory and exploit-reference metadata.→ Future/Phase 2+
-4. Feed structured evidence into physarum-llm.                        ✔ Active core
-5. Keep high-risk actions behind explicit policy gates.               ✔ Mandatory
-6. Prefer native Rust components and curated metadata over wrappers.   ✔ Direction
+3. Expose safe enrichment capabilities to the LLM.                    → Future/Phase 2+
+4. Let physarum-maze perform bounded enrichment when requested.       → Future/Phase 2+
+5. Feed structured evidence into physarum-llm.                        ✔ Active core
+6. Keep high-risk actions behind explicit policy gates.               ✔ Mandatory
+7. Prefer native Rust components and curated metadata over wrappers.   ✔ Direction
 ```
 
 This direction strengthens the project name: `Physarum Attack Paths` becomes an organism that senses, validates, reasons, reinforces, and propagates through attack paths — not merely a scanner or a static attack-graph generator.
