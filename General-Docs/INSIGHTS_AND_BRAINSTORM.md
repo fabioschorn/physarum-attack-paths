@@ -4,7 +4,7 @@ This document captures exploratory ideas, research insights, and future directio
 
 It is intentionally separate from the operational prototype roadmap. The roadmap defines what we are building next. This document preserves promising ideas that may influence future architecture, research positioning, or invention framing.
 
-**Last reviewed:** 2026-06-07 — updated after PF-6 Phase 1, Issue #141 Phase 2 planning, and the documentation synchronization pass.
+**Last reviewed:** 2026-06-09 — updated with the `pentest-active` / `analysis-only` execution-mode distinction and the June 2026 adaptive self-replicating AI worm research comparison.
 
 ---
 
@@ -534,3 +534,175 @@ Recommended posture:
 ```
 
 This direction strengthens the project name: `Physarum Attack Paths` becomes an organism that senses, validates, reasons, reinforces, and propagates through attack paths — not merely a scanner or a static attack-graph generator.
+
+---
+
+## 14. Execution modes after propagation: `pentest-active` and `analysis-only`
+
+> **Status (2026-06-09):** Proposed architecture and manager review item. This section records the intended separation between controlled propagation/validation and post-propagation graph analysis.
+
+The same `physarum-maze` runtime should support two explicitly different operational modes.
+
+### `pentest-active`
+
+This mode exists to validate attack paths and propagate the organism inside an owned, private, policy-scoped lab.
+
+Expected flow:
+
+```text
+sense
+  -> discover
+  -> validate
+  -> enrich evidence
+  -> choose a path
+  -> request policy approval
+  -> execute an authorized action
+  -> create or transfer functional presence to the next node
+  -> append lineage
+  -> update graph morphology
+```
+
+This mode may perform controlled propagation, but only under explicit scope, generation, node-count, concurrency, credential, and kill-switch constraints.
+
+Minimum controls:
+
+```text
+owned_lab = true
+scope_defined = true
+policy_gate = required
+lineage = required
+kill_switch = required
+max_generations = bounded
+max_new_nodes = bounded
+external_target_expansion = false
+```
+
+### `analysis-only`
+
+This mode is intended for the period after `physarum-maze` is already distributed across approved nodes and the research objective changes from expansion to analysis of new stimuli.
+
+Expected flow:
+
+```text
+existing agents observe new stimuli
+  -> produce SensingResult / PatternFinding evidence
+  -> update q_ema / D_ij
+  -> recalculate competing paths
+  -> identify new, degraded, or recovered conduits
+  -> detect barrier-crossing risk
+  -> prioritize findings for the Blue Team
+```
+
+Allowed behavior:
+
+```text
+observe local telemetry
+collect bounded evidence
+update confidence and conductivity
+recalculate paths
+compare graph changes over time
+identify unintended propagation routes
+emit prioritized findings
+```
+
+Blocked behavior:
+
+```text
+new exploitation
+new propagation
+new agent creation
+scope expansion
+credential-based movement
+role escalation
+high-risk validation actions
+```
+
+The central distinction is:
+
+```text
+pentest-active = validate and expand under policy
+analysis-only  = sense, remember, recalculate, and report without further expansion
+```
+
+The execution mode should be separate from the organism lifecycle state. Example:
+
+```yaml
+organism_state: propagated
+execution_mode: analysis-only
+```
+
+A mode transition should be explicit and auditable:
+
+```text
+pentest-active
+  -> authorized propagation objective reached
+  -> operator or manager approval
+  -> analysis-only
+  -> continued sensing and graph remodeling
+```
+
+The transition should generate a lineage event containing the previous mode, new mode, policy version, reason, approving authority, and current graph root.
+
+### Research significance
+
+This separation supports two different hypotheses:
+
+```text
+Hypothesis A — controlled propagation:
+An LLM-assisted organism can establish functional presence on new approved nodes by following evidence-backed attack paths.
+
+Hypothesis B — post-propagation morphology:
+After distribution, the organism can continue sensing environmental changes and remodeling the graph without continuing to propagate.
+```
+
+Without replication or functional deployment to new nodes, the project can still build an analytical map, but it does not become a distributed organism in the strong operational sense. The propagation phase creates distributed presence; the analysis phase turns that presence into a persistent sensory and morphological memory.
+
+### Related June 2026 research
+
+The following research should be reviewed by the Manager as relevant state of the art:
+
+```text
+AI Agents Enable Adaptive Computer Worms
+arXiv: 2606.03811
+Submitted: 2026-06-02
+https://arxiv.org/abs/2606.03811
+```
+
+Public coverage:
+
+```text
+Researchers Build Self-Replicating AI Worm That Operates Entirely on Local, Open-Weight Models
+The Hacker News, June 2026
+https://thehackernews.com/2026/06/researchers-build-self-replicating-ai.html?m=1
+```
+
+That work demonstrates a closely related capability class: a local open-weight LLM agent can perform adaptive exploitation and self-replication across an isolated vulnerable network. This reduces the novelty of a broad claim such as "LLM agent self-replication is possible," but it does not eliminate the distinct research space of `physarum-attack-paths`.
+
+The project should therefore preserve and emphasize its differentiated contribution:
+
+```text
+adaptive Physarum-inspired graph morphology
+q_ema / D_ij reinforcement and decay
+competing-path re-selection
+lineage-aware distributed continuity
+policy-gated execution modes
+post-propagation sensing and graph remodeling
+identification of unintended propagation nodes
+Blue Team prioritization of barrier-crossing paths
+```
+
+### Manager decision point
+
+The recommended direction is to continue the current PF-6 development, complete controlled `pentest-active` propagation, and then add `analysis-only` as a distinct execution profile for already-propagated agents.
+
+The Manager should assess:
+
+```text
+1. Whether execution mode belongs in agent configuration, signed policy, or both.
+2. Which capabilities are disabled structurally in analysis-only mode.
+3. Which lineage events prove mode transitions and propagation generations.
+4. Which benchmark compares Physarum path selection with a conventional LLM-driven worm.
+5. How the external paper should be cited in future research and invention-positioning documents.
+```
+
+No signature was added because the exact requested signature text was not provided.
