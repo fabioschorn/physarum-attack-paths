@@ -172,7 +172,9 @@ RULES:
 
 RESPONSE FORMAT:
 Return ONLY valid JSON matching the PropagationStrategy schema.
-No markdown fences. No prose before or after the JSON object.";
+No markdown fences. No prose before or after the JSON object.
+CRITICAL: the \"method\" object must contain EXACTLY ONE key (e.g. {\"Exploit\":{...}} OR {\"Http\":{...}}).
+NEVER put two method keys in the same object — that is invalid and will fail parsing.";
 
 /// Build the user-turn prompt from query JSON, allowed methods, and the schema.
 ///
@@ -205,14 +207,17 @@ fn method_label(m: &PropagationMethodClass) -> &'static str {
 }
 
 /// Canonical JSON schema for `PropagationStrategy` injected into the user prompt.
-pub const STRATEGY_SCHEMA: &str = r#"{
-  "method": {
-    "Ssh":     { "user": "<string>", "auth": "EmptyPassword | PrivateKey" },
-    "Http":    { "path": "<string>", "port": "<observed_port_integer>", "http_method": "Get | Post | Put", "headers": [] },
-    "Exploit": { "cve": "<CVE-ID>" },
-    "Custom":  { "description": "<string>" },
-    "NoPath":  { "reason": "<string>" }
-  },
+///
+/// `method` is a **discriminated union** — it must contain EXACTLY ONE key.
+/// Listing all variants here as context only; pick the one that fits.
+pub const STRATEGY_SCHEMA: &str = r#"METHOD OPTIONS — choose exactly ONE; "method" must have exactly one key:
+  { "Exploit": { "cve": "<CVE-ID>" } }
+  { "Ssh":     { "user": "<string>", "auth": "EmptyPassword | PrivateKey" } }
+  { "Http":    { "path": "<string>", "port": <integer>, "http_method": "Get | Post | Put", "headers": [] } }
+  { "NoPath":  { "reason": "<string>" } }
+
+{
+  "method": { "<EXACTLY_ONE_KEY_FROM_ABOVE>": { } },
   "artifact_type": "AgentBinary | Script | HttpRequest | None",
   "bootstrap_plan": {
     "steps": [
