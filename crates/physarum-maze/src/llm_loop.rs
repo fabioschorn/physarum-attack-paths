@@ -1295,8 +1295,7 @@ fn ssh_opts(key_path: Option<&Path>) -> Vec<String> {
 ///     Internally expanded to TWO requests (wget step then sh step) by execute_step.
 fn resolve_http_path(path: &str, source_ip: Option<Ipv4Addr>) -> String {
     let ip_str = source_ip.map(|ip| ip.to_string()).unwrap_or_default();
-    let path = path.replace("<source_ip>", &ip_str);
-    path
+    path.replace("<source_ip>", &ip_str)
 }
 
 /// Expand `__struts_bypass__` to the wget-only OGNL URL (step 1 of 2).
@@ -1787,7 +1786,7 @@ fn build_template_catalog_for_llm(
         t.info
             .tags
             .iter()
-            .any(|tag| tag.to_ascii_lowercase() == "rce")
+            .any(|tag| tag.eq_ignore_ascii_case("rce"))
     };
 
     let mut rce_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
