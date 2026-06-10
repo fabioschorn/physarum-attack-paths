@@ -79,7 +79,12 @@ impl LlmConfig {
             let _ = parts.next(); // "mock-exploit"
             let port: u16 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(8080);
             let user = parts.next().unwrap_or("root");
-            Arc::new(MockLlmClient::exploit_rce_ssh_first(port, user, 0.92))
+            Arc::new(MockLlmClient::exploit_rce_ssh_first(
+                "ssh-ed25519 PLACEHOLDER physarum-ephemeral",
+                port,
+                user,
+                0.92,
+            ))
         } else {
             let api_key = cli.llm_api_key.clone().unwrap_or_default();
             match OpenAiCompatibleClient::new(
