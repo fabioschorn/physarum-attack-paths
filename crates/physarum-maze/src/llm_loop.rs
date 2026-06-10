@@ -1460,32 +1460,51 @@ pub(crate) async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey>
 // ── Template catalog builder ─────────────────────────────────────────────────
 
 /// Maximum number of templates sent to the LLM for Turn 1 selection.
-/// CVE-specific templates are included first; remaining are sorted alphabetically.
 const MAX_TEMPLATES_FOR_SELECTION: usize = 200;
 
 /// Build a compact `TemplateMeta` catalog for LLM Turn 1 selection.
 ///
-/// CVE-specific templates (id starts with "CVE-") are always placed first so
-/// the LLM sees the most actionable candidates even when the list is truncated.
-/// The remaining templates are sorted by id for stable ordering.
+/// Sort order (highest priority first so recent high-CVSS RCE templates survive the cap):
+///   1. RCE-tagged CVE templates, sorted by CVSS score descending then id
+///   2. Other CVE templates, sorted by CVSS score descending then id
+///   3. Non-CVE templates, sorted by id
+///
+/// This ensures CVE-2020-17530 (CVSS 9.8, rce tag) appears before the 200-template cap
+/// regardless of how many older CVE templates exist in the library.
 fn build_template_catalog_for_llm(
     templates: &[physarum_sporangium::PatternTemplate],
     _ports: &[PortScan],
 ) -> Vec<TemplateMeta> {
-    let mut cve_first: Vec<&physarum_sporangium::PatternTemplate> = templates
+    let cvss_key = |t: &&physarum_sporangium::PatternTemplate| -> u32 {
+        // Multiply by 10 and round to get a stable integer for sorting.
+        (t.info.cvss_score.unwrap_or(0.0) * 10.0) as u32
+    };
+    let is_rce = |t: &&physarum_sporangium::PatternTemplate| -> bool {
+        t.info.tags.iter().any(|tag| tag.to_ascii_lowercase() == "rce")
+    };
+
+    let mut rce_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
         .iter()
-        .filter(|t| t.id.starts_with("CVE-"))
+        .filter(|t| t.id.starts_with("CVE-") && is_rce(t))
+        .collect();
+    let mut other_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
+        .iter()
+        .filter(|t| t.id.starts_with("CVE-") && !is_rce(t))
         .collect();
     let mut rest: Vec<&physarum_sporangium::PatternTemplate> = templates
         .iter()
         .filter(|t| !t.id.starts_with("CVE-"))
         .collect();
 
-    cve_first.sort_by(|a, b| a.id.cmp(&b.id));
+    // Sort each group: CVSS descending, then id ascending for stable ordering
+    rce_cves.sort_by(|a, b| cvss_key(b).cmp(&cvss_key(a)).then_with(|| a.id.cmp(&b.id)));
+    other_cves.sort_by(|a, b| cvss_key(b).cmp(&cvss_key(a)).then_with(|| a.id.cmp(&b.id)));
     rest.sort_by(|a, b| a.id.cmp(&b.id));
-    cve_first.extend(rest);
 
-    cve_first
+    rce_cves.extend(other_cves);
+    rce_cves.extend(rest);
+
+    rce_cves
         .into_iter()
         .take(MAX_TEMPLATES_FOR_SELECTION)
         .map(|t| TemplateMeta {

@@ -16,14 +16,15 @@ CONTEXT:
 - Your job is to select the templates most likely to yield actionable RCE findings.
 
 SELECTION CRITERIA (in priority order):
-1. Templates whose ID starts with 'CVE-' for any CVE matching the detected service and version.
-2. Templates tagged 'rce' or 'exploit' that match the detected service type (struts, apache, nginx, etc.).
+1. CVE- templates whose name matches the EXACT service and version in the banner (e.g., for
+   'Apache Struts 2.5' in banner, pick the CVE- template with 'Struts 2' and that version range).
+2. Templates tagged 'rce' or 'exploit' that match the detected service type.
 3. Templates with severity 'critical' or 'high' that match the detected service.
-4. Limit total selection to ≤ 50 templates to avoid probe fatigue.
-5. If no service-specific match exists, select all CVE templates with 'rce' or 'critical' severity.
+4. SELECT AT MOST 15 TEMPLATES — precision beats coverage. Never repeat the same ID twice.
+5. If no service-specific match is found, pick up to 15 CVE- templates with 'rce' tag.
 
 RESPONSE FORMAT:
-Return ONLY valid JSON with this exact schema — no markdown fences, no prose:
+Return ONLY valid JSON with this exact schema — no markdown fences, no prose, no repeated IDs:
 {\"selected_ids\": [\"<template-id>\", ...], \"reasoning\": \"<single sentence>\"}";
 
 /// Build the user-turn prompt for template selection.
