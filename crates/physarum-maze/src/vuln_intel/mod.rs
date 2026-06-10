@@ -36,7 +36,7 @@ mod osv;
 
 use std::path::{Path, PathBuf};
 
-use physarum_llm::types::VulnerabilityCandidate;
+use physarum_llm::types::{VulnerabilityCandidate, VulnerabilitySource};
 
 pub use cache::LocalAdvisoryCache;
 
@@ -299,6 +299,13 @@ impl VulnerabilityIntelService {
     /// per finding in the same order as the input slice.
     ///
     /// Bounded by `MAX_INTEL_CONCURRENCY` to avoid hammering advisory APIs.
+    ///
+    /// Two enrichment paths:
+    /// 1. Version-based: extract service/version from banner → advisory cache / OSV.
+    /// 2. Spore-direct: when a CVE-named template itself fires (is_actionable + check_id
+    ///    starts with "CVE-"), synthesize a confirmed `PhysarumSpore` candidate without
+    ///    needing a version string. This covers CVE exploit templates (e.g. CVE-2020-17530)
+    ///    whose match already proves vulnerability — no banner version extraction required.
     pub async fn enrich_findings(
         &self,
         findings: &[physarum_sporangium::PatternFinding],
@@ -307,16 +314,46 @@ impl VulnerabilityIntelService {
 
         const MAX_INTEL_CONCURRENCY: usize = 4;
 
-        let inputs: Vec<Option<VulnerabilityIntelInput>> =
-            findings.iter().map(build_intel_input).collect();
-
-        stream::iter(inputs.into_iter().enumerate().map(|(i, maybe_input)| {
+        stream::iter(findings.iter().enumerate().map(|(i, finding)| {
             let svc = self;
+            let maybe_input = build_intel_input(finding);
+            // When the template IS the CVE proof, synthesize a confirmed candidate.
+            // Computed before the async block to avoid borrowing `finding` across await.
+            let spore_candidate: Option<VulnerabilityCandidate> =
+                if maybe_input.is_none()
+                    && finding.is_actionable()
+                    && finding.check_id.starts_with("CVE-")
+                {
+                    Some(VulnerabilityCandidate {
+                        cve_id: finding.check_id.clone(),
+                        cvss_score: None,
+                        description: format!(
+                            "Confirmed by template match: {}",
+                            finding.check_id
+                        ),
+                        affected_port: finding.port,
+                        confidence: 0.95,
+                        source: VulnerabilitySource::PhysarumSpore,
+                        matched_service: None,
+                        matched_version: None,
+                        evidence: vec![finding.matched_condition_summary.clone()],
+                        is_confirmed: true,
+                        affected_range: None,
+                        exploit_class: None,
+                        impact: None,
+                        preconditions: vec![],
+                        references: vec![],
+                    })
+                } else {
+                    None
+                };
+
             async move {
-                match maybe_input {
-                    None => (i, vec![]),
-                    Some(input) => (i, svc.enrich(&input).await),
-                }
+                let candidates = match maybe_input {
+                    Some(input) => svc.enrich(&input).await,
+                    None => spore_candidate.map(|c| vec![c]).unwrap_or_default(),
+                };
+                (i, candidates)
             }
         }))
         .buffer_unordered(MAX_INTEL_CONCURRENCY)
