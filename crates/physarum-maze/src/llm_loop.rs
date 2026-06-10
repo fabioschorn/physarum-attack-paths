@@ -1389,10 +1389,10 @@ fn method_port(method: &PropagationMethod) -> Option<u16> {
 
 // ── Ephemeral SSH keypair ─────────────────────────────────────────────────────
 
-struct EphemeralKey {
-    privkey_path: PathBuf,
+pub(crate) struct EphemeralKey {
+    pub(crate) privkey_path: PathBuf,
     /// OpenSSH public key string (e.g. "ssh-ed25519 AAAA... physarum-ephemeral").
-    pubkey: String,
+    pub(crate) pubkey: String,
 }
 
 /// Generate an ephemeral ed25519 SSH keypair via `ssh-keygen`.
@@ -1400,7 +1400,7 @@ struct EphemeralKey {
 /// Private key is written to `/tmp/physarum/ephemeral_key` (mode 600).
 /// Public key is returned as an OpenSSH one-liner for embedding in DiscoveryQuery.
 /// Both files are cleaned up by the caller after the exploit loop exits.
-async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey> {
+pub(crate) async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey> {
     use tokio::process::Command;
 
     let key_dir = PathBuf::from("/tmp/physarum");

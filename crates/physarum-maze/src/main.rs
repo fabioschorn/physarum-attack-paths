@@ -18,6 +18,9 @@ pub enum Mode {
     Seed,
     /// Propagated instance — receives lineage from parent via --lineage-b64
     Propagated,
+    /// Smoke-test: generate an ephemeral ed25519 keypair, print the pubkey and
+    /// fingerprint, verify file permissions, then clean up. Exit 0 on success.
+    KeygenTest,
 }
 
 #[derive(Parser, Debug)]
