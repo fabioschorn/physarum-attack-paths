@@ -339,7 +339,9 @@ impl VulnerabilityIntelService {
                         evidence: vec![finding.matched_condition_summary.clone()],
                         is_confirmed: true,
                         affected_range: None,
-                        exploit_class: None,
+                        // Template firing = active exploitation confirmed; label as RCE
+                        // so EXPLOIT MODE in the LLM Turn 2 prompt can trigger.
+                        exploit_class: Some("RemoteCodeExecution".to_string()),
                         impact: None,
                         preconditions: vec![],
                         references: vec![],

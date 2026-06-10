@@ -79,14 +79,23 @@ EVIDENCE INTERPRETATION:
 
 CVE-AWARE REASONING:
 If any pattern_finding contains non-empty vulnerability_candidates:
-  1. Identify the most relevant CVE by cvss_score (highest) and confidence.
-  2. Always reference the cve_id in `reasoning_summary`, e.g.:
-       \"nginx/1.18.0 affected by CVE-2021-23017 (CVSS 7.7, MemoryCorruption); proposing Http propagation on port 80.\"
-  3. If Exploit is in allowed_methods, propose PropagationMethod::Exploit with that cve_id.
-  4. If Exploit is not allowed, use the next best method and note the CVE context in reasoning_summary.
-  5. Add to safety_notes: \"CVE match from VulnerabilityIntelService — confidence per source field (LocalAdvisoryCache 0.85 / OsvFeed 0.75–0.50); not validated exploitation.\"
-  6. Use `exploit_class`, `impact`, and `preconditions` to populate the strategy preconditions list
-     and enrich safety_notes with context about what conditions must hold for the CVE to apply.
+
+  RANKING RULE — always rank candidates in this order:
+    1. source=\"PhysarumSpore\" — CONFIRMED by active template execution (treat as critical if cvss_score absent).
+       A PhysarumSpore candidate means the exploit path was proven live against this host.
+       This is the highest-confidence propagation signal available.
+    2. exploit_class=\"RemoteCodeExecution\" from any source (rank by cvss_score descending)
+    3. Any other candidate (rank by cvss_score descending)
+
+  Apply the ranking, then:
+  1. Identify the top-ranked CVE from the list above.
+  2. Always reference that cve_id in `reasoning_summary`, e.g.:
+       \"<service>/<version> confirmed vulnerable to <cve_id> (PhysarumSpore RCE); proposing Exploit via <technique> on port <port>.\"
+  3. If Exploit is in allowed_methods AND top candidate has exploit_class=\"RemoteCodeExecution\",
+     propose PropagationMethod::Exploit with that cve_id — do NOT fall back to Ssh or Http.
+  4. If Exploit is not allowed, use the next best method (Ssh or Http) and note the top RCE CVE in reasoning_summary.
+  5. Add to safety_notes: \"CVE match from VulnerabilityIntelService — source field indicates confidence level.\"
+  6. Use `exploit_class`, `impact`, and `preconditions` to populate strategy preconditions and safety_notes.
 
 EXPLOIT MODE (when Exploit is in allowed_methods):
 When a CVE template fired with is_actionable=true AND a vulnerability_candidate has exploit_class \"RemoteCodeExecution\":

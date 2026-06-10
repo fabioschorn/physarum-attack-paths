@@ -94,8 +94,19 @@ pub async fn run(
             resp.selected_ids
         }
         Err(e) => {
-            tracing::warn!(%target, err = %e, "LLM Turn 1 (template selection) failed — running all templates");
-            vec![] // empty = no filter (run all)
+            // Fall back to the catalog shown to the LLM rather than all templates.
+            // Running all templates (2126+) causes false positive matches and noise.
+            let catalog_ids: Vec<String> = selection_query
+                .available_templates
+                .iter()
+                .map(|t| t.id.clone())
+                .collect();
+            tracing::warn!(
+                %target, err = %e,
+                fallback_count = catalog_ids.len(),
+                "LLM Turn 1 (template selection) failed — falling back to catalog"
+            );
+            catalog_ids
         }
     };
 
@@ -1479,6 +1490,7 @@ fn build_template_catalog_for_llm(
         .take(MAX_TEMPLATES_FOR_SELECTION)
         .map(|t| TemplateMeta {
             id: t.id.clone(),
+            name: t.info.name.clone(),
             severity: format!("{:?}", t.info.severity).to_ascii_lowercase(),
             tags: t.info.tags.clone(),
         })
