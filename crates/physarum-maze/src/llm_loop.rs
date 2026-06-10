@@ -598,9 +598,15 @@ fn upgrade_with_banner(
     r
 }
 
-/// Scan `raw` for common server version strings (nginx, Apache, OpenSSH, …).
+/// Scan `raw` for server version strings and application-level framework hints.
+///
+/// Returns a combined hint such as "Jetty/9.4.31.v20200723 (Apache Struts S2-059)"
+/// so that LLM Turn 1 can match service-specific CVE templates for each open port.
 fn extract_version_hint(raw: &str) -> Option<String> {
     let b = raw.to_ascii_lowercase();
+
+    // Server-level version patterns from HTTP headers or protocol banners.
+    let mut server_ver = None;
     for pat in &[
         "nginx/",
         "apache/",
@@ -616,9 +622,51 @@ fn extract_version_hint(raw: &str) -> Option<String> {
                 .find(|c: char| c.is_whitespace())
                 .map(|e| pos + e)
                 .unwrap_or_else(|| raw.len().min(pos + 32));
-            return Some(raw[pos..end].to_string());
+            server_ver = Some(raw[pos..end].to_string());
+            break;
         }
     }
+
+    // Application-level framework hint from HTML <title> (e.g. "Apache Struts S2-059").
+    let app_hint = extract_app_hint_from_html(&b);
+
+    match (server_ver, app_hint) {
+        (Some(sv), Some(ah)) => Some(format!("{sv} ({ah})")),
+        (Some(sv), None) => Some(sv),
+        (None, Some(ah)) => Some(ah),
+        (None, None) => None,
+    }
+}
+
+/// Detect application-level framework from the HTML `<title>` in an HTTP banner.
+///
+/// Recognises Struts Security Advisory IDs (S2-001…S2-065+) which appear as page
+/// titles in CVE demo/lab containers (e.g. "S2-059 demo" → "Apache Struts S2-059").
+/// Returns a short, LLM-readable hint; returns `None` for non-matching pages.
+fn extract_app_hint_from_html(lower_raw: &str) -> Option<String> {
+    let title_start = lower_raw.find("<title>")? + 7;
+    let title = lower_raw[title_start..]
+        .split("</title>")
+        .next()?
+        .trim();
+
+    if title.is_empty() {
+        return None;
+    }
+
+    // Apache Struts Security Advisory IDs: S2-001 through S2-065 and beyond.
+    if let Some(s2_idx) = title.find("s2-") {
+        let advisory = &title[s2_idx..];
+        let end = advisory
+            .find(|c: char| !c.is_alphanumeric() && c != '-')
+            .unwrap_or_else(|| advisory.len().min(8));
+        let id = advisory[..end].to_uppercase(); // "S2-059"
+        return Some(format!("Apache Struts {id}"));
+    }
+    if title.contains("struts") {
+        return Some("Apache Struts".to_string());
+    }
+
     None
 }
 
@@ -1678,4 +1726,50 @@ fn extract_cve_ids(summaries: &[PatternFindingSummary]) -> Vec<String> {
     ids.sort();
     ids.dedup();
     ids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_app_hint_from_html, extract_version_hint};
+
+    #[test]
+    fn struts_s2_advisory_in_title_detected() {
+        let body = "HTTP/1.1 200 OK\r\nServer: Jetty/9.4.31\r\n\r\n\
+                    <html><head><title>S2-059 demo</title></head></html>";
+        let hint = extract_version_hint(body).unwrap();
+        assert!(hint.contains("Jetty"), "should keep server version: {hint}");
+        assert!(hint.contains("Apache Struts"), "should append app hint: {hint}");
+        assert!(hint.contains("S2-059"), "should include advisory ID: {hint}");
+    }
+
+    #[test]
+    fn openssh_version_hint_no_false_positive() {
+        let banner = "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u2\r\n";
+        let hint = extract_version_hint(banner).unwrap();
+        assert!(hint.starts_with("OpenSSH_"), "should extract SSH version: {hint}");
+        assert!(!hint.contains("Struts"), "no Struts in SSH banner: {hint}");
+    }
+
+    #[test]
+    fn jetty_only_no_struts_hint_when_no_title() {
+        let body = "HTTP/1.1 404 Not Found\r\nServer: Jetty/9.4.31\r\n\r\n";
+        let hint = extract_version_hint(body).unwrap();
+        assert_eq!(hint, "Jetty/9.4.31", "plain Jetty without title: {hint}");
+    }
+
+    #[test]
+    fn extract_app_hint_struts_word_in_title() {
+        // extract_app_hint_from_html expects pre-lowercased input (caller convention).
+        let raw = "<title>apache struts showcase</title>";
+        assert_eq!(
+            extract_app_hint_from_html(raw),
+            Some("Apache Struts".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_app_hint_returns_none_for_generic_title() {
+        let raw = "<title>welcome to nginx!</title>";
+        assert!(extract_app_hint_from_html(raw).is_none());
+    }
 }
