@@ -21,8 +21,8 @@ use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
     LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
     PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
-    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol,
-    VulnerabilitySource, MAX_ATTEMPTS,
+    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol, VulnerabilitySource,
+    MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     effective_stimulus_ports, result_from_open_port, EvidenceSource as ScanEvidenceSource,
@@ -650,10 +650,7 @@ fn extract_version_hint(raw: &str) -> Option<String> {
 /// Returns a short, LLM-readable hint; returns `None` for non-matching pages.
 fn extract_app_hint_from_html(lower_raw: &str) -> Option<String> {
     let title_start = lower_raw.find("<title>")? + 7;
-    let title = lower_raw[title_start..]
-        .split("</title>")
-        .next()?
-        .trim();
+    let title = lower_raw[title_start..].split("</title>").next()?.trim();
 
     if title.is_empty() {
         return None;
@@ -1373,8 +1370,16 @@ fn percent_encode_ognl(ognl: &str) -> String {
             }
             _ => {
                 encoded.push('%');
-                encoded.push(char::from_digit((byte >> 4) as u32, 16).unwrap().to_ascii_uppercase());
-                encoded.push(char::from_digit((byte & 0xF) as u32, 16).unwrap().to_ascii_uppercase());
+                encoded.push(
+                    char::from_digit((byte >> 4) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+                encoded.push(
+                    char::from_digit((byte & 0xF) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
             }
         }
     }
@@ -1720,16 +1725,25 @@ const MAX_PROPAGATION_CANDIDATES: usize = 6;
 /// Findings with no vulnerability_candidates or is_actionable=false are excluded.
 /// The caller presents ranked[attempt_number - 1] to the LLM so each attempt
 /// focuses on the next-highest-priority exploit path.
-fn rank_propagation_candidates(
-    findings: &[PatternFindingSummary],
-) -> Vec<PatternFindingSummary> {
+fn rank_propagation_candidates(findings: &[PatternFindingSummary]) -> Vec<PatternFindingSummary> {
     let candidate_weight = |f: &PatternFindingSummary| -> f32 {
-        f.vulnerability_candidates.iter().map(|c| {
-            let cvss = c.cvss_score.unwrap_or(5.0);
-            let source_mult = if c.source == VulnerabilitySource::PhysarumSpore { 2.0f32 } else { 1.0f32 };
-            let class_mult = if c.exploit_class.as_deref() == Some("RemoteCodeExecution") { 1.5f32 } else { 1.0f32 };
-            cvss * source_mult * class_mult * c.confidence
-        }).fold(0.0f32, f32::max)
+        f.vulnerability_candidates
+            .iter()
+            .map(|c| {
+                let cvss = c.cvss_score.unwrap_or(5.0);
+                let source_mult = if c.source == VulnerabilitySource::PhysarumSpore {
+                    2.0f32
+                } else {
+                    1.0f32
+                };
+                let class_mult = if c.exploit_class.as_deref() == Some("RemoteCodeExecution") {
+                    1.5f32
+                } else {
+                    1.0f32
+                };
+                cvss * source_mult * class_mult * c.confidence
+            })
+            .fold(0.0f32, f32::max)
     };
 
     let mut scored: Vec<(f32, &PatternFindingSummary)> = findings
@@ -1738,9 +1752,7 @@ fn rank_propagation_candidates(
         .map(|f| (candidate_weight(f), f))
         .collect();
 
-    scored.sort_by(|a, b| {
-        b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
     scored
         .into_iter()
@@ -1772,7 +1784,10 @@ fn build_template_catalog_for_llm(
         (t.info.cvss_score.unwrap_or(0.0) * 10.0) as u32
     };
     let is_rce = |t: &&physarum_sporangium::PatternTemplate| -> bool {
-        t.info.tags.iter().any(|tag| tag.to_ascii_lowercase() == "rce")
+        t.info
+            .tags
+            .iter()
+            .any(|tag| tag.to_ascii_lowercase() == "rce")
     };
 
     let mut rce_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
@@ -1851,7 +1866,10 @@ async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHand
                 let n = socket.read(&mut buf).await.unwrap_or(0);
                 let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
                 // Parse the request path from the first line: "GET /path HTTP/1.x"
-                let path = request.split_whitespace().nth(1).unwrap_or("/physarum-maze");
+                let path = request
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/physarum-maze");
 
                 if path == "/bootstrap.sh" {
                     let script_path = PathBuf::from("/tmp/physarum/bootstrap.sh");
@@ -1932,15 +1950,24 @@ mod tests {
                     <html><head><title>S2-059 demo</title></head></html>";
         let hint = extract_version_hint(body).unwrap();
         assert!(hint.contains("Jetty"), "should keep server version: {hint}");
-        assert!(hint.contains("Apache Struts"), "should append app hint: {hint}");
-        assert!(hint.contains("S2-059"), "should include advisory ID: {hint}");
+        assert!(
+            hint.contains("Apache Struts"),
+            "should append app hint: {hint}"
+        );
+        assert!(
+            hint.contains("S2-059"),
+            "should include advisory ID: {hint}"
+        );
     }
 
     #[test]
     fn openssh_version_hint_no_false_positive() {
         let banner = "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u2\r\n";
         let hint = extract_version_hint(banner).unwrap();
-        assert!(hint.starts_with("OpenSSH_"), "should extract SSH version: {hint}");
+        assert!(
+            hint.starts_with("OpenSSH_"),
+            "should extract SSH version: {hint}"
+        );
         assert!(!hint.contains("Struts"), "no Struts in SSH banner: {hint}");
     }
 

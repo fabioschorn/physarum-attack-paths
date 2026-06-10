@@ -134,7 +134,7 @@ impl OpenAiCompatibleClient {
                 },
             ],
             temperature: 0.3, // Slight randomness avoids repetition loops
-            max_tokens: 512, // Short: ≤15 IDs × ~10 tokens each; prevents infinite loops
+            max_tokens: 512,  // Short: ≤15 IDs × ~10 tokens each; prevents infinite loops
         };
 
         let url = self.completions_url();

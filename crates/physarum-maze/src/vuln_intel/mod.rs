@@ -319,36 +319,32 @@ impl VulnerabilityIntelService {
             let maybe_input = build_intel_input(finding);
             // When the template IS the CVE proof, synthesize a confirmed candidate.
             // Computed before the async block to avoid borrowing `finding` across await.
-            let spore_candidate: Option<VulnerabilityCandidate> =
-                if maybe_input.is_none()
-                    && finding.is_actionable()
-                    && finding.check_id.starts_with("CVE-")
-                {
-                    Some(VulnerabilityCandidate {
-                        cve_id: finding.check_id.clone(),
-                        cvss_score: None,
-                        description: format!(
-                            "Confirmed by template match: {}",
-                            finding.check_id
-                        ),
-                        affected_port: finding.port,
-                        confidence: 0.95,
-                        source: VulnerabilitySource::PhysarumSpore,
-                        matched_service: None,
-                        matched_version: None,
-                        evidence: vec![finding.matched_condition_summary.clone()],
-                        is_confirmed: true,
-                        affected_range: None,
-                        // Template firing = active exploitation confirmed; label as RCE
-                        // so EXPLOIT MODE in the LLM Turn 2 prompt can trigger.
-                        exploit_class: Some("RemoteCodeExecution".to_string()),
-                        impact: None,
-                        preconditions: vec![],
-                        references: vec![],
-                    })
-                } else {
-                    None
-                };
+            let spore_candidate: Option<VulnerabilityCandidate> = if maybe_input.is_none()
+                && finding.is_actionable()
+                && finding.check_id.starts_with("CVE-")
+            {
+                Some(VulnerabilityCandidate {
+                    cve_id: finding.check_id.clone(),
+                    cvss_score: None,
+                    description: format!("Confirmed by template match: {}", finding.check_id),
+                    affected_port: finding.port,
+                    confidence: 0.95,
+                    source: VulnerabilitySource::PhysarumSpore,
+                    matched_service: None,
+                    matched_version: None,
+                    evidence: vec![finding.matched_condition_summary.clone()],
+                    is_confirmed: true,
+                    affected_range: None,
+                    // Template firing = active exploitation confirmed; label as RCE
+                    // so EXPLOIT MODE in the LLM Turn 2 prompt can trigger.
+                    exploit_class: Some("RemoteCodeExecution".to_string()),
+                    impact: None,
+                    preconditions: vec![],
+                    references: vec![],
+                })
+            } else {
+                None
+            };
 
             async move {
                 let candidates = match maybe_input {

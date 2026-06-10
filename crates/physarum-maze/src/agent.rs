@@ -606,7 +606,10 @@ async fn run_keygen_test() -> Result<()> {
             "keygen-test: privkey permissions are {:o}, expected 600",
             mode
         );
-        tracing::info!(mode = format!("{:o}", mode), "keygen-test: privkey permissions OK");
+        tracing::info!(
+            mode = format!("{:o}", mode),
+            "keygen-test: privkey permissions OK"
+        );
     }
     #[cfg(not(unix))]
     {
