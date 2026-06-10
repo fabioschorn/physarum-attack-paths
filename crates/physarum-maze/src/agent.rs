@@ -350,6 +350,7 @@ async fn handle_candidate(
         {
             LlmOutcome::Propagated => {
                 tracing::info!(%src_ip, "LLM propagation succeeded");
+                lineage.mark_colonized(&ip_str);
                 lineage.save()?;
                 return Ok(());
             }
