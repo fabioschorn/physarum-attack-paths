@@ -1,5 +1,9 @@
 # physarum-attack-paths
 
+<p align="center">
+  <img src="assets/branding/physarum-attack-paths-logo-tech-transparent.png" alt="Physarum Attack Paths logo" width="720">
+</p>
+
 > **Bio-inspired attack-path organism for controlled security research.** `physarum-attack-paths` is a Rust research prototype that turns local network observations, adaptive sensing, pattern evidence, LLM reasoning, policy decisions, and lineage memory into a living attack-path discovery organism.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
