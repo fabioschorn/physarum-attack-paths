@@ -463,7 +463,17 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     use tokio::time::{timeout, Duration};
 
     const TIMEOUT_MS: u64 = 1_500;
-    const MAX_BYTES: usize = 256;
+    // HTTP ports: larger buffer so the response body (e.g. page <title>) reaches
+    // the LLM Turn 1 query alongside the server header. 256 bytes was too small —
+    // HTTP response headers alone can exceed 256 bytes, cutting the HTML body
+    // that contains application-specific version strings (e.g. "S2-059 demo" for
+    // Apache Struts CVE-2020-17530). Non-HTTP ports keep the 256-byte cap since
+    // their banners are short text strings.
+    let is_http_port = matches!(
+        port,
+        80 | 3000 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000 | 9090 | 9200 | 9999
+    );
+    let max_bytes: usize = if is_http_port { 2048 } else { 256 };
 
     let addr = SocketAddr::new(IpAddr::V4(target), port);
     let mut stream = timeout(Duration::from_millis(TIMEOUT_MS), TcpStream::connect(addr))
@@ -473,10 +483,7 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
 
     // Send a minimal HTTP probe for plain-HTTP ports to elicit a response header.
     // TLS ports (443/8443/9443) are skipped — the TLS handshake would be binary.
-    if matches!(
-        port,
-        80 | 3000 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000 | 9090 | 9200 | 9999
-    ) {
+    if is_http_port {
         let _ = timeout(
             Duration::from_millis(TIMEOUT_MS),
             stream.write_all(b"GET / HTTP/1.0\r\nHost: physarum\r\nConnection: close\r\n\r\n"),
@@ -484,7 +491,7 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
         .await;
     }
 
-    let mut buf = vec![0u8; MAX_BYTES];
+    let mut buf = vec![0u8; max_bytes];
     let n = timeout(Duration::from_millis(TIMEOUT_MS), stream.read(&mut buf))
         .await
         .ok()?
