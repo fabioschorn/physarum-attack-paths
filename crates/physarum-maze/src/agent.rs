@@ -60,6 +60,7 @@ impl LlmConfig {
         if cli.exploit_enabled {
             allowed_methods.push(PropagationMethodClass::Exploit);
         }
+        gate.allowed_methods = allowed_methods.clone();
 
         let client: Arc<dyn physarum_llm::LlmClient> = if endpoint == "mock" {
             Arc::new(MockLlmClient::no_path("mock mode — no real LLM"))

