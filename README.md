@@ -602,7 +602,7 @@ For Rust-side dependencies of architectural significance:
 This software is dual-licensed:
 
 - **Non-Commercial / Academic use** — free under the [Non-Commercial License](./LICENSE-NONCOMMERCIAL). Covers research, education, and personal non-revenue use in authorized lab environments.
-- **Commercial use** — requires a separate written agreement. See [LICENSE-COMMERCIAL](./LICENSE-COMMERCIAL) and contact fschorn@gmail.com.
+- **Commercial use** — requires a separate written agreement. See [LICENSE-COMMERCIAL](./LICENSE-COMMERCIAL) and contact fabio.schorn@expertsonline.com.br.
 
 Patent applications covering methods and systems embodied in this software have been filed. Neither license option grants any patent rights. See [PATENTS](./PATENTS) for details.
 
