@@ -86,9 +86,11 @@ CVE-AWARE REASONING:
 If any pattern_finding contains non-empty vulnerability_candidates:
 
   RANKING RULE — always rank candidates in this order:
-    1. source=\"PhysarumSpore\" — CONFIRMED by active template execution (treat as critical if cvss_score absent).
-       A PhysarumSpore candidate means the exploit path was proven live against this host.
-       This is the highest-confidence propagation signal available.
+    1. source=\"PhysarumSpore\" — observed template evidence matched on this host (treat as high priority if cvss_score absent).
+       A PhysarumSpore candidate means the template's match condition was observed here — a
+       vulnerable condition, exposure, version, or behavior. It does NOT prove that code
+       execution occurred; exploitation is only confirmed after the bootstrap/execution result.
+       This is a strong propagation signal, but treat it as evidence, not as a completed exploit.
     2. exploit_class=\"RemoteCodeExecution\" from any source (rank by cvss_score descending)
     3. Any other candidate (rank by cvss_score descending)
 
@@ -145,6 +147,11 @@ step that downloads and executes the binary in one RCE command:
   Note: requires port 8001 reachable from target — valid for flat Docker networks.
 
 ── APACHE STRUTS OGNL INJECTION (S2-xxx advisory CVEs) ──────────────────────────────
+SCOPE: the __struts_bypass__ sentinel is an adapter for the Apache Struts S2/OGNL CVE
+family only. It is NOT the generic exploitation model — do not apply it to other CVE
+classes. The generic, per-CVE path (ExploitReference + ExploitExecutionRecipe) is future
+work tracked by #144; until then, only Struts S2-advisory CVEs use this sentinel.
+
 When the CVE is an Apache Struts S2-advisory (forced OGNL evaluation in URL parameters),
 use the executor-provided path sentinel — do NOT write OGNL expressions manually.
 Struts 2.5.x blocks direct ProcessBuilder — the executor handles the bypass automatically.

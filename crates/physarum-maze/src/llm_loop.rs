@@ -187,7 +187,7 @@ pub async fn run(
         let attempt_findings: Vec<PatternFindingSummary> = if ranked_candidates.is_empty() {
             pattern_summaries.clone()
         } else {
-            let idx = (attempt_number as usize - 1).min(ranked_candidates.len() - 1);
+            let idx = (attempt_number as usize - 1) % ranked_candidates.len();
             vec![ranked_candidates[idx].clone()]
         };
 
@@ -1293,6 +1293,10 @@ fn ssh_opts(key_path: Option<&Path>) -> Vec<String> {
 ///   `__struts_bypass__` → the full URL-encoded Struts 2.5.x SecurityMemberAccess bypass OGNL
 ///     that downloads and executes bootstrap.sh via freemarker.Execute.
 ///     Internally expanded to TWO requests (wget step then sh step) by execute_step.
+///
+/// Scope: `__struts_bypass__` is an adapter for the Apache Struts S2/OGNL CVE family
+/// only — not the generic exploitation model. The generic per-CVE delivery path
+/// (ExploitReference + ExploitExecutionRecipe) is future work tracked by #144.
 fn resolve_http_path(path: &str, source_ip: Option<Ipv4Addr>) -> String {
     let ip_str = source_ip.map(|ip| ip.to_string()).unwrap_or_default();
     path.replace("<source_ip>", &ip_str)
