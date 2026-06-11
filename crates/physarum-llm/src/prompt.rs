@@ -121,9 +121,6 @@ CRITICAL RULES (must not be violated):
   4. CVE-2015-3306 → mandatory FtpModCopy action (see PROFTPD MOD_COPY section below).
   5. Apache Struts CVEs → mandatory __struts_bypass__ sentinel in HttpPost path.
 
-── SSH-FIRST PATH (for HTTP-based CVEs when port 22 is also open) ───────────────────
-Use this path when the CVE exploits an HTTP service AND port 22 is open.
-
 Step 1 — HttpPost (RCE via CVE): download and execute the bootstrap script.
   The agent HTTP server (source_ip:8001) serves /bootstrap.sh which plants the ephemeral pubkey
   and creates /tmp/physarum on the target. Use the CVE-class-specific injection path — see the
