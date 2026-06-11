@@ -1616,8 +1616,15 @@ async fn execute_step(
                 %target, ftp_port, %staging_path, %dest_path,
                 "FTP mod_copy — CVE-2015-3306 STOR + SITE CPFR/CPTO"
             );
-            execute_ftp_mod_copy(target, ftp_port, staging_path, dest_path, key_path, timeout_ms)
-                .await
+            execute_ftp_mod_copy(
+                target,
+                ftp_port,
+                staging_path,
+                dest_path,
+                key_path,
+                timeout_ms,
+            )
+            .await
         }
     }
 }
@@ -1673,9 +1680,7 @@ async fn execute_ftp_mod_copy(
             let pub_path = kp.with_extension("pub");
             match tokio::fs::read_to_string(&pub_path).await {
                 Ok(s) => s,
-                Err(e) => {
-                    return StepResult::Failed(format!("ftp-mod-copy: pubkey read: {e}"))
-                }
+                Err(e) => return StepResult::Failed(format!("ftp-mod-copy: pubkey read: {e}")),
             }
         }
         None => {
@@ -1744,10 +1749,7 @@ async fn execute_ftp_mod_copy(
         let n = ctrl.read(&mut buf).await?;
         let xfer = String::from_utf8_lossy(&buf[..n]);
         if !xfer.starts_with("226") {
-            return Err(anyhow::anyhow!(
-                "STOR transfer incomplete: {}",
-                xfer.trim()
-            ));
+            return Err(anyhow::anyhow!("STOR transfer incomplete: {}", xfer.trim()));
         }
         tracing::info!(%staging_path, "FTP STOR pubkey uploaded");
 
