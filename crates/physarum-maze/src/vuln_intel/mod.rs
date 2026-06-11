@@ -36,7 +36,7 @@ mod osv;
 
 use std::path::{Path, PathBuf};
 
-use physarum_llm::types::VulnerabilityCandidate;
+use physarum_llm::types::{VulnerabilityCandidate, VulnerabilitySource};
 
 pub use cache::LocalAdvisoryCache;
 
@@ -299,6 +299,15 @@ impl VulnerabilityIntelService {
     /// per finding in the same order as the input slice.
     ///
     /// Bounded by `MAX_INTEL_CONCURRENCY` to avoid hammering advisory APIs.
+    ///
+    /// Two enrichment paths:
+    /// 1. Version-based: extract service/version from banner → advisory cache / OSV.
+    /// 2. Spore-direct: when a CVE-named template itself fires (is_actionable + check_id
+    ///    starts with "CVE-"), synthesize a `PhysarumSpore` candidate without needing a
+    ///    version string. The match records that the template's evidence was observed on
+    ///    the host (e.g. CVE-2020-17530) — a vulnerable condition, not proof of code
+    ///    execution. The candidate is only labelled `RemoteCodeExecution` when the
+    ///    finding's local metadata identifies the class as RCE (see `finding_indicates_rce`).
     pub async fn enrich_findings(
         &self,
         findings: &[physarum_sporangium::PatternFinding],
@@ -307,16 +316,57 @@ impl VulnerabilityIntelService {
 
         const MAX_INTEL_CONCURRENCY: usize = 4;
 
-        let inputs: Vec<Option<VulnerabilityIntelInput>> =
-            findings.iter().map(build_intel_input).collect();
-
-        stream::iter(inputs.into_iter().enumerate().map(|(i, maybe_input)| {
+        stream::iter(findings.iter().enumerate().map(|(i, finding)| {
             let svc = self;
+            let maybe_input = build_intel_input(finding);
+            // When the template IS the CVE proof, synthesize a confirmed candidate.
+            // Computed before the async block to avoid borrowing `finding` across await.
+            let spore_candidate: Option<VulnerabilityCandidate> = if maybe_input.is_none()
+                && finding.is_actionable()
+                && finding.check_id.starts_with("CVE-")
+            {
+                Some(VulnerabilityCandidate {
+                    cve_id: finding.check_id.clone(),
+                    cvss_score: None,
+                    description: format!(
+                        "Observed template evidence matched: {}",
+                        finding.check_id
+                    ),
+                    affected_port: finding.port,
+                    confidence: 0.95,
+                    source: VulnerabilitySource::PhysarumSpore,
+                    matched_service: None,
+                    matched_version: None,
+                    evidence: vec![finding.matched_condition_summary.clone()],
+                    // A template match confirms the vulnerable condition was observed
+                    // (exposure / version / endpoint / behavior). It is NOT proof that
+                    // code execution occurred — that is only confirmed once the
+                    // bootstrap/execution result produces the expected evidence.
+                    is_confirmed: true,
+                    affected_range: None,
+                    // Only label RCE when the template's local metadata identifies the
+                    // class as remote code execution. A generic actionable CVE match is
+                    // observed evidence, not a confirmed RCE path, so it must not flip
+                    // EXPLOIT MODE in the LLM Turn 2 prompt on its own.
+                    exploit_class: if finding_indicates_rce(finding) {
+                        Some("RemoteCodeExecution".to_string())
+                    } else {
+                        None
+                    },
+                    impact: None,
+                    preconditions: vec![],
+                    references: vec![],
+                })
+            } else {
+                None
+            };
+
             async move {
-                match maybe_input {
-                    None => (i, vec![]),
-                    Some(input) => (i, svc.enrich(&input).await),
-                }
+                let candidates = match maybe_input {
+                    Some(input) => svc.enrich(&input).await,
+                    None => spore_candidate.map(|c| vec![c]).unwrap_or_default(),
+                };
+                (i, candidates)
             }
         }))
         .buffer_unordered(MAX_INTEL_CONCURRENCY)
@@ -328,6 +378,40 @@ impl VulnerabilityIntelService {
             acc
         })
     }
+}
+
+/// True when a finding's local metadata identifies its class as remote code
+/// execution. We only inspect signals already present on the `PatternFinding`
+/// (template name, check id, matched-condition summary, extracted facts) — no
+/// network lookup. This keeps a generic actionable CVE match as *observed
+/// evidence* while reserving the `RemoteCodeExecution` label (which can flip the
+/// LLM into EXPLOIT MODE) for templates whose own metadata names the RCE class.
+///
+/// The generic, advisory-driven classification path is future work tracked by
+/// #144 (`ExploitReference` + `ExploitExecutionRecipe`); this is a deliberately
+/// narrow local-signal check.
+fn finding_indicates_rce(finding: &physarum_sporangium::PatternFinding) -> bool {
+    const RCE_SIGNALS: [&str; 6] = [
+        "remote code execution",
+        "rce",
+        "ognl",
+        "deserialization",
+        "command injection",
+        "command execution",
+    ];
+
+    let mut haystacks = vec![
+        finding.name.to_ascii_lowercase(),
+        finding.matched_condition_summary.to_ascii_lowercase(),
+    ];
+    for fact in &finding.extracted_facts {
+        haystacks.push(fact.name.to_ascii_lowercase());
+        haystacks.extend(fact.values.iter().map(|v| v.to_ascii_lowercase()));
+    }
+
+    haystacks
+        .iter()
+        .any(|h| RCE_SIGNALS.iter().any(|sig| h.contains(sig)))
 }
 
 // ── Input extraction from PatternFinding ──────────────────────────────────────

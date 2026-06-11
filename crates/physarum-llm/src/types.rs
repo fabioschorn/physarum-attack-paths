@@ -152,6 +152,10 @@ pub enum VulnerabilitySource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemplateMeta {
     pub id: String,
+    /// Human-readable template name (e.g. "Apache Struts 2.0.0-2.5.25 - Remote Code Execution").
+    /// Helps the LLM disambiguate templates with similar IDs or tags.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
     pub severity: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
