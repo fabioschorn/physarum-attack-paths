@@ -327,7 +327,7 @@ impl VulnerabilityIntelService {
             {
                 Some(VulnerabilityCandidate {
                     cve_id: finding.check_id.clone(),
-                    cvss_score: None,
+                    cvss_score: finding.template_cvss,
                     description: format!(
                         "Observed template evidence matched: {}",
                         finding.check_id

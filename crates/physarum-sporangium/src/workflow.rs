@@ -195,6 +195,7 @@ mod tests {
             }],
             evidence_source: EvidenceSource::HttpProbe,
             timestamp: Utc::now(),
+            template_cvss: None,
         }
     }
 

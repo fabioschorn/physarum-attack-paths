@@ -48,6 +48,10 @@ pub struct PatternFinding {
     pub extracted_facts: Vec<ExtractedFact>,
     pub evidence_source: EvidenceSource,
     pub timestamp: DateTime<Utc>,
+    /// CVSS score from the template's info block, if present.
+    /// Propagated to PhysarumSpore candidates so ranking uses the template's
+    /// declared score instead of defaulting to 5.0.
+    pub template_cvss: Option<f32>,
 }
 
 impl PatternFinding {
@@ -80,6 +84,7 @@ mod tests {
             extracted_facts: vec![],
             evidence_source: EvidenceSource::HttpProbe,
             timestamp: Utc::now(),
+            template_cvss: None,
         }
     }
 

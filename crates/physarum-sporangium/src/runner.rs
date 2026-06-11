@@ -246,6 +246,7 @@ pub fn evaluate_template(
         extracted_facts,
         evidence_source,
         timestamp: Utc::now(),
+        template_cvss: template.info.cvss_score,
     }]
 }
 
@@ -290,6 +291,7 @@ pub fn evaluate_template_with_response(
         extracted_facts,
         evidence_source,
         timestamp: Utc::now(),
+        template_cvss: template.info.cvss_score,
     }]
 }
 
