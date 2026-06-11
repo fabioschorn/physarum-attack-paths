@@ -2,7 +2,7 @@
 
 > **Bio-inspired attack-path organism for controlled security research.** `physarum-attack-paths` is a Rust research prototype that turns local network observations, adaptive sensing, pattern evidence, LLM reasoning, policy decisions, and lineage memory into a living attack-path discovery organism.
 
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
+[![License: Dual](https://img.shields.io/badge/license-NonCommercial%20%7C%20Commercial-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
 [![Rust](https://img.shields.io/badge/rust-1.86%2B-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](https://github.com/fabioschorn/physarum-attack-paths/releases)
@@ -599,7 +599,14 @@ For Rust-side dependencies of architectural significance:
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE) for full terms.
+This software is dual-licensed:
+
+- **Non-Commercial / Academic use** — free under the [Non-Commercial License](./LICENSE-NONCOMMERCIAL). Covers research, education, and personal non-revenue use in authorized lab environments.
+- **Commercial use** — requires a separate written agreement. See [LICENSE-COMMERCIAL](./LICENSE-COMMERCIAL) and contact fschorn@gmail.com.
+
+Patent applications covering methods and systems embodied in this software have been filed. Neither license option grants any patent rights. See [PATENTS](./PATENTS) for details.
+
+See [LICENSE](./LICENSE) for the full licensing overview.
 
 ---
 

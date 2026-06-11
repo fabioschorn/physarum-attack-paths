@@ -1,0 +1,108 @@
+physarum-attack-paths — Non-Commercial License, Version 1.0
+
+Copyright (c) 2026 Fábio Schorn / EFS Security Team / EXP-ON
+All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, study, modify, and distribute the Software and Derivative Works thereof,
+subject to all of the following conditions:
+
+────────────────────────────────────────────────────────────────────────────
+1. NON-COMMERCIAL USE ONLY
+────────────────────────────────────────────────────────────────────────────
+The Software and any Derivative Works may only be used for:
+
+  (a) personal, non-revenue-generating purposes;
+  (b) academic research, teaching, or education at an accredited institution;
+  (c) non-commercial security research conducted in owned, isolated, and
+      authorized lab environments.
+
+"Commercial use" means any use of the Software — directly or indirectly — in
+a product, service, platform, consulting deliverable, or internal tooling that
+generates or supports revenue. This includes, without limitation:
+
+  - SaaS or hosted security platforms
+  - Security products sold or licensed to third parties
+  - Professional services or consulting outputs
+  - Internal business tooling in revenue-generating operations
+
+If you are unsure whether your use qualifies as non-commercial, contact
+fschorn@gmail.com before proceeding.
+
+────────────────────────────────────────────────────────────────────────────
+2. ATTRIBUTION
+────────────────────────────────────────────────────────────────────────────
+All copies or substantial portions of the Software — whether modified or
+unmodified — must retain:
+
+  - This copyright notice
+  - This list of conditions
+  - The disclaimer in Section 7
+
+In any public distribution or publication that uses or describes the Software,
+include a citation to the original repository:
+  https://github.com/fabioschorn/physarum-attack-paths
+
+────────────────────────────────────────────────────────────────────────────
+3. SHARE-ALIKE FOR PUBLIC DISTRIBUTIONS
+────────────────────────────────────────────────────────────────────────────
+If you publicly distribute a modified version of the Software, you must do
+so under this same Non-Commercial License or a more restrictive license.
+You may not apply terms that grant others rights beyond those in this license.
+
+────────────────────────────────────────────────────────────────────────────
+4. NO SUBLICENSING FOR COMMERCIAL USE
+────────────────────────────────────────────────────────────────────────────
+You may not sublicense, sell, rent, or offer the Software or any Derivative
+Work as a service under terms that permit commercial use. Any redistribution
+that enables commercial use by a third party requires a Commercial License.
+See LICENSE-COMMERCIAL.
+
+────────────────────────────────────────────────────────────────────────────
+5. NO PATENT RIGHTS GRANTED
+────────────────────────────────────────────────────────────────────────────
+This license does NOT grant any rights under any patent, patent application,
+or other intellectual property right of the copyright holders.
+
+Specifically: use of the Software, whether permitted under this license or
+otherwise, does NOT constitute and shall NOT be construed as a license —
+express, implied, by estoppel, or otherwise — to practice any invention
+claimed in any pending or granted patent owned or controlled by Fábio Schorn
+or EXP-ON.
+
+See PATENTS for a description of covered inventions and contact information
+for patent licensing inquiries.
+
+────────────────────────────────────────────────────────────────────────────
+6. AUTHORIZED LABS ONLY
+────────────────────────────────────────────────────────────────────────────
+The Software is a controlled security research tool designed exclusively for
+use in owned, isolated, and authorized lab environments (local labs, Docker
+labs, owned cloud VPCs under explicit authorization).
+
+Use of the Software against:
+  - public targets
+  - networks or systems you do not own
+  - systems without explicit written authorization from the owner
+
+is PROHIBITED regardless of which license option applies. Violation of this
+condition is a breach of this license and may constitute a criminal offense.
+
+────────────────────────────────────────────────────────────────────────────
+7. DISCLAIMER OF WARRANTIES AND LIMITATION OF LIABILITY
+────────────────────────────────────────────────────────────────────────────
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE, INCLUDING ANY USE AGAINST UNAUTHORIZED
+TARGETS OR IN VIOLATION OF APPLICABLE LAW.
+
+────────────────────────────────────────────────────────────────────────────
+For commercial licensing:  fschorn@gmail.com (subject: commercial license)
+For patent licensing:      fschorn@gmail.com (subject: patent license)
+Repository:                https://github.com/fabioschorn/physarum-attack-paths

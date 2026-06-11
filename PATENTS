@@ -1,0 +1,51 @@
+physarum-attack-paths — Patent Notice
+
+Copyright (c) 2026 Fábio Schorn / EFS Security Team / EXP-ON
+
+────────────────────────────────────────────────────────────────────────────
+PENDING PATENT APPLICATIONS
+────────────────────────────────────────────────────────────────────────────
+One or more patent applications have been filed by Fábio Schorn / EXP-ON
+covering inventions embodied in this software. The covered subject matter
+includes, without limitation:
+
+  - Autonomous bio-inspired attack-path discovery and reinforcement systems
+  - Distributed multi-hop vulnerability propagation with lineage tracking
+  - LLM-guided exploit strategy selection with policy-gate enforcement
+  - Adaptive path scoring via evidence accumulation (q_ema / D_ij model)
+  - Autonomous validation agent architecture for networked environments
+  - Physarum-inspired reinforcement/decay applied to security path analysis
+
+The patent applications are currently in prosecution. Application numbers
+and publication details will be added to this file upon public disclosure
+by the relevant patent office(s).
+
+────────────────────────────────────────────────────────────────────────────
+WHAT THIS MEANS FOR USERS
+────────────────────────────────────────────────────────────────────────────
+IMPORTANT: No license — express, implied, by estoppel, or otherwise — to
+practice any of the above-mentioned patents or patent applications is granted
+by:
+
+  - The Non-Commercial License (LICENSE-NONCOMMERCIAL)
+  - The source code, documentation, or any other materials in this repository
+  - The act of distributing or making available this software
+
+Use of this software under the Non-Commercial License grants copyright
+permissions only. It does NOT grant any patent license whatsoever.
+
+────────────────────────────────────────────────────────────────────────────
+PATENT LICENSING
+────────────────────────────────────────────────────────────────────────────
+To obtain a patent license (for research or commercial purposes), contact:
+
+  Fábio Schorn / EXP-ON
+  Email:   fschorn@gmail.com
+  Subject: physarum-attack-paths — Patent License Inquiry
+
+────────────────────────────────────────────────────────────────────────────
+NOTE ON PRIOR ART
+────────────────────────────────────────────────────────────────────────────
+This repository and its git history constitute prior art established by
+the inventors. The filing date of the patent application(s) predates public
+disclosure and establishes the priority date for all covered claims.
