@@ -1,5 +1,5 @@
 physarum-attack-paths
-Copyright (c) 2026 Fábio Schorn / EFS Security Team / EXP-ON
+Copyright (c) 2026 Fábio Schorn
 
 This product includes software developed by Fábio Schorn and contributors.
 
@@ -31,9 +31,9 @@ targets, is prohibited and may constitute a violation of applicable law.
 PATENT NOTICE
 ────────────────────────────────────────────────────────────────────────────
 One or more patent applications covering methods and systems embodied in
-this software have been filed by Fábio Schorn / EXP-ON. The Apache 2.0
-license does not extend to any such pending or granted patents beyond what
-is required by applicable law.
+this software have been filed by Fábio Schorn. The Apache 2.0 license does
+not extend to any such pending or granted patents beyond what is required
+by applicable law.
 
 For commercial or patent licensing inquiries:
   fabio.schorn@expertsonline.com.br
