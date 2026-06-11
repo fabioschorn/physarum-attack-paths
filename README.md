@@ -1,6 +1,6 @@
 # physarum-attack-paths
 
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
+[![License: PolyForm NC 1.0.0](https://img.shields.io/badge/license-PolyForm%20NC%201.0.0-blue.svg)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-research--prototype-orange.svg)](https://github.com/fabioschorn/physarum-attack-paths)
 [![Rust](https://img.shields.io/badge/rust-1.86%2B-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](https://github.com/fabioschorn/physarum-attack-paths/releases)
@@ -603,7 +603,13 @@ For Rust-side dependencies of architectural significance:
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE) for full terms.
+Licensed under the [PolyForm Noncommercial License 1.0.0](./LICENSE).
+
+This license permits use for any purpose that is **not** primarily intended for commercial advantage or monetary compensation — including academic research, education, and security testing in owned and authorized lab environments.
+
+Commercial use requires a separate agreement. Contact: fabio.schorn@expertsonline.com.br
+
+Patent applications covering methods and systems embodied in this software have been filed by Fábio Schorn. See [NOTICE](./NOTICE) for details.
 
 ---
 
