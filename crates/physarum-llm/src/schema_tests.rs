@@ -148,6 +148,16 @@ mod tests {
         round_trip(&BootstrapAction::Custom {
             description: "custom action".into(),
         });
+        round_trip(&BootstrapAction::FtpModCopy {
+            port: Some(21),
+            staging_path: "/tmp/physarum_authorized_keys".into(),
+            dest_path: "/root/.ssh/authorized_keys".into(),
+        });
+        round_trip(&BootstrapAction::FtpModCopy {
+            port: None,
+            staging_path: "/tmp/physarum_authorized_keys".into(),
+            dest_path: "/root/.ssh/authorized_keys".into(),
+        });
     }
 
     // ── PropagationStrategy — all method variants ─────────────────────────────

