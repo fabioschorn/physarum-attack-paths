@@ -3,7 +3,6 @@ use tracing_subscriber::EnvFilter;
 
 mod agent;
 mod discovery;
-mod exploit_db;
 #[cfg(target_os = "linux")]
 mod ebpf;
 mod exploit_db;
