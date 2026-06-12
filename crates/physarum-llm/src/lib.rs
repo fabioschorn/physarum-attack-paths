@@ -19,9 +19,11 @@ pub use openai::OpenAiCompatibleClient;
 pub use policy::{PolicyGate, MAX_ATTEMPTS, MIN_CONFIDENCE};
 pub use types::{
     ArtifactType, BootstrapAction, BootstrapPlan, BootstrapStep, DiscoveryQuery,
-    ExecutionResultSummary, ExpectedResult, HttpMethod, LineageSummary, LlmAttemptEvidence,
-    NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyRejectionReason,
-    PortScan, PortState, PropagationMethod, PropagationMethodClass, PropagationStrategy,
-    RejectedStrategy, SecretRef, SecretSource, SshAuth, TemplateMeta, TemplateSelectionQuery,
-    TemplateSelectionResponse, TransportProtocol, VulnerabilityCandidate, VulnerabilitySource,
+    EnrichmentCapability, EnrichmentLookupStatus, EnrichmentRequest, EnrichmentResult,
+    ExecutionResultSummary, ExpectedResult, ExploitReference, HttpMethod, LineageSummary,
+    LlmAttemptEvidence, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision,
+    PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
+    PropagationStrategy, RejectedStrategy, SecretRef, SecretSource, SshAuth, TemplateMeta,
+    TemplateSelectionQuery, TemplateSelectionResponse, TransportProtocol, VulnerabilityCandidate,
+    VulnerabilitySource,
 };

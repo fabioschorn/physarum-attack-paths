@@ -46,6 +46,7 @@ impl MockLlmClient {
             preconditions: vec![],
             validation_check: None,
             safety_notes: vec!["Mock client — lab use only.".into()],
+            enrichment_request: None,
         })
     }
 
@@ -64,6 +65,7 @@ impl MockLlmClient {
             preconditions: vec!["Port 22 open".into()],
             validation_check: Some("SSH connection succeeds".into()),
             safety_notes: vec!["Mock client — lab use only.".into()],
+            enrichment_request: None,
         })
     }
 
@@ -84,6 +86,7 @@ impl MockLlmClient {
             preconditions: vec!["Port 80 or 8080 open".into()],
             validation_check: Some("HTTP 200 response".into()),
             safety_notes: vec!["Mock client — lab use only.".into()],
+            enrichment_request: None,
         })
     }
 
@@ -187,6 +190,7 @@ impl MockLlmClient {
                 "Mock exploit client — Docker Lab Phase 2 only.".into(),
                 "RCE + SSH access — isolated lab environment only.".into(),
             ],
+            enrichment_request: None,
         })
     }
 
@@ -233,6 +237,7 @@ impl MockLlmClient {
             preconditions: vec![format!("Port {port_label} open")],
             validation_check: Some(format!("HTTP 200 from target:{port_label}")),
             safety_notes: vec!["Mock client — Docker Lab only.".into()],
+            enrichment_request: None,
         })
     }
 }
