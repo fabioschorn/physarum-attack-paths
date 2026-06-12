@@ -246,6 +246,8 @@ pub struct TemplateInfo {
     pub authors: Vec<String>,
     pub description: Option<String>,
     #[serde(default)]
+    pub remediation: Option<String>,
+    #[serde(default)]
     pub severity: SeverityHint,
     #[serde(default)]
     pub tags: Vec<String>,

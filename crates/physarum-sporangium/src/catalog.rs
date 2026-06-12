@@ -22,6 +22,7 @@ fn info(name: &str, description: &str, severity: SeverityHint, tags: &[&str]) ->
         name: name.into(),
         authors: vec!["physarum".into()],
         description: Some(description.into()),
+        remediation: None,
         severity,
         tags: tags.iter().map(|s| s.to_string()).collect(),
         references: vec![],
