@@ -50,7 +50,10 @@ fn extract_embedded_templates() -> PathBuf {
     archive.unpack(&dest).expect("tar unpack failed");
 
     std::fs::write(&sentinel, "").ok();
-    info!("templates extracted entries={}", walkdir::WalkDir::new(&result_dir).into_iter().count());
+    info!(
+        "templates extracted entries={}",
+        walkdir::WalkDir::new(&result_dir).into_iter().count()
+    );
 
     result_dir
 }
@@ -132,7 +135,9 @@ pub fn template_dir() -> PathBuf {
     if let Ok(v) = std::env::var("PHYSARUM_TEMPLATE_DIR") {
         return PathBuf::from(v);
     }
-    EXTRACTED_DIR.get_or_init(extract_embedded_templates).clone()
+    EXTRACTED_DIR
+        .get_or_init(extract_embedded_templates)
+        .clone()
 }
 
 /// Load all templates from `dir` that pass `filter`, converting from Nuclei

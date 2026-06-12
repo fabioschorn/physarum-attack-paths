@@ -733,8 +733,7 @@ fn upgrade_with_banner(
 ///   2. Non-HTTP protocol banners — SSH `SSH-<proto>-<software>`, FTP `220 <greeting>`.
 ///   3. HTML `<title>` app hint appended when present.
 fn extract_version_hint(raw: &str) -> Option<String> {
-    let server_ver = extract_server_header(raw)
-        .or_else(|| extract_non_http_banner_version(raw));
+    let server_ver = extract_server_header(raw).or_else(|| extract_non_http_banner_version(raw));
 
     let app_hint = extract_app_hint_from_html(&raw.to_ascii_lowercase());
 
@@ -756,9 +755,8 @@ fn extract_server_header(raw: &str) -> Option<String> {
     // (?i) case-insensitive; ^Server:\s* matches the header name; (.+) captures the value.
     // Compiled once per process via OnceLock — zero cost on subsequent calls.
     static RE: OnceLock<regex_lite::Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| {
-        regex_lite::Regex::new(r"(?i)^Server:\s*(.+)").expect("static regex")
-    });
+    let re =
+        RE.get_or_init(|| regex_lite::Regex::new(r"(?i)^Server:\s*(.+)").expect("static regex"));
     for line in raw.lines() {
         if let Some(cap) = re.captures(line.trim()) {
             let val = cap[1].trim();
@@ -780,9 +778,8 @@ fn extract_non_http_banner_version(raw: &str) -> Option<String> {
     // SSH: SSH-<proto>-<software [SP comment]>
     // Captures the software token (no spaces) after the second dash-separated field.
     static SSH_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
-    let ssh_re = SSH_RE.get_or_init(|| {
-        regex_lite::Regex::new(r"^SSH-[^-]+-(\S+)").expect("static regex")
-    });
+    let ssh_re =
+        SSH_RE.get_or_init(|| regex_lite::Regex::new(r"^SSH-[^-]+-(\S+)").expect("static regex"));
 
     // FTP / SMTP: "220[ -]<greeting until first '(' or '['>".
     // The greeting may contain the product name and version (e.g. "ProFTPD 1.3.5 Server").
@@ -2631,7 +2628,8 @@ mod tests {
     fn apache_struts_server_header_captured_without_hardcode() {
         // The old implementation missed "Apache-Struts/" because it only matched "apache/".
         // The new generic approach captures any Server: value verbatim.
-        let body = "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nServer: Apache-Struts/2.5.29\r\n\r\n\
+        let body =
+            "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nServer: Apache-Struts/2.5.29\r\n\r\n\
                     <!DOCTYPE HTML><html><body>Apache Struts 2.5.29</body></html>";
         let hint = extract_version_hint(body).unwrap();
         assert!(
@@ -2665,10 +2663,12 @@ mod tests {
 
     #[test]
     fn ftp_proftpd_banner_version_extracted() {
-        let banner =
-            "220 ProFTPD 1.3.5 Server (ProFTPD Default Installation) [172.21.0.4]\r\n";
+        let banner = "220 ProFTPD 1.3.5 Server (ProFTPD Default Installation) [172.21.0.4]\r\n";
         let hint = extract_non_http_banner_version(banner).unwrap();
-        assert!(hint.starts_with("ProFTPD"), "should start with product: {hint}");
+        assert!(
+            hint.starts_with("ProFTPD"),
+            "should start with product: {hint}"
+        );
         assert!(hint.contains("1.3.5"), "should include version: {hint}");
     }
 
