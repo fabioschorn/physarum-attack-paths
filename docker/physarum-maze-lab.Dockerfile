@@ -21,10 +21,13 @@
 
 FROM rust:1.86-slim-bookworm AS builder
 
+# musl-tools: provides musl-gcc linker wrapper required by x86_64-unknown-linux-musl target.
+# reqwest uses rustls-tls (pure Rust), so no OpenSSL is needed — musl compiles cleanly.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         pkg-config \
-        libssl-dev && \
+        musl-tools && \
+    rustup target add x86_64-unknown-linux-musl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -46,7 +49,9 @@ COPY crates/physarum-agent/       crates/physarum-agent/
 COPY crates/physarum-ebpf-observer/ crates/physarum-ebpf-observer/
 COPY crates/physarum-packet-observer/ crates/physarum-packet-observer/
 
-RUN cargo build --release -p physarum-maze
+# Static musl binary — no glibc dependency at runtime.
+# Propagated agents can run on any Linux regardless of glibc version (fixes Issue #158 Bug 2).
+RUN cargo build --release --target x86_64-unknown-linux-musl -p physarum-maze
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -61,7 +66,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 # openssh-client provides: ssh, scp, ssh-keygen (ephemeral keypair generation for exploit path)
 
-COPY --from=builder /build/target/release/physarum-maze /usr/local/bin/physarum-maze
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/physarum-maze /usr/local/bin/physarum-maze
 RUN chmod +x /usr/local/bin/physarum-maze
 
 # Templates are embedded inside the binary as nuclei-templates.tar.zst (include_bytes!).

