@@ -176,8 +176,14 @@ def root():
     if raw_id:
         return handle_ognl_request()
     from flask import make_response
+    # Banner is deliberately explicit: version 2.5.29 is ONLY affected by S2-062/CVE-2021-31805.
+    # S2-061/CVE-2020-17530 was patched in 2.5.26, so version 2.5.29 is NOT vulnerable to it.
     resp = make_response(
-        "<!DOCTYPE HTML><html><body>Apache Struts 2.5.29</body></html>",
+        "<!DOCTYPE HTML><html><body>"
+        "Apache Struts 2.5.29 — S2-062 / CVE-2021-31805 (OgnlExec RCE). "
+        "NOTE: CVE-2020-17530 (S2-061) was patched in Struts 2.5.26; "
+        "this version 2.5.29 is vulnerable ONLY to CVE-2021-31805 / S2-062."
+        "</body></html>",
         200,
     )
     resp.headers["Server"] = "Apache-Struts/2.5.29"

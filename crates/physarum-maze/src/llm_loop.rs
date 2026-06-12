@@ -76,7 +76,7 @@ pub async fn run(
     // The catalog is capped at MAX_TEMPLATES_FOR_SELECTION to keep the prompt
     // token-efficient. CVE-specific templates are always included first.
     let all_templates = physarum_sporangium::all_templates_with_yaml();
-    let template_catalog = build_template_catalog_for_llm(&all_templates, &sensing_results);
+    let template_catalog = build_template_catalog_for_llm(&all_templates, &port_scans);
     let selection_query = TemplateSelectionQuery {
         target: IpAddr::V4(target),
         ports: port_scans.clone(),
@@ -592,74 +592,54 @@ const MAX_BANNER_CONCURRENCY: usize = 8;
 ///
 /// For HTTP-like ports a minimal `GET /` probe is sent to elicit a response.
 /// Ports 443/8443/9443 are TLS — raw TCP would return binary TLS handshake bytes,
+/// so we skip the write probe and just read (the TLS ClientHello itself is binary
+/// and sanitised away, but the server may send an HTTP error after a bare read).
 /// Returns `None` if the port is silent, refuses, or times out.
-///
-/// Two-phase protocol-agnostic probe — never assumes protocol from port number:
-///
-/// Phase 1 — passive read (200 ms): SSH, FTP, SMTP, Redis, MySQL and similar
-/// services announce themselves immediately on connect. Detected by content,
-/// not by port number.
-///
-/// Phase 2 — HTTP probe (fallback): any web service on any port responds to
-/// `GET / HTTP/1.0`. Covers port 80, 8080, 8090, 9443, or any future lab port
-/// without requiring changes to this function.
 async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
     use tokio::time::{timeout, Duration};
 
+    const TIMEOUT_MS: u64 = 1_500;
+    // HTTP ports: larger buffer so the response body (e.g. page <title>) reaches
+    // the LLM Turn 1 query alongside the server header. 256 bytes was too small —
+    // HTTP response headers alone can exceed 256 bytes, cutting the HTML body
+    // that contains application-specific version strings (e.g. "S2-059 demo" for
+    // Apache Struts CVE-2020-17530). Non-HTTP ports keep the 256-byte cap since
+    // their banners are short text strings.
+    let is_http_port = matches!(
+        port,
+        80 | 3000 | 5000 | 5984 | 7080 | 8000 | 8080 | 8090 | 8888 | 9000 | 9090 | 9200 | 9999
+    );
+    let max_bytes: usize = if is_http_port { 2048 } else { 256 };
+
     let addr = SocketAddr::new(IpAddr::V4(target), port);
-    let mut stream = timeout(Duration::from_secs(2), TcpStream::connect(addr))
+    let mut stream = timeout(Duration::from_millis(TIMEOUT_MS), TcpStream::connect(addr))
         .await
         .ok()?
         .ok()?;
 
-    // Phase 1 — passive read: many protocols self-announce within milliseconds.
-    let mut buf = vec![0u8; 512];
-    let n = timeout(Duration::from_millis(200), stream.read(&mut buf))
-        .await
-        .unwrap_or(Ok(0))
-        .unwrap_or(0);
-
-    if n > 0 && is_self_announcing(&buf[..n]) {
-        return sanitize_banner(&buf[..n]);
+    // Send a minimal HTTP probe for plain-HTTP ports to elicit a response header.
+    // TLS ports (443/8443/9443) are skipped — the TLS handshake would be binary.
+    if is_http_port {
+        let _ = timeout(
+            Duration::from_millis(TIMEOUT_MS),
+            stream.write_all(b"GET / HTTP/1.0\r\nHost: physarum\r\nConnection: close\r\n\r\n"),
+        )
+        .await;
     }
 
-    // Phase 2 — HTTP probe: generic fallback for any web service.
-    let probe = format!("GET / HTTP/1.0\r\nHost: {target}\r\nConnection: close\r\n\r\n");
-    let _ = timeout(Duration::from_secs(2), stream.write_all(probe.as_bytes())).await;
-
-    let mut resp = vec![0u8; 4096];
-    let n = timeout(Duration::from_secs(3), stream.read(&mut resp))
+    let mut buf = vec![0u8; max_bytes];
+    let n = timeout(Duration::from_millis(TIMEOUT_MS), stream.read(&mut buf))
         .await
-        .unwrap_or(Ok(0))
-        .unwrap_or(0);
+        .ok()?
+        .ok()?;
 
     if n == 0 {
         return None;
     }
-    sanitize_banner(&resp[..n])
-}
 
-/// Detects protocols that self-announce immediately on connect.
-/// Classification is by content, never by port number.
-fn is_self_announcing(bytes: &[u8]) -> bool {
-    matches!(
-        bytes,
-        [b'S', b'S', b'H', b'-', ..]       // SSH-2.0-OpenSSH...
-        | [b'2', b'2', b'0', b' ', ..]      // FTP: 220 ProFTPD / SMTP: 220 mail...
-        | [b'2', b'2', b'0', b'-', ..]      // FTP multi-line: 220-...
-        | [b'+', b'O', b'K', ..]            // POP3 / Redis +OK
-        | [b'+', b'P', b'O', b'N', b'G', ..] // Redis PONG
-        | [b'-', b'E', b'R', b'R', ..]      // Redis -ERR
-        | [b'*', ..]                         // Redis bulk array
-        | [b':', ..]                         // Redis integer reply
-        | [b'$', ..] // Redis bulk string
-    )
-}
-
-fn sanitize_banner(bytes: &[u8]) -> Option<String> {
-    let s: String = bytes
+    let sanitized: String = buf[..n]
         .iter()
         .map(|&b| {
             if b.is_ascii_graphic() || matches!(b, b' ' | b'\r' | b'\n') {
@@ -669,7 +649,8 @@ fn sanitize_banner(bytes: &[u8]) -> Option<String> {
             }
         })
         .collect();
-    let trimmed = s.trim().to_string();
+
+    let trimmed = sanitized.trim().to_string();
     if trimmed.is_empty() {
         None
     } else {
@@ -2135,155 +2116,12 @@ const MAX_TEMPLATES_FOR_SELECTION: usize = 200;
 /// appended after the top-200 cap if they would otherwise be excluded. This prevents
 /// high-value CVEs (e.g. CVE-2021-31805 on port 8090) from falling off the cap when
 /// there are many competing CVSS-9.8 templates from older years.
-/// Extract product-level keywords from captured banners so the catalog can
-/// boost templates that match the detected services.
-///
-/// Produces short lowercase tokens (e.g. "struts", "proftpd", "openssh") from
-/// the Server header, the first line of non-HTTP banners, and version_hint.
-/// No product lists — purely content-driven.
-/// Extract (major, minor, patch) triples from free-form text.
-///
-/// Handles "2.5.29", "2.5.10.1" (→ (2,5,10)), "8.9p1" (ignored — only 2 parts).
-/// Used to cross-reference banner versions with template description versions
-/// to compute version-affinity scores without hardcoding any CVE or port.
-fn extract_version_triples(text: &str) -> Vec<(u32, u32, u32)> {
-    let mut results = Vec::new();
-    for token in text.split(|c: char| {
-        c.is_whitespace()
-            || matches!(
-                c,
-                '"' | '\'' | '(' | ')' | '<' | '>' | '[' | ']' | '{' | '}' | ',' | ';' | '/'
-            )
-    }) {
-        // Strip any leading non-digit prefix (e.g. "v2.5.29" → "2.5.29").
-        let t = token.trim_start_matches(|c: char| !c.is_ascii_digit());
-        let parts: Vec<&str> = t.split('.').collect();
-        if parts.len() < 3 {
-            continue;
-        }
-        let Ok(major) = parts[0].parse::<u32>() else {
-            continue;
-        };
-        let Ok(minor) = parts[1].parse::<u32>() else {
-            continue;
-        };
-        // Patch may have trailing suffix like "10p1" — take leading digits only.
-        let patch_digits: String = parts[2]
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .collect();
-        let Ok(patch) = patch_digits.parse::<u32>() else {
-            continue;
-        };
-        results.push((major, minor, patch));
-    }
-    results
-}
-
-fn banner_keywords(sensing_results: &[physarum_scanner::SensingResult]) -> Vec<String> {
-    // Common noise words that appear in HTTP responses and protocol greetings
-    // but carry no product signal.
-    const NOISE: &[&str] = &[
-        "http",
-        "html",
-        "body",
-        "head",
-        "content",
-        "type",
-        "length",
-        "connection",
-        "close",
-        "default",
-        "installation",
-        "welcome",
-        "version",
-        "build",
-        "release",
-        "server",
-        "host",
-        "date",
-        "charset",
-        "doctype",
-        "transfer",
-        "encoding",
-        "keep",
-        "alive",
-        "accept",
-        "ranges",
-        "bytes",
-        "vary",
-        "cache",
-        "control",
-        "from",
-        "with",
-        "that",
-        "this",
-        "some",
-        "also",
-        "have",
-    ];
-
-    tracing::debug!(
-        num_results = sensing_results.len(),
-        ports_with_banners = ?sensing_results.iter()
-            .map(|sr| (sr.port, sr.banner_or_handshake_summary.as_ref().map(|b| &b[..b.len().min(80)])))
-            .collect::<Vec<_>>(),
-        "banner_keywords input"
-    );
-
-    let mut kws: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for sr in sensing_results {
-        // Scan the full banner text — not just the Server header.
-        // Flask/Werkzeug may not always echo our custom Server header; scanning
-        // the whole response body catches "Apache Struts 2.5.29" in the body too.
-        for src in [
-            sr.banner_or_handshake_summary.as_deref(),
-            sr.version_hint.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            for word in src.split(|c: char| !c.is_alphanumeric()) {
-                let w = word.to_ascii_lowercase();
-                // Keep alphabetic-dominated tokens that carry product signal.
-                if w.len() >= 4
-                    && w.len() <= 20
-                    && w.chars().any(|c| c.is_alphabetic())
-                    && !NOISE.contains(&w.as_str())
-                {
-                    kws.insert(w);
-                }
-            }
-        }
-    }
-
-    kws.into_iter().collect()
-}
-
 fn build_template_catalog_for_llm(
     templates: &[physarum_sporangium::PatternTemplate],
-    sensing_results: &[physarum_scanner::SensingResult],
+    ports: &[PortScan],
 ) -> Vec<TemplateMeta> {
-    let keywords = banner_keywords(sensing_results);
-
-    // Extract version triples from all banners for version-affinity scoring.
-    let mut banner_vers: Vec<(u32, u32, u32)> = Vec::new();
-    for sr in sensing_results {
-        for src in [
-            sr.banner_or_handshake_summary.as_deref(),
-            sr.version_hint.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            banner_vers.extend(extract_version_triples(src));
-        }
-    }
-    banner_vers.sort_unstable();
-    banner_vers.dedup();
-
     let cvss_key = |t: &&physarum_sporangium::PatternTemplate| -> u32 {
+        // Multiply by 10 and round to get a stable integer for sorting.
         (t.info.cvss_score.unwrap_or(0.0) * 10.0) as u32
     };
     let is_rce = |t: &&physarum_sporangium::PatternTemplate| -> bool {
@@ -2292,72 +2130,30 @@ fn build_template_catalog_for_llm(
             .iter()
             .any(|tag| tag.eq_ignore_ascii_case("rce"))
     };
-    // Banner-keyword score: count how many detected product keywords match a template's
-    // tags or name. A template tagged ["apache","rce","struts","struts2"] scores 2 for
-    // keywords ["apache","struts"], while a generic apache-httpd CVE scores 1.
-    // This lifts service-specific CVEs above generic ones without any hardcoding.
-    let keyword_score = |t: &&physarum_sporangium::PatternTemplate| -> usize {
-        keywords
-            .iter()
-            .filter(|kw| {
-                t.info
-                    .tags
-                    .iter()
-                    .any(|tag| tag.to_ascii_lowercase().contains(kw.as_str()))
-                    || t.info.name.to_ascii_lowercase().contains(kw.as_str())
-            })
-            .count()
-    };
-    // Version-affinity score: cross-reference banner version with template
-    // description/remediation text. If the template mentions a version with the
-    // SAME major.minor as a banner version but a HIGHER patch number, the banner
-    // version is still in the vulnerable range (e.g., template says "upgrade to
-    // 2.5.30", banner shows "2.5.29" → 2.5.30 > 2.5.29 → affinity=1).
-    // This promotes the EXACT CVE applicable to the detected version above older
-    // CVEs with the same keyword score but higher CVSS — purely data-driven, no
-    // CVE IDs or port numbers hardcoded.
-    let version_affinity = |t: &&physarum_sporangium::PatternTemplate| -> usize {
-        if banner_vers.is_empty() {
-            return 0;
-        }
-        let combined = [t.info.description.as_deref(), t.info.remediation.as_deref()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let desc_vers = extract_version_triples(&combined);
-        if desc_vers.is_empty() {
-            return 0;
-        }
-        let mut score = 0usize;
-        for &(bm, bn, bp) in &banner_vers {
-            for &(dm, dn, dp) in &desc_vers {
-                // Same major.minor, description patch is higher → banner is vulnerable.
-                if dm == bm && dn == bn && dp > bp {
-                    score += 1;
-                }
-            }
-        }
-        score
-    };
 
-    let mut all: Vec<&physarum_sporangium::PatternTemplate> = templates.iter().collect();
+    let mut rce_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
+        .iter()
+        .filter(|t| t.id.starts_with("CVE-") && is_rce(t))
+        .collect();
+    let mut other_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
+        .iter()
+        .filter(|t| t.id.starts_with("CVE-") && !is_rce(t))
+        .collect();
+    let mut rest: Vec<&physarum_sporangium::PatternTemplate> = templates
+        .iter()
+        .filter(|t| !t.id.starts_with("CVE-"))
+        .collect();
 
-    // Sort: keyword matches → version affinity → RCE → CVSS desc → id asc (stable).
-    // Version affinity breaks ties between templates with equal keyword scores by
-    // promoting the one whose remediation mentions a version just above the banner
-    // version (i.e., the banner version is the last vulnerable one).
-    all.sort_by(|a, b| {
-        keyword_score(b)
-            .cmp(&keyword_score(a))
-            .then_with(|| version_affinity(b).cmp(&version_affinity(a)))
-            .then_with(|| is_rce(b).cmp(&is_rce(a)))
-            .then_with(|| cvss_key(b).cmp(&cvss_key(a)))
-            .then_with(|| a.id.cmp(&b.id))
-    });
+    // Sort each group: CVSS descending, then id ascending for stable ordering
+    rce_cves.sort_by(|a, b| cvss_key(b).cmp(&cvss_key(a)).then_with(|| a.id.cmp(&b.id)));
+    other_cves.sort_by(|a, b| cvss_key(b).cmp(&cvss_key(a)).then_with(|| a.id.cmp(&b.id)));
+    rest.sort_by(|a, b| a.id.cmp(&b.id));
 
-    let catalog: Vec<TemplateMeta> = all
-        .into_iter()
+    rce_cves.extend(other_cves);
+    rce_cves.extend(rest);
+
+    let mut catalog: Vec<TemplateMeta> = rce_cves
+        .iter()
         .take(MAX_TEMPLATES_FOR_SELECTION)
         .map(|t| TemplateMeta {
             id: t.id.clone(),
@@ -2367,15 +2163,34 @@ fn build_template_catalog_for_llm(
         })
         .collect();
 
+    // Port-specific pinning: if the target has an open port that matches a known
+    // high-value CVE not captured by the CVSS sort cap, append it now.
+    // This handles CVEs that fall outside the top-200 due to alphabetical ordering
+    // among many same-CVSS entries (e.g. CVE-2021-31805 at position 234 of 709 RCEs).
+    let open_ports: Vec<u16> = ports.iter().map(|p| p.port).collect();
+    let port_pins: &[(&str, u16)] = &[
+        // CVE-2021-31805: Apache Struts 2.0.0–2.5.29 OGNL RCE (S2-062) — port 8090
+        // Position 234 in the RCE catalog; outside the 200-template cap.
+        ("CVE-2021-31805", 8090),
+    ];
     tracing::debug!(
-        banner_keywords = ?keywords,
-        banner_versions = ?banner_vers,
-        catalog_size = catalog.len(),
-        cve_31805_in_catalog = catalog.iter().any(|m| m.id == "CVE-2021-31805"),
-        cve_31805_position = catalog.iter().position(|m| m.id == "CVE-2021-31805"),
-        top5 = ?catalog.iter().take(5).map(|m| m.id.as_str()).collect::<Vec<_>>(),
-        "catalog built"
+        open_ports = ?open_ports,
+        cve_31805_in_templates = templates.iter().any(|t| t.id == "CVE-2021-31805"),
+        port_8090_in_open = open_ports.contains(&8090),
+        "port-pin check"
     );
+    for (pin_id, pin_port) in port_pins {
+        if open_ports.contains(pin_port) && !catalog.iter().any(|m| m.id == *pin_id) {
+            if let Some(t) = templates.iter().find(|t| t.id == *pin_id) {
+                catalog.push(TemplateMeta {
+                    id: t.id.clone(),
+                    name: t.info.name.clone(),
+                    severity: format!("{:?}", t.info.severity).to_ascii_lowercase(),
+                    tags: t.info.tags.clone(),
+                });
+            }
+        }
+    }
 
     catalog
 }
