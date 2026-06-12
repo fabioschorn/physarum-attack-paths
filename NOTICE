@@ -1,13 +1,43 @@
 physarum-attack-paths
-Copyright 2026 Fábio Schorn
+Copyright (c) 2026 Fábio Schorn
 
-This product includes software developed by Fábio Schorn
-and contributors.
+This product includes software developed by Fábio Schorn and contributors.
 
-Licensed under the Apache License, Version 2.0 (the "License").
-See LICENSE for full terms.
+Licensed under the PolyForm Noncommercial License 1.0.0.
+See LICENSE for full terms: https://polyformproject.org/licenses/noncommercial/1.0.0
 
----
+────────────────────────────────────────────────────────────────────────────
+INTENDED USE AND SCOPE
+────────────────────────────────────────────────────────────────────────────
+This software is intended exclusively for:
+
+  - Academic research and educational purposes
+  - Security testing in owned, isolated, and authorized lab environments
+    (local labs, Docker labs, owned cloud VPCs with explicit authorization)
+  - Defensive security validation and research
+
+This software is NOT intended for:
+
+  - Commercial use, integration into products, or revenue-generating services
+  - Scanning or testing systems you do not own or have explicit written
+    authorization to test
+  - Production deployment or use against public targets
+  - Redistribution as part of any commercial offering
+
+Use of this software outside the scope above, or against unauthorized
+targets, is prohibited and may constitute a violation of applicable law.
+
+────────────────────────────────────────────────────────────────────────────
+PATENT NOTICE
+────────────────────────────────────────────────────────────────────────────
+One or more patent applications covering methods and systems embodied in
+this software have been filed by Fábio Schorn. The PolyForm Noncommercial License does not extend to any such pending or
+granted patents beyond what is required by applicable law.
+
+For commercial or patent licensing inquiries:
+  fabio.schorn@expertsonline.com.br
+
+────────────────────────────────────────────────────────────────────────────
 
 ACKNOWLEDGMENTS
 
