@@ -629,8 +629,11 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     let probe = format!("GET / HTTP/1.0\r\nHost: {target}\r\nConnection: close\r\n\r\n");
     let _ = timeout(Duration::from_secs(2), stream.write_all(probe.as_bytes())).await;
 
-    let mut resp = vec![0u8; 4096];
-    let n = timeout(Duration::from_secs(3), stream.read(&mut resp))
+    // read_to_end waits for the server to close the connection (Connection: close),
+    // collecting headers + body in one shot. A single read() can return only the
+    // status line when the OS delivers the HTTP response across multiple segments.
+    let mut resp = Vec::with_capacity(4096);
+    let n = timeout(Duration::from_secs(3), stream.read_to_end(&mut resp))
         .await
         .unwrap_or(Ok(0))
         .unwrap_or(0);
@@ -638,7 +641,7 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     if n == 0 {
         return None;
     }
-    sanitize_banner(&resp[..n])
+    sanitize_banner(&resp[..n.min(4096)])
 }
 
 /// Detects protocols that self-announce immediately on connect.
@@ -1728,6 +1731,31 @@ async fn execute_step(
             path_prefix,
             extra_headers,
         } => {
+            // freemarker.Execute calls Runtime.exec(String), not a shell — it tokenizes by
+            // whitespace. Shell chaining operators are silently corrupted, not evaluated.
+            // Note: `>` and `<` are NOT included because `<source_ip>` is a valid placeholder.
+            const MAX_COMMANDS: usize = 10;
+            const SHELL_OPERATORS: &[&str] = &["&&", "||", ";", "|", "`", "$("];
+
+            if commands.len() > MAX_COMMANDS {
+                return StepResult::Failed(format!(
+                    "OgnlExec refused: {} commands exceed MAX_COMMANDS={}",
+                    commands.len(),
+                    MAX_COMMANDS
+                ));
+            }
+
+            for (i, raw_cmd) in commands.iter().enumerate() {
+                for op in SHELL_OPERATORS {
+                    if raw_cmd.contains(op) {
+                        return StepResult::Failed(format!(
+                            "OgnlExec cmd[{i}] refused: shell operator '{op}' detected — \
+                             freemarker.Execute does not chain shell commands"
+                        ));
+                    }
+                }
+            }
+
             let p = port.unwrap_or(8080);
             let prefix = path_prefix.as_deref().unwrap_or("/");
             let ip_str = source_ip.map(|ip| ip.to_string()).unwrap_or_default();

