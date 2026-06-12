@@ -104,6 +104,7 @@ mod tests {
                 name: id.into(),
                 authors: vec![],
                 description: None,
+                remediation: None,
                 severity,
                 tags: tags.iter().map(|s| s.to_string()).collect(),
                 references: vec![],

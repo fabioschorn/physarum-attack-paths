@@ -2,12 +2,15 @@
 #
 # pf6-lab.sh — physarum-maze PF-6 dual-CVE lab runner
 #
-# Three-container lab: two concurrent RCE targets + agent.
-#   host-b (physarum-target-pf6:lab)      — Struts 2.5.25 (CVE-2020-17530, HTTP :8080) + sshd
-#   host-c (physarum-target-dualcve:lab)  — ProFTPD 1.3.5 mock (CVE-2015-3306, FTP :21)
-#                                           Wing FTP 7.4.3 mock (CVE-2025-47812, HTTP :80)
-#                                           sshd :22 for Phase 2 delivery
-#   host-a (physarum-maze:lab)            — agent, senses the /24 subnet
+# Four-container lab: three RCE targets + agent.
+#   host-b (physarum-target-pf6:lab)       — Struts 2.5.25 (CVE-2020-17530, HTTP :8080) + sshd
+#   host-c (physarum-target-dualcve:lab)   — ProFTPD 1.3.5 mock (CVE-2015-3306, FTP :21)
+#                                            Wing FTP 7.4.3 mock (CVE-2025-47812, HTTP :80)
+#                                            sshd :22 for Phase 2 delivery
+#   host-d (physarum-target-ognlexec:lab)  — Apache Struts 2.5.29 (CVE-2021-31805, HTTP :8090) + sshd
+#                                            OgnlExec validation: LLM must request Exploit-DB enrichment
+#                                            and generate commands array autonomously
+#   host-a (physarum-maze:lab)             — agent, senses the /24 subnet
 #
 # Phases:
 #   Phase 1 (default):   LLM senses targets, identifies CVEs, TCP+HTTP probes confirm access
@@ -117,9 +120,10 @@ rm -f "$LINEAGE_DIR/physarum-lineage.json"
 # ─── Start lab ────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}── Starting PF-6 dual-CVE lab${NC}"
-echo -e "  [${INFO}] host-b: physarum-target-pf6:lab     172.21.0.3  :8080 Struts/CVE-2020-17530  :22 sshd"
+echo -e "  [${INFO}] host-b: physarum-target-pf6:lab      172.21.0.3  :8080 Struts/CVE-2020-17530  :22 sshd"
 echo -e "  [${INFO}] host-c: physarum-target-dualcve:lab 172.21.0.4  :21 ProFTPD/CVE-2015-3306   :80 WingFTP/CVE-2025-47812  :22 sshd"
-echo -e "  [${INFO}] host-a: physarum-maze:lab           172.21.0.2  agent"
+echo -e "  [${INFO}] host-d: physarum-target-ognlexec:lab 172.21.0.5  :8090 Struts/CVE-2021-31805 (OgnlExec)  :22 sshd"
+echo -e "  [${INFO}] host-a: physarum-maze:lab            172.21.0.2  agent"
 echo ""
 
 trap 'on_exit' INT TERM EXIT
@@ -139,10 +143,13 @@ print(f"  Path:  {' → '.join(lin.get('path', []))}")
 print(f"  LLM attempts: {len(attempts)}")
 for a in attempts:
     decision = a.get("policy_decision", {})
-    status = "ACCEPTED" if decision == "Accepted" else f"REJECTED"
+    status = "ACCEPTED" if decision == "Accepted" else "REJECTED"
     result = a.get("execution_result", {})
     outcome = "✔ Success" if result == "Success" else f"✘ {result}"
-    print(f"\n  Attempt {a['attempt_number']}:  policy={status}  result={outcome}")
+    enriched = " [enriched]" if a.get("enrichment_requested") else ""
+    ref_id = a.get("exploit_reference_id", "")
+    ref_str = f"  ref={ref_id}" if ref_id else ""
+    print(f"\n  Attempt {a['attempt_number']}:  policy={status}  result={outcome}{enriched}{ref_str}")
     print(f"    cve_candidates: {a.get('cve_candidate_ids', [])}")
     print(f"    summary: {a.get('reasoning_summary', '')}")
 PYEOF

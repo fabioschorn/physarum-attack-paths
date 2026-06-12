@@ -271,8 +271,8 @@ pub fn effective_stimulus_ports() -> Vec<u16> {
 /// a /24 sweep (254 × 21 = 5334 probes) completes in well under 10 seconds
 /// at the profile's 1500 ms timeout.
 pub const STARTUP_SWEEP_PORTS: &[u16] = &[
-    21, 22, 25, 53, 80, 443, 3000, 3306, 5000, 5432, 6379, 7777, 7080, 8000, 8080, 8443, 8888,
-    9000, 9090, 9200, 9999,
+    21, 22, 25, 53, 80, 443, 3000, 3306, 5000, 5432, 6379, 7777, 7080, 8000, 8080, 8090, 8443,
+    8888, 9000, 9090, 9200, 9999,
 ];
 
 // ── SchemeHint / NextProbeHint ────────────────────────────────────────────────
@@ -744,6 +744,10 @@ mod tests {
     fn startup_sweep_ports_covers_docker_lab_targets() {
         assert!(STARTUP_SWEEP_PORTS.contains(&80), "must cover port 80");
         assert!(STARTUP_SWEEP_PORTS.contains(&8080), "must cover port 8080");
+        assert!(
+            STARTUP_SWEEP_PORTS.contains(&8090),
+            "must cover port 8090 (CVE-2021-31805)"
+        );
         assert!(STARTUP_SWEEP_PORTS.contains(&7777), "must cover port 7777");
     }
 

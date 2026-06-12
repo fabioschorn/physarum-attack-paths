@@ -193,6 +193,8 @@ struct NucleiInfo {
     pub severity: NucleiSeverity,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub remediation: Option<String>,
     #[serde(rename = "cve-id", default)]
     pub cve_id: Option<String>,
     #[serde(rename = "cvss-score", default)]
@@ -499,6 +501,7 @@ impl NucleiTemplate {
             name: self.info.name.clone(),
             authors: self.info.author.into_vec(),
             description: self.info.description,
+            remediation: self.info.remediation,
             severity: self.info.severity.to_severity_hint(),
             tags: self.info.tags,
             references: self.info.reference.into_vec(),

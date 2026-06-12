@@ -46,6 +46,18 @@ futures = { workspace = true }
 # HTTP execution in LLM bootstrap steps (HttpGet / HttpPost actions)
 reqwest = { workspace = true }
 
+# Exploit-DB CSV embedding — build.rs compresses the CSV; runtime decompresses in memory
+zstd = "0.13"
+
+# Lightweight CSV parsing for the embedded Exploit-DB index
+csv = "1.3"
+
+# Lightweight regex for version-range extraction in exploit_db.rs
+regex-lite = "0.1"
+
+[build-dependencies]
+zstd = "0.13"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # eBPF ring buffer reader — same version as physarum-ebpf-observer
 aya     = { version = "0.13", features = ["async_tokio"] }
