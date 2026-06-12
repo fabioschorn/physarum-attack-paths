@@ -26,14 +26,14 @@
 #   ./docker/pf6-lab.sh              # Phase 1 — dual-CVE sensing + identification
 #   ./docker/pf6-lab.sh --phase2     # Phase 2 — exploit enabled (Manager approval required)
 #
-# Build images (mandatory cloud builder law):
-#   docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
+# Build images (ALWAYS use desktop-linux builder — never the default cloud builder):
+#   docker buildx build --builder desktop-linux \
 #     --platform linux/amd64 -f docker/physarum-maze-lab.Dockerfile -t physarum-maze:lab --load .
-#   docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
+#   docker buildx build --builder desktop-linux \
 #     --platform linux/amd64 -f docker/physarum-target-pf6.Dockerfile -t physarum-target-pf6:lab --load .
-#   docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
+#   docker buildx build --builder desktop-linux \
 #     --platform linux/amd64 -f docker/physarum-target-dualcve.Dockerfile -t physarum-target-dualcve:lab --load .
-#   docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
+#   docker buildx build --builder desktop-linux \
 #     --platform linux/amd64 -f docker/physarum-target-ognlexec.Dockerfile -t physarum-target-ognlexec:lab --load .
 #
 # After evidence committed:
