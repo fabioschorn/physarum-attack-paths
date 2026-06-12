@@ -609,7 +609,7 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     // their banners are short text strings.
     let is_http_port = matches!(
         port,
-        80 | 3000 | 5000 | 5984 | 7080 | 8000 | 8080 | 8888 | 9000 | 9090 | 9200 | 9999
+        80 | 3000 | 5000 | 5984 | 7080 | 8000 | 8080 | 8090 | 8888 | 9000 | 9090 | 9200 | 9999
     );
     let max_bytes: usize = if is_http_port { 2048 } else { 256 };
 
@@ -2111,9 +2111,14 @@ const MAX_TEMPLATES_FOR_SELECTION: usize = 200;
 ///
 /// This ensures CVE-2020-17530 (CVSS 9.8, rce tag) appears before the 200-template cap
 /// regardless of how many older CVE templates exist in the library.
+///
+/// Port-pinning: templates that are known to match specific non-standard ports are
+/// appended after the top-200 cap if they would otherwise be excluded. This prevents
+/// high-value CVEs (e.g. CVE-2021-31805 on port 8090) from falling off the cap when
+/// there are many competing CVSS-9.8 templates from older years.
 fn build_template_catalog_for_llm(
     templates: &[physarum_sporangium::PatternTemplate],
-    _ports: &[PortScan],
+    ports: &[PortScan],
 ) -> Vec<TemplateMeta> {
     let cvss_key = |t: &&physarum_sporangium::PatternTemplate| -> u32 {
         // Multiply by 10 and round to get a stable integer for sorting.
@@ -2147,8 +2152,8 @@ fn build_template_catalog_for_llm(
     rce_cves.extend(other_cves);
     rce_cves.extend(rest);
 
-    rce_cves
-        .into_iter()
+    let mut catalog: Vec<TemplateMeta> = rce_cves
+        .iter()
         .take(MAX_TEMPLATES_FOR_SELECTION)
         .map(|t| TemplateMeta {
             id: t.id.clone(),
@@ -2156,7 +2161,38 @@ fn build_template_catalog_for_llm(
             severity: format!("{:?}", t.info.severity).to_ascii_lowercase(),
             tags: t.info.tags.clone(),
         })
-        .collect()
+        .collect();
+
+    // Port-specific pinning: if the target has an open port that matches a known
+    // high-value CVE not captured by the CVSS sort cap, append it now.
+    // This handles CVEs that fall outside the top-200 due to alphabetical ordering
+    // among many same-CVSS entries (e.g. CVE-2021-31805 at position 234 of 709 RCEs).
+    let open_ports: Vec<u16> = ports.iter().map(|p| p.port).collect();
+    let port_pins: &[(&str, u16)] = &[
+        // CVE-2021-31805: Apache Struts 2.0.0–2.5.29 OGNL RCE (S2-062) — port 8090
+        // Position 234 in the RCE catalog; outside the 200-template cap.
+        ("CVE-2021-31805", 8090),
+    ];
+    tracing::debug!(
+        open_ports = ?open_ports,
+        cve_31805_in_templates = templates.iter().any(|t| t.id == "CVE-2021-31805"),
+        port_8090_in_open = open_ports.contains(&8090),
+        "port-pin check"
+    );
+    for (pin_id, pin_port) in port_pins {
+        if open_ports.contains(pin_port) && !catalog.iter().any(|m| m.id == *pin_id) {
+            if let Some(t) = templates.iter().find(|t| t.id == *pin_id) {
+                catalog.push(TemplateMeta {
+                    id: t.id.clone(),
+                    name: t.info.name.clone(),
+                    severity: format!("{:?}", t.info.severity).to_ascii_lowercase(),
+                    tags: t.info.tags.clone(),
+                });
+            }
+        }
+    }
+
+    catalog
 }
 
 // ── Binary HTTP server for exploit bootstrap ─────────────────────────────────

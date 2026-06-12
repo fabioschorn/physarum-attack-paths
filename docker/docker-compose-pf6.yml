@@ -120,7 +120,7 @@ services:
       PHYSARUM_EXPLOIT_ENABLED: "${PHYSARUM_EXPLOIT_ENABLED:-false}"
       # Extend stimulus scan to include FTP (:21) for TCP template probing.
       # Override via env or compose .env — no recompile required.
-      PHYSARUM_STIMULUS_PORTS: "${PHYSARUM_STIMULUS_PORTS:-21,22,80,443,8080,8443}"
+      PHYSARUM_STIMULUS_PORTS: "${PHYSARUM_STIMULUS_PORTS:-21,22,80,443,8080,8090,8443}"
     command: >
       --mode seed
       --llm-endpoint ${PHYSARUM_LLM_ENDPOINT:-mock-http}
