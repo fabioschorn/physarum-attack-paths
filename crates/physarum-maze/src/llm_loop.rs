@@ -1437,7 +1437,10 @@ fn inject_lineage_b64_if_needed(action: &BootstrapAction, lineage_b64: &str) -> 
             // returns within milliseconds.
             let injected = if injected.contains("nohup") && !injected.contains("(nohup") {
                 injected
-                    .replace("nohup /tmp/physarum/physarum-maze", "(nohup /tmp/physarum/physarum-maze")
+                    .replace(
+                        "nohup /tmp/physarum/physarum-maze",
+                        "(nohup /tmp/physarum/physarum-maze",
+                    )
                     .replace(
                         ">/tmp/physarum/agent.log 2>&1 &",
                         "</dev/null >/tmp/physarum/agent.log 2>&1 &)",
