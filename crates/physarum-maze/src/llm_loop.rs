@@ -192,12 +192,11 @@ pub async fn run(
         };
 
         // Expose Exploit-DB enrichment capability when the index is non-empty.
-        let enrichment_caps: Vec<EnrichmentCapability> =
-            if !crate::exploit_db::index().is_empty() {
-                vec![EnrichmentCapability::ExploitDb]
-            } else {
-                vec![]
-            };
+        let enrichment_caps: Vec<EnrichmentCapability> = if !crate::exploit_db::index().is_empty() {
+            vec![EnrichmentCapability::ExploitDb]
+        } else {
+            vec![]
+        };
 
         let query = DiscoveryQuery {
             target: IpAddr::V4(target),
@@ -1751,14 +1750,10 @@ async fn execute_step(
                         );
                     }
                     Ok(Err(e)) => {
-                        return StepResult::Failed(format!(
-                            "OgnlExec cmd[{i}] HTTP error: {e}"
-                        ));
+                        return StepResult::Failed(format!("OgnlExec cmd[{i}] HTTP error: {e}"));
                     }
                     Err(_) => {
-                        return StepResult::Failed(format!(
-                            "OgnlExec cmd[{i}] timeout"
-                        ));
+                        return StepResult::Failed(format!("OgnlExec cmd[{i}] timeout"));
                     }
                 }
             }
