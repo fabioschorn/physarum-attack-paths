@@ -13,11 +13,11 @@ mod tests {
         types::{
             ArtifactType, BootstrapAction, BootstrapPlan, BootstrapStep, DiscoveryQuery,
             EnrichmentCapability, EnrichmentLookupStatus, EnrichmentRequest, EnrichmentResult,
-            ExecutionResultSummary, ExpectedResult, ExploitReference, LineageSummary,
-            LlmAttemptEvidence, NextAction, OsHint, OsHintSource, PatternFindingSummary,
-            PolicyDecision, PolicyRejectionReason, PortScan, PortState, PropagationMethod,
-            PropagationMethodClass, PropagationStrategy, RejectedStrategy, SecretRef, SecretSource,
-            SshAuth, TransportProtocol,
+            ExecutionResultSummary, ExpectedResult, ExploitExecutionRecipe, ExploitReference,
+            LineageSummary, LlmAttemptEvidence, NextAction, OsHint, OsHintSource,
+            PatternFindingSummary, PolicyDecision, PolicyRejectionReason, PortScan, PortState,
+            PropagationMethod, PropagationMethodClass, PropagationStrategy, RecipeTransport,
+            RejectedStrategy, SecretRef, SecretSource, SshAuth, TransportProtocol,
         },
         LlmClient,
     };
@@ -708,6 +708,7 @@ mod tests {
             summary: Some(
                 "OGNL injection via HTTP; freemarker.Execute; one OS command per request".into(),
             ),
+            recipe_id: None,
         });
     }
 
@@ -734,6 +735,7 @@ mod tests {
                 expected_effect: None,
                 safety_class: None,
                 summary: None,
+                recipe_id: None,
             }],
             status: EnrichmentLookupStatus::Found { count: 1 },
         });
@@ -818,5 +820,110 @@ mod tests {
             gate.evaluate(&strategy, "172.21.0.5".parse().unwrap(), 1),
             PolicyDecision::Accepted
         ));
+    }
+
+    // ── ExploitExecutionRecipe round-trips (Issue #144 Phase 2) ──────────────
+
+    #[test]
+    fn exploit_execution_recipe_ognl_round_trip() {
+        round_trip(&ExploitExecutionRecipe {
+            id: "struts-ognl-v1".into(),
+            description: "Apache Struts OGNL injection — one OS command per HTTP POST".into(),
+            transport: RecipeTransport::OgnlExec {
+                default_port: 8080,
+                path_prefix: "/".into(),
+            },
+            max_commands: 10,
+            allowed_placeholders: vec![
+                "<source_ip>".into(),
+                "<target_port>".into(),
+                "<bootstrap_url>".into(),
+            ],
+            cve_ids: vec!["CVE-2021-31805".into(), "CVE-2020-17530".into()],
+            safety_class: "lab-only".into(),
+        });
+    }
+
+    #[test]
+    fn exploit_execution_recipe_http_body_inject_round_trip() {
+        round_trip(&ExploitExecutionRecipe {
+            id: "phpunit-eval-stdin-v1".into(),
+            description: "PHPUnit eval-stdin RCE — PHP code in HTTP POST body".into(),
+            transport: RecipeTransport::HttpBodyInject {
+                default_port: 80,
+                path: "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php".into(),
+                content_type: "application/x-www-form-urlencoded".into(),
+                command_template: "<?php system('{{cmd}}'); ?>".into(),
+            },
+            max_commands: 10,
+            allowed_placeholders: vec!["<source_ip>".into(), "<bootstrap_url>".into()],
+            cve_ids: vec!["CVE-2017-9841".into()],
+            safety_class: "lab-only".into(),
+        });
+    }
+
+    #[test]
+    fn exploit_execution_recipe_default_max_commands_deserialises() {
+        // Verify that omitting max_commands in JSON gives the default of 10.
+        let json = r#"{
+            "id": "struts-ognl-v1",
+            "description": "test",
+            "transport": {"type": "ognl_exec", "default_port": 8080, "path_prefix": "/"},
+            "allowed_placeholders": [],
+            "cve_ids": [],
+            "safety_class": "lab-only"
+        }"#;
+        let recipe: ExploitExecutionRecipe = serde_json::from_str(json).unwrap();
+        assert_eq!(recipe.max_commands, 10);
+    }
+
+    #[test]
+    fn exploit_reference_with_recipe_id_round_trip() {
+        round_trip(&ExploitReference {
+            exploit_reference_id: "EDB-51213".into(),
+            source: EnrichmentCapability::ExploitDb,
+            cve_id: Some("CVE-2021-31805".into()),
+            product: Some("Apache Struts".into()),
+            version_range: Some("2.0.0 - 2.5.29".into()),
+            platform: Some("linux".into()),
+            exploit_type: Some("webapps".into()),
+            verified_status: true,
+            requires_auth: false,
+            requires_user_interaction: false,
+            requires_outbound_callback: true,
+            expected_effect: Some("Remote Code Execution".into()),
+            safety_class: Some("lab-only".into()),
+            summary: Some(
+                "OGNL injection via HTTP; freemarker.Execute; one OS command per request".into(),
+            ),
+            recipe_id: Some("struts-ognl-v1".into()),
+        });
+    }
+
+    #[test]
+    fn exploit_reference_without_recipe_id_omits_field() {
+        // recipe_id=None must not appear in JSON (skip_serializing_if).
+        let r = ExploitReference {
+            exploit_reference_id: "EDB-99999".into(),
+            source: EnrichmentCapability::ExploitDb,
+            cve_id: None,
+            product: None,
+            version_range: None,
+            platform: None,
+            exploit_type: None,
+            verified_status: false,
+            requires_auth: false,
+            requires_user_interaction: false,
+            requires_outbound_callback: false,
+            expected_effect: None,
+            safety_class: None,
+            summary: None,
+            recipe_id: None,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(
+            !json.contains("recipe_id"),
+            "recipe_id must be absent when None"
+        );
     }
 }

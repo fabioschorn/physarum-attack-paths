@@ -59,5 +59,9 @@ hex        = "0.4"
 serde_yaml = "0.9"
 walkdir    = "2"
 
+# Embedded template archive — decompressed at startup into /tmp/physarum/templates/
+zstd = "0.13"
+tar  = "0.4"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

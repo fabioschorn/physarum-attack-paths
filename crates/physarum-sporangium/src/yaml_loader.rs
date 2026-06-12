@@ -21,10 +21,42 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde::Deserialize;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use walkdir::WalkDir;
+
+// ── Embedded template archive ─────────────────────────────────────────────────
+
+static TEMPLATES_TAR_ZST: &[u8] = include_bytes!("../data/nuclei-templates.tar.zst");
+static EXTRACTED_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+fn extract_embedded_templates() -> PathBuf {
+    let dest = PathBuf::from("/tmp/physarum/templates");
+    let result_dir = dest.join("nuclei-legacy");
+    let sentinel = result_dir.join(".embedded-extracted");
+
+    if sentinel.exists() {
+        return result_dir;
+    }
+
+    std::fs::create_dir_all(&dest).expect("cannot create /tmp/physarum/templates");
+
+    info!("extracting embedded nuclei templates to {}", dest.display());
+    let decoder = zstd::stream::Decoder::new(std::io::Cursor::new(TEMPLATES_TAR_ZST))
+        .expect("zstd decoder init");
+    let mut archive = tar::Archive::new(decoder);
+    archive.unpack(&dest).expect("tar unpack failed");
+
+    std::fs::write(&sentinel, "").ok();
+    info!(
+        "templates extracted entries={}",
+        walkdir::WalkDir::new(&result_dir).into_iter().count()
+    );
+
+    result_dir
+}
 
 use crate::extractor::{ExtractPart, ExtractorType, PatternExtractor};
 use crate::matcher::{MatchCondition, MatchPart, MatcherType, PatternMatcher};
@@ -94,11 +126,18 @@ fn env_list(key: &str) -> Vec<String> {
 
 // ── Public loader ─────────────────────────────────────────────────────────────
 
-/// Resolve the template directory from `PHYSARUM_TEMPLATE_DIR` or default path.
+/// Resolve the template directory.
+///
+/// Priority:
+/// 1. `PHYSARUM_TEMPLATE_DIR` env var (explicit override — Docker, tests, CI)
+/// 2. Embedded `nuclei-templates.tar.zst` extracted to `/tmp/physarum/templates/nuclei-legacy/`
 pub fn template_dir() -> PathBuf {
-    std::env::var("PHYSARUM_TEMPLATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("templates/nuclei-legacy"))
+    if let Ok(v) = std::env::var("PHYSARUM_TEMPLATE_DIR") {
+        return PathBuf::from(v);
+    }
+    EXTRACTED_DIR
+        .get_or_init(extract_embedded_templates)
+        .clone()
 }
 
 /// Load all templates from `dir` that pass `filter`, converting from Nuclei

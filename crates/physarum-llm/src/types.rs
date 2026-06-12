@@ -680,6 +680,11 @@ pub struct ExploitReference {
     /// `"OGNL injection via Content-Type header; freemarker.Execute; one command per request"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    /// Identifier of the `ExploitExecutionRecipe` that covers this CVE family.
+    /// When set, the LLM should return `recipe_id + bootstrap_objective` instead of
+    /// raw `BootstrapAction` variants. The executor resolves the recipe to actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe_id: Option<String>,
 }
 
 /// physarum-maze's response to an `EnrichmentRequest`.
@@ -704,4 +709,76 @@ pub enum EnrichmentLookupStatus {
     PolicyBlocked { reason: String },
     /// Source not available at runtime (e.g. searchsploit not in PATH).
     SourceUnavailable,
+}
+
+// ── ExploitExecutionRecipe (Layer 2 — YAML-driven, no recompile) ─────────────
+
+/// Which Layer 1 transport primitive an `ExploitExecutionRecipe` drives.
+///
+/// Each variant maps to a corresponding `BootstrapAction` builder in the executor.
+/// New transport variants here let new lab challenges be added via YAML only —
+/// no Rust recompile needed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RecipeTransport {
+    /// Apache Struts OGNL injection — maps to `BootstrapAction::OgnlExec`.
+    OgnlExec {
+        /// Default HTTP port when the recipe does not override it.
+        default_port: u16,
+        /// URL path prefix for OGNL delivery. Typically "/".
+        path_prefix: String,
+    },
+    /// HTTP POST body injection (e.g. PHPUnit eval-stdin CVE-2017-9841).
+    /// Maps to `BootstrapAction::HttpPost` with body from `command_template`.
+    HttpBodyInject {
+        default_port: u16,
+        /// Fixed URL path for the vulnerable endpoint.
+        path: String,
+        /// Content-Type header value.
+        content_type: String,
+        /// Template for the HTTP body. Use `{{cmd}}` where the OS command goes.
+        command_template: String,
+    },
+}
+
+/// Layer 2: per-CVE-family execution recipe loaded from YAML at startup.
+///
+/// A recipe couples a named transport strategy with the constraints and metadata
+/// the PolicyGate and executor need — without hardcoding CVE-specific logic in Rust.
+///
+/// The LLM returns `recipe_id` (from `ExploitReference.recipe_id`) plus a
+/// `bootstrap_objective` string; the executor resolves the recipe and builds
+/// the concrete `BootstrapAction` array, substituting allowed placeholders.
+///
+/// Adding a new lab challenge: write a new `<id>.yaml`, drop it in the recipes dir,
+/// no Rust changes required.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExploitExecutionRecipe {
+    /// Unique identifier — matches `ExploitReference.recipe_id`.
+    /// Convention: `<product>-<technique>-v<N>` (e.g. `struts-ognl-v1`).
+    pub id: String,
+    /// Human-readable description for lineage and logs.
+    pub description: String,
+    /// Transport primitive this recipe drives.
+    pub transport: RecipeTransport,
+    /// Hard cap on the number of commands the LLM may generate.
+    /// Executor enforces this ceiling regardless of what the LLM produces.
+    #[serde(default = "default_max_commands")]
+    pub max_commands: usize,
+    /// Placeholder names the LLM is permitted to use in command strings.
+    /// The executor substitutes these at runtime. Unknown placeholders are rejected.
+    /// Standard set: `<source_ip>`, `<target_port>`, `<bootstrap_url>`,
+    /// `<ephemeral_pubkey>`, `<remote_artifact_path>`, `<lineage_context>`.
+    #[serde(default)]
+    pub allowed_placeholders: Vec<String>,
+    /// CVE identifiers this recipe is known to cover.
+    /// Informational — the LLM links recipe to CVE via `ExploitReference.recipe_id`.
+    #[serde(default)]
+    pub cve_ids: Vec<String>,
+    /// Safety class for PolicyGate (`"lab-only"`, `"destructive"`, …).
+    pub safety_class: String,
+}
+
+fn default_max_commands() -> usize {
+    10
 }

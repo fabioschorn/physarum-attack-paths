@@ -629,8 +629,11 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     let probe = format!("GET / HTTP/1.0\r\nHost: {target}\r\nConnection: close\r\n\r\n");
     let _ = timeout(Duration::from_secs(2), stream.write_all(probe.as_bytes())).await;
 
-    let mut resp = vec![0u8; 4096];
-    let n = timeout(Duration::from_secs(3), stream.read(&mut resp))
+    // read_to_end waits for the server to close the connection (Connection: close),
+    // collecting headers + body in one shot. A single read() can return only the
+    // status line when the OS delivers the HTTP response across multiple segments.
+    let mut resp = Vec::with_capacity(4096);
+    let n = timeout(Duration::from_secs(3), stream.read_to_end(&mut resp))
         .await
         .unwrap_or(Ok(0))
         .unwrap_or(0);
@@ -638,7 +641,7 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     if n == 0 {
         return None;
     }
-    sanitize_banner(&resp[..n])
+    sanitize_banner(&resp[..n.min(4096)])
 }
 
 /// Detects protocols that self-announce immediately on connect.
@@ -721,35 +724,18 @@ fn upgrade_with_banner(
 
 /// Scan `raw` for server version strings and application-level framework hints.
 ///
-/// Returns a combined hint such as "Jetty/9.4.31.v20200723 (Apache Struts S2-059)"
+/// Returns a combined hint such as "Apache-Struts/2.5.29 (Apache Struts S2-062)"
 /// so that LLM Turn 1 can match service-specific CVE templates for each open port.
+///
+/// Resolution order:
+///   1. HTTP `Server:` header — captures any RFC 7231 compliant product verbatim
+///      (no hardcoded list; new labs need no recompile).
+///   2. Non-HTTP protocol banners — SSH `SSH-<proto>-<software>`, FTP `220 <greeting>`.
+///   3. HTML `<title>` app hint appended when present.
 fn extract_version_hint(raw: &str) -> Option<String> {
-    let b = raw.to_ascii_lowercase();
+    let server_ver = extract_server_header(raw).or_else(|| extract_non_http_banner_version(raw));
 
-    // Server-level version patterns from HTTP headers or protocol banners.
-    let mut server_ver = None;
-    for pat in &[
-        "nginx/",
-        "apache/",
-        "openssh_",
-        "openssl/",
-        "tomcat/",
-        "jetty/",
-        "lighttpd/",
-        "gunicorn/",
-    ] {
-        if let Some(pos) = b.find(pat) {
-            let end = raw[pos..]
-                .find(|c: char| c.is_whitespace())
-                .map(|e| pos + e)
-                .unwrap_or_else(|| raw.len().min(pos + 32));
-            server_ver = Some(raw[pos..end].to_string());
-            break;
-        }
-    }
-
-    // Application-level framework hint from HTML <title> (e.g. "Apache Struts S2-059").
-    let app_hint = extract_app_hint_from_html(&b);
+    let app_hint = extract_app_hint_from_html(&raw.to_ascii_lowercase());
 
     match (server_ver, app_hint) {
         (Some(sv), Some(ah)) => Some(format!("{sv} ({ah})")),
@@ -757,6 +743,63 @@ fn extract_version_hint(raw: &str) -> Option<String> {
         (None, Some(ah)) => Some(ah),
         (None, None) => None,
     }
+}
+
+/// Extract the value of the HTTP `Server:` response header (case-insensitive).
+///
+/// Returns the trimmed header value verbatim — "Apache-Struts/2.5.29", "nginx/1.18.0",
+/// "WingFTP-Server/7.4.3" — without any hardcoded product list.  Any HTTP service that
+/// follows RFC 7231 §7.4.2 is captured automatically; no recompile needed for new labs.
+fn extract_server_header(raw: &str) -> Option<String> {
+    use std::sync::OnceLock;
+    // (?i) case-insensitive; ^Server:\s* matches the header name; (.+) captures the value.
+    // Compiled once per process via OnceLock — zero cost on subsequent calls.
+    static RE: OnceLock<regex_lite::Regex> = OnceLock::new();
+    let re =
+        RE.get_or_init(|| regex_lite::Regex::new(r"(?i)^Server:\s*(.+)").expect("static regex"));
+    for line in raw.lines() {
+        if let Some(cap) = re.captures(line.trim()) {
+            let val = cap[1].trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extract a version string from non-HTTP protocol banners (SSH, FTP/SMTP greeting).
+///
+/// SSH  — "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u2" → "OpenSSH_9.2p1"
+/// FTP  — "220 ProFTPD 1.3.5 Server (Default Inst.) [x.x]" → "ProFTPD 1.3.5 Server"
+fn extract_non_http_banner_version(raw: &str) -> Option<String> {
+    use std::sync::OnceLock;
+
+    // SSH: SSH-<proto>-<software [SP comment]>
+    // Captures the software token (no spaces) after the second dash-separated field.
+    static SSH_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
+    let ssh_re =
+        SSH_RE.get_or_init(|| regex_lite::Regex::new(r"^SSH-[^-]+-(\S+)").expect("static regex"));
+
+    // FTP / SMTP: "220[ -]<greeting until first '(' or '['>".
+    // The greeting may contain the product name and version (e.g. "ProFTPD 1.3.5 Server").
+    static FTP_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
+    let ftp_re = FTP_RE.get_or_init(|| {
+        regex_lite::Regex::new(r"^220[-\s](.+?)(?:\s*[\(\[]|$)").expect("static regex")
+    });
+
+    let first = raw.split('\n').next().unwrap_or("").trim();
+
+    if let Some(cap) = ssh_re.captures(first) {
+        return Some(cap[1].to_string());
+    }
+    if let Some(cap) = ftp_re.captures(first) {
+        let val = cap[1].trim();
+        if !val.is_empty() {
+            return Some(val.to_string());
+        }
+    }
+    None
 }
 
 /// Detect application-level framework from the HTML `<title>` in an HTTP banner.
@@ -1728,6 +1771,31 @@ async fn execute_step(
             path_prefix,
             extra_headers,
         } => {
+            // freemarker.Execute calls Runtime.exec(String), not a shell — it tokenizes by
+            // whitespace. Shell chaining operators are silently corrupted, not evaluated.
+            // Note: `>` and `<` are NOT included because `<source_ip>` is a valid placeholder.
+            const MAX_COMMANDS: usize = 10;
+            const SHELL_OPERATORS: &[&str] = &["&&", "||", ";", "|", "`", "$("];
+
+            if commands.len() > MAX_COMMANDS {
+                return StepResult::Failed(format!(
+                    "OgnlExec refused: {} commands exceed MAX_COMMANDS={}",
+                    commands.len(),
+                    MAX_COMMANDS
+                ));
+            }
+
+            for (i, raw_cmd) in commands.iter().enumerate() {
+                for op in SHELL_OPERATORS {
+                    if raw_cmd.contains(op) {
+                        return StepResult::Failed(format!(
+                            "OgnlExec cmd[{i}] refused: shell operator '{op}' detected — \
+                             freemarker.Execute does not chain shell commands"
+                        ));
+                    }
+                }
+            }
+
             let p = port.unwrap_or(8080);
             let prefix = path_prefix.as_deref().unwrap_or("/");
             let ip_str = source_ip.map(|ip| ip.to_string()).unwrap_or_default();
@@ -2499,7 +2567,10 @@ fn extract_cve_ids(summaries: &[PatternFindingSummary]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_app_hint_from_html, extract_version_hint};
+    use super::{
+        extract_app_hint_from_html, extract_non_http_banner_version, extract_server_header,
+        extract_version_hint,
+    };
 
     #[test]
     fn struts_s2_advisory_in_title_detected() {
@@ -2549,5 +2620,63 @@ mod tests {
     fn extract_app_hint_returns_none_for_generic_title() {
         let raw = "<title>welcome to nginx!</title>";
         assert!(extract_app_hint_from_html(raw).is_none());
+    }
+
+    // ── Generic Server: header tests ─────────────────────────────────────────
+
+    #[test]
+    fn apache_struts_server_header_captured_without_hardcode() {
+        // The old implementation missed "Apache-Struts/" because it only matched "apache/".
+        // The new generic approach captures any Server: value verbatim.
+        let body =
+            "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nServer: Apache-Struts/2.5.29\r\n\r\n\
+                    <!DOCTYPE HTML><html><body>Apache Struts 2.5.29</body></html>";
+        let hint = extract_version_hint(body).unwrap();
+        assert!(
+            hint.contains("Apache-Struts/2.5.29"),
+            "should capture Struts version from Server header: {hint}"
+        );
+    }
+
+    #[test]
+    fn unknown_product_server_header_captured_generically() {
+        // Any product following RFC 7231 §7.4.2 is captured — no recompile needed.
+        let body = "HTTP/1.1 200 OK\r\nServer: SomeNewProduct/3.1.4\r\n\r\n";
+        let hint = extract_version_hint(body).unwrap();
+        assert_eq!(hint, "SomeNewProduct/3.1.4");
+    }
+
+    #[test]
+    fn server_header_case_insensitive() {
+        let body = "HTTP/1.1 200 OK\r\nSERVER: MyApp/1.0.0\r\n\r\n";
+        let hint = extract_version_hint(body).unwrap();
+        assert_eq!(hint, "MyApp/1.0.0");
+    }
+
+    #[test]
+    fn extract_server_header_returns_none_without_header() {
+        let body = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+        assert!(extract_server_header(body).is_none());
+    }
+
+    // ── Non-HTTP protocol banner tests ───────────────────────────────────────
+
+    #[test]
+    fn ftp_proftpd_banner_version_extracted() {
+        let banner = "220 ProFTPD 1.3.5 Server (ProFTPD Default Installation) [172.21.0.4]\r\n";
+        let hint = extract_non_http_banner_version(banner).unwrap();
+        assert!(
+            hint.starts_with("ProFTPD"),
+            "should start with product: {hint}"
+        );
+        assert!(hint.contains("1.3.5"), "should include version: {hint}");
+    }
+
+    #[test]
+    fn ssh_banner_with_dashes_in_comment() {
+        // Debian suffix contains dashes — splitn(3) must not split on those.
+        let banner = "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.15\r\n";
+        let hint = extract_non_http_banner_version(banner).unwrap();
+        assert_eq!(hint, "OpenSSH_8.9p1");
     }
 }
