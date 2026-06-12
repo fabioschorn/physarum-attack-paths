@@ -348,6 +348,7 @@ mod tests {
             name: name.into(),
             authors: vec!["physarum".into()],
             description: None,
+            remediation: None,
             severity,
             tags: vec![],
             references: vec![],
