@@ -626,14 +626,8 @@ async fn grab_banner(target: Ipv4Addr, port: u16) -> Option<String> {
     }
 
     // Phase 2 — HTTP probe: generic fallback for any web service.
-    let probe = format!(
-        "GET / HTTP/1.0\r\nHost: {target}\r\nConnection: close\r\n\r\n"
-    );
-    let _ = timeout(
-        Duration::from_secs(2),
-        stream.write_all(probe.as_bytes()),
-    )
-    .await;
+    let probe = format!("GET / HTTP/1.0\r\nHost: {target}\r\nConnection: close\r\n\r\n");
+    let _ = timeout(Duration::from_secs(2), stream.write_all(probe.as_bytes())).await;
 
     let mut resp = vec![0u8; 4096];
     let n = timeout(Duration::from_secs(3), stream.read(&mut resp))
@@ -660,7 +654,7 @@ fn is_self_announcing(bytes: &[u8]) -> bool {
         | [b'-', b'E', b'R', b'R', ..]      // Redis -ERR
         | [b'*', ..]                         // Redis bulk array
         | [b':', ..]                         // Redis integer reply
-        | [b'$', ..]                         // Redis bulk string
+        | [b'$', ..] // Redis bulk string
     )
 }
 
@@ -676,7 +670,11 @@ fn sanitize_banner(bytes: &[u8]) -> Option<String> {
         })
         .collect();
     let trimmed = s.trim().to_string();
-    if trimmed.is_empty() { None } else { Some(trimmed) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 /// Upgrade a `SensingResult` with banner evidence.
@@ -2151,7 +2149,11 @@ const MAX_TEMPLATES_FOR_SELECTION: usize = 200;
 fn extract_version_triples(text: &str) -> Vec<(u32, u32, u32)> {
     let mut results = Vec::new();
     for token in text.split(|c: char| {
-        c.is_whitespace() || matches!(c, '"' | '\'' | '(' | ')' | '<' | '>' | '[' | ']' | '{' | '}' | ',' | ';' | '/')
+        c.is_whitespace()
+            || matches!(
+                c,
+                '"' | '\'' | '(' | ')' | '<' | '>' | '[' | ']' | '{' | '}' | ',' | ';' | '/'
+            )
     }) {
         // Strip any leading non-digit prefix (e.g. "v2.5.29" → "2.5.29").
         let t = token.trim_start_matches(|c: char| !c.is_ascii_digit());
@@ -2159,11 +2161,20 @@ fn extract_version_triples(text: &str) -> Vec<(u32, u32, u32)> {
         if parts.len() < 3 {
             continue;
         }
-        let Ok(major) = parts[0].parse::<u32>() else { continue };
-        let Ok(minor) = parts[1].parse::<u32>() else { continue };
+        let Ok(major) = parts[0].parse::<u32>() else {
+            continue;
+        };
+        let Ok(minor) = parts[1].parse::<u32>() else {
+            continue;
+        };
         // Patch may have trailing suffix like "10p1" — take leading digits only.
-        let patch_digits: String = parts[2].chars().take_while(|c| c.is_ascii_digit()).collect();
-        let Ok(patch) = patch_digits.parse::<u32>() else { continue };
+        let patch_digits: String = parts[2]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        let Ok(patch) = patch_digits.parse::<u32>() else {
+            continue;
+        };
         results.push((major, minor, patch));
     }
     results
@@ -2173,12 +2184,43 @@ fn banner_keywords(sensing_results: &[physarum_scanner::SensingResult]) -> Vec<S
     // Common noise words that appear in HTTP responses and protocol greetings
     // but carry no product signal.
     const NOISE: &[&str] = &[
-        "http", "html", "body", "head", "content", "type", "length",
-        "connection", "close", "default", "installation", "welcome",
-        "version", "build", "release", "server", "host", "date",
-        "charset", "doctype", "transfer", "encoding", "keep", "alive",
-        "accept", "ranges", "bytes", "vary", "cache", "control",
-        "from", "with", "that", "this", "some", "also", "have",
+        "http",
+        "html",
+        "body",
+        "head",
+        "content",
+        "type",
+        "length",
+        "connection",
+        "close",
+        "default",
+        "installation",
+        "welcome",
+        "version",
+        "build",
+        "release",
+        "server",
+        "host",
+        "date",
+        "charset",
+        "doctype",
+        "transfer",
+        "encoding",
+        "keep",
+        "alive",
+        "accept",
+        "ranges",
+        "bytes",
+        "vary",
+        "cache",
+        "control",
+        "from",
+        "with",
+        "that",
+        "this",
+        "some",
+        "also",
+        "have",
     ];
 
     tracing::debug!(
@@ -2245,7 +2287,10 @@ fn build_template_catalog_for_llm(
         (t.info.cvss_score.unwrap_or(0.0) * 10.0) as u32
     };
     let is_rce = |t: &&physarum_sporangium::PatternTemplate| -> bool {
-        t.info.tags.iter().any(|tag| tag.eq_ignore_ascii_case("rce"))
+        t.info
+            .tags
+            .iter()
+            .any(|tag| tag.eq_ignore_ascii_case("rce"))
     };
     // Banner-keyword score: count how many detected product keywords match a template's
     // tags or name. A template tagged ["apache","rce","struts","struts2"] scores 2 for
@@ -2275,14 +2320,11 @@ fn build_template_catalog_for_llm(
         if banner_vers.is_empty() {
             return 0;
         }
-        let combined = [
-            t.info.description.as_deref(),
-            t.info.remediation.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
+        let combined = [t.info.description.as_deref(), t.info.remediation.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
         let desc_vers = extract_version_triples(&combined);
         if desc_vers.is_empty() {
             return 0;
