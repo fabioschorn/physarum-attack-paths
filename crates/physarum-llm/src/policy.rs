@@ -202,7 +202,6 @@ mod tests {
             preconditions: vec![],
             validation_check: None,
             safety_notes: vec![],
-            enrichment_request: None,
         }
     }
 

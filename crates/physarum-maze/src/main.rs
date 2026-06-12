@@ -5,7 +5,6 @@ mod agent;
 mod discovery;
 #[cfg(target_os = "linux")]
 mod ebpf;
-mod exploit_db;
 mod icmp;
 mod lineage;
 mod llm_loop;

@@ -1,4 +1,4 @@
-# PF-6 dual-CVE end-to-end lab (four containers)
+# PF-6 dual-CVE end-to-end lab (three containers)
 #
 # Network design:
 #   physarum-pf6-external  — regular bridge (Internet access allowed)
@@ -6,17 +6,13 @@
 #                            Container A reaches LLM API on this interface
 #
 #   physarum-pf6-internal  — isolated bridge (internal: true)
-#                            Containers B, C and D are ONLY here: no Internet access
-#                            Container A eth1 — used to sense/probe Containers B, C and D
+#                            Containers B and C are ONLY here: no Internet access
+#                            Container A eth1 — used to sense/probe Containers B and C
 #
 # Container B (host-b) — Struts 2.5.25: CVE-2020-17530 (HTTP RCE, port 8080)
 # Container C (host-c) — Dual-CVE mock:
 #                         CVE-2015-3306 ProFTPD mod_copy (TCP/FTP, port 21)
 #                         CVE-2025-47812 Wing FTP web admin (HTTP, port 80)
-# Container D (host-d) — OgnlExec validation target (Issue #144 north star):
-#                         CVE-2021-31805 Apache Struts 2.0.0-2.5.29 (HTTP RCE, port 8090)
-#                         Validates LLM-generated OgnlExec.commands from Exploit-DB enrichment
-#                         The LLM must discover the technique from enrichment, not from hardcoding
 #
 # Phase 1 gate: lineage JSON must contain CVE candidate + policy_decision=Accepted + real LLM reasoning_summary
 # Phase 2 gate: physarum-maze binary must be running on a target (via exploit → pubkey → SCP → exec)
@@ -26,15 +22,13 @@
 #   ./docker/pf6-lab.sh              # Phase 1 — dual-CVE sensing + identification
 #   ./docker/pf6-lab.sh --phase2     # Phase 2 — exploit enabled (Manager approval required)
 #
-# Build images (ALWAYS use desktop-linux builder — never the default cloud builder):
-#   docker buildx build --builder desktop-linux \
+# Build images (mandatory cloud builder law):
+#   docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
 #     --platform linux/amd64 -f docker/physarum-maze-lab.Dockerfile -t physarum-maze:lab --load .
-#   docker buildx build --builder desktop-linux \
+#   docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
 #     --platform linux/amd64 -f docker/physarum-target-pf6.Dockerfile -t physarum-target-pf6:lab --load .
-#   docker buildx build --builder desktop-linux \
+#   docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
 #     --platform linux/amd64 -f docker/physarum-target-dualcve.Dockerfile -t physarum-target-dualcve:lab --load .
-#   docker buildx build --builder desktop-linux \
-#     --platform linux/amd64 -f docker/physarum-target-ognlexec.Dockerfile -t physarum-target-ognlexec:lab --load .
 #
 # After evidence committed:
 #   docker compose -f docker/docker-compose-pf6.yml down -v
@@ -78,29 +72,12 @@ services:
       - ./pf6-dualcve-volume:/tmp/physarum
     restart: "no"
 
-  host-d:
-    # OgnlExec validation target (Issue #144 north star).
-    # CVE-2021-31805 Apache Struts 2.0.0-2.5.29 — OGNL injection via freemarker.Execute.
-    # The LLM must request Exploit-DB enrichment, learn the one-command-per-request technique,
-    # and generate OgnlExec.commands autonomously — no hardcoded delivery recipe.
-    #   :8090  Struts 2.5.29 web app (CVE-2021-31805 OGNL RCE)
-    #   :22    sshd (Phase 2 binary delivery)
-    image: physarum-target-ognlexec:lab
-    container_name: physarum-pf6-target-ognlexec
-    networks:
-      physarum-pf6-internal:
-        ipv4_address: 172.21.0.5
-    volumes:
-      - ./pf6-ognlexec-volume:/tmp/physarum
-    restart: "no"
-
   host-a:
     image: physarum-maze:lab
     container_name: physarum-pf6-agent
     depends_on:
       - host-b
       - host-c
-      - host-d
     networks:
       physarum-pf6-internal:     # eth1 — Docker sorts alphabetically: external < internal → eth0=ext, eth1=int
         ipv4_address: 172.21.0.2
