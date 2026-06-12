@@ -1423,11 +1423,31 @@ async fn execute_bootstrap(
 fn inject_lineage_b64_if_needed(action: &BootstrapAction, lineage_b64: &str) -> BootstrapAction {
     if let BootstrapAction::SshCommand { command, user } = action {
         if command.contains("--mode propagated") && !command.contains("--lineage-b64") {
+            // Inject --lineage-b64 immediately after --mode propagated.
             let injected = command.replace(
                 "--mode propagated",
                 &format!("--mode propagated --lineage-b64 {lineage_b64}"),
             );
-            tracing::debug!("injected --lineage-b64 into SshCommand for propagated agent");
+            // Wrap nohup in a subshell: (nohup ... </dev/null >log 2>&1 &)
+            // Without the subshell, bash -c 'cmd1 && cmd2 && nohup ... &' treats the
+            // entire && chain as an async list. The child bash running that list then
+            // enters do_wait() for physarum-maze, keeping its SSH pipe FDs open and
+            // blocking the SSH session indefinitely. The subshell exits immediately
+            // after forking nohup, so physarum-maze is reparented to PID 1 and SSH
+            // returns within milliseconds.
+            let injected = if injected.contains("nohup") && !injected.contains("(nohup") {
+                injected
+                    .replace("nohup /tmp/physarum/physarum-maze", "(nohup /tmp/physarum/physarum-maze")
+                    .replace(
+                        ">/tmp/physarum/agent.log 2>&1 &",
+                        "</dev/null >/tmp/physarum/agent.log 2>&1 &)",
+                    )
+            } else {
+                injected
+            };
+            tracing::debug!(
+                "injected --lineage-b64 + subshell nohup into SshCommand for propagated agent"
+            );
             return BootstrapAction::SshCommand {
                 command: injected,
                 user: user.clone(),
@@ -1690,6 +1710,9 @@ async fn execute_step(
                 // Fall back to empty-password auth via sshpass
             }
             args.extend(opts);
+            // -n redirects SSH stdin from /dev/null so `nohup ... &` launches return
+            // immediately without waiting for the remote process to close stdin.
+            args.push("-n".into());
             args.push("-o".into());
             args.push(connect_timeout);
             args.push(format!("{remote_user}@{target}"));
