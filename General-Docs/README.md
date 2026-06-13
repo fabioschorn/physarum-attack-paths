@@ -6,6 +6,7 @@ Supporting documents for the physarum-attack-paths project. The main `README.md`
 
 | Document | Purpose |
 |---|---|
+| [ROADMAP.md](./ROADMAP.md) | Current status, evidence pipeline, labs, roadmap, planned evolution, safety and scope |
 | [GATE_N0_THREAT_MODEL.md](./GATE_N0_THREAT_MODEL.md) | Gate N.0 — secure organism continuity: threat model, 4-pillar security design, invariants, Gate N.1–N.7 sequence |
 | [PHYSARUM_SCANNER_DESIGN.md](./PHYSARUM_SCANNER_DESIGN.md) | physarum-scanner design — SensingProfile variants, SensingResult evidence model, eBPF integration |
 | [ROLE_FLUID_AGENT_ARCHITECTURE.md](./ROLE_FLUID_AGENT_ARCHITECTURE.md) | Role-fluid agent design — eBPF direction and organism architecture intent |
