@@ -1,19 +1,19 @@
 use crate::graph_sink::GraphSink;
 use axum::{
-    Json, Router,
     extract::State,
     http::header,
     response::{
-        IntoResponse,
         sse::{Event, KeepAlive, Sse},
+        IntoResponse,
     },
     routing::get,
+    Json, Router,
 };
 use physarum_protocol::OrganismGraph;
 use std::convert::Infallible;
 use std::sync::Arc;
-use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt as _;
 
 static INDEX_HTML: &str = include_str!("server/index.html");
 
@@ -38,7 +38,10 @@ pub async fn start(port: u16, sink: Arc<GraphSink>) -> anyhow::Result<()> {
 }
 
 async fn index_handler() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], INDEX_HTML)
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        INDEX_HTML,
+    )
 }
 
 async fn graph_handler(State(state): State<AppState>) -> Json<OrganismGraph> {

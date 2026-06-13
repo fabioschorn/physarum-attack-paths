@@ -1,7 +1,5 @@
 pub mod organism_graph;
-pub use organism_graph::{
-    ColonizationEvent, EventKind, OrganismEdge, OrganismGraph, OrganismNode,
-};
+pub use organism_graph::{ColonizationEvent, EventKind, OrganismEdge, OrganismGraph, OrganismNode};
 
 pub mod flow_observation;
 pub use flow_observation::{

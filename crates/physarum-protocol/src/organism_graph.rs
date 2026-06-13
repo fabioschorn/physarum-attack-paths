@@ -61,7 +61,11 @@ impl OrganismGraph {
                 to,
                 conductivity,
             } => {
-                if let Some(e) = self.edges.iter_mut().find(|e| &e.from == from && &e.to == to) {
+                if let Some(e) = self
+                    .edges
+                    .iter_mut()
+                    .find(|e| &e.from == from && &e.to == to)
+                {
                     e.conductivity = *conductivity;
                 }
             }
