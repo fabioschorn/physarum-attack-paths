@@ -35,7 +35,12 @@ use crate::vuln_intel::VulnerabilityIntelService;
 
 pub enum LlmOutcome {
     /// Bootstrap succeeded — lineage extended with new hop + evidence recorded.
-    Propagated,
+    Propagated {
+        /// LLM strategy confidence at the successful attempt.
+        confidence: f64,
+        /// First CVE candidate referenced in the successful attempt, if any.
+        cve: Option<String>,
+    },
     /// All attempts exhausted or LLM returned NoPath — mark target as dead end.
     DeadEnd,
 }
@@ -458,7 +463,10 @@ pub async fn run(
             }
             let extended = lineage.extend(&target.to_string());
             *lineage = extended;
-            return Ok(LlmOutcome::Propagated);
+            return Ok(LlmOutcome::Propagated {
+                confidence: strategy.confidence as f64,
+                cve: cve_ids.first().cloned(),
+            });
         }
 
         tracing::warn!(%target, attempt = attempt_number, "bootstrap failed — retrying");

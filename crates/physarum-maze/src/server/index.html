@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>physarum — live organism graph</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d0d0d;
+    color: #ccc;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 18px;
+    border-bottom: 1px solid #1e1e1e;
+    background: #111;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 14px; color: #e8724a; letter-spacing: 0.04em; }
+  #status {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+  }
+  #status.connected { color: #4caf7d; border-color: #2a5c3f; }
+  #status.connecting { color: #e8b34a; border-color: #5c4a2a; }
+  #status.disconnected { color: #e84a4a; border-color: #5c2a2a; }
+  #counters { margin-left: auto; color: #555; font-size: 11px; }
+  #counters span { color: #888; margin-left: 12px; }
+  main { flex: 1; position: relative; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #log {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 110px;
+    background: rgba(10,10,10,0.92);
+    border-top: 1px solid #1e1e1e;
+    overflow-y: auto;
+    padding: 6px 12px;
+    font-size: 11px;
+    line-height: 1.6;
+  }
+  .log-entry { color: #555; }
+  .log-entry.colonized { color: #e8724a; }
+  .log-entry.edge { color: #4a8ce8; }
+  .log-entry.dij { color: #6a4ae8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>physarum organism</h1>
+  <div id="status" class="connecting">connecting…</div>
+  <div id="counters">nodes: <span id="cnt-nodes">0</span> &nbsp; edges: <span id="cnt-edges">0</span> &nbsp; events: <span id="cnt-events">0</span></div>
+</header>
+<main>
+  <canvas id="c"></canvas>
+  <div id="log"></div>
+</main>
+
+<script>
+// ── state ───────────────────────────────────────────────────────────────────
+const nodes = [];   // { id, x, y, fx, fy, depth, colonized, confidence, cve, pulse }
+const edges = [];   // { from, to, conductivity }
+
+// ── canvas setup ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W = 0, H = 0;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  W = canvas.width  = rect.width;
+  H = canvas.height = rect.height - 110; // subtract log height
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── force-directed layout (Fruchterman-Reingold, one step per frame) ─────────
+const K_BASE = 120;
+
+function layoutStep() {
+  if (nodes.length < 2) return;
+  const k = K_BASE * Math.sqrt(W * H / nodes.length) / Math.max(W, H) * K_BASE;
+
+  for (const n of nodes) { n.fx = 0; n.fy = 0; }
+
+  // repulsion
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const dx = nodes[i].x - nodes[j].x || 0.1;
+      const dy = nodes[i].y - nodes[j].y || 0.1;
+      const d2 = dx*dx + dy*dy || 0.01;
+      const d  = Math.sqrt(d2);
+      const f  = k * k / d;
+      nodes[i].fx += f * dx / d;  nodes[i].fy += f * dy / d;
+      nodes[j].fx -= f * dx / d;  nodes[j].fy -= f * dy / d;
+    }
+  }
+
+  // attraction along edges
+  for (const e of edges) {
+    const u = nodes.find(n => n.id === e.from);
+    const v = nodes.find(n => n.id === e.to);
+    if (!u || !v) continue;
+    const dx = v.x - u.x, dy = v.y - u.y;
+    const d  = Math.sqrt(dx*dx + dy*dy) || 0.1;
+    const f  = d * d / k;
+    u.fx += f * dx / d;  u.fy += f * dy / d;
+    v.fx -= f * dx / d;  v.fy -= f * dy / d;
+  }
+
+  const cap = 40;
+  for (const n of nodes) {
+    n.x += Math.max(-cap, Math.min(cap, n.fx * 0.5));
+    n.y += Math.max(-cap, Math.min(cap, n.fy * 0.5));
+    const pad = 50;
+    n.x = Math.max(pad, Math.min(W - pad, n.x));
+    n.y = Math.max(pad, Math.min(H - 10, n.y));
+  }
+}
+
+// ── rendering ─────────────────────────────────────────────────────────────────
+function dijColor(c) {
+  // blue (low D_ij) → orange (high D_ij)
+  const r = Math.round(74  + (232 - 74)  * c);
+  const g = Math.round(140 + (114 - 140) * c);
+  const b = Math.round(232 + (74  - 232) * c);
+  return `rgb(${r},${g},${b})`;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // edges
+  for (const e of edges) {
+    const u = nodes.find(n => n.id === e.from);
+    const v = nodes.find(n => n.id === e.to);
+    if (!u || !v) continue;
+    ctx.beginPath();
+    ctx.moveTo(u.x, u.y);
+    ctx.lineTo(v.x, v.y);
+    ctx.strokeStyle = dijColor(e.conductivity);
+    ctx.lineWidth   = 1 + e.conductivity * 3;
+    ctx.globalAlpha = 0.55 + e.conductivity * 0.35;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // nodes
+  for (const n of nodes) {
+    const r = 16 + n.confidence * 14;
+
+    // pulse ring on newly colonized
+    if (n.pulse > 0) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + (1 - n.pulse) * 28, 0, Math.PI * 2);
+      ctx.strokeStyle = '#e8724a';
+      ctx.lineWidth   = 2;
+      ctx.globalAlpha = n.pulse * 0.6;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      n.pulse -= 0.025;
+      if (n.pulse < 0) n.pulse = 0;
+    }
+
+    // node fill
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.fillStyle   = n.colonized ? '#e8724a' : '#2a2a2a';
+    ctx.strokeStyle = n.colonized ? '#ff9a6c' : '#444';
+    ctx.lineWidth   = 1.5;
+    ctx.fill();
+    ctx.stroke();
+
+    // IP label
+    ctx.fillStyle  = n.colonized ? '#fff' : '#888';
+    ctx.font       = '10px monospace';
+    ctx.textAlign  = 'center';
+    ctx.fillText(n.id, n.x, n.y + 1);
+
+    // depth badge
+    ctx.fillStyle = '#555';
+    ctx.font      = '9px monospace';
+    ctx.fillText(`d${n.depth}`, n.x, n.y + 13);
+
+    // CVE badge
+    if (n.cve) {
+      ctx.fillStyle = '#e8b34a';
+      ctx.font      = '8px monospace';
+      ctx.fillText(n.cve, n.x, n.y - r - 5);
+    }
+  }
+}
+
+let frameId;
+function loop() {
+  layoutStep();
+  draw();
+  frameId = requestAnimationFrame(loop);
+}
+
+// ── SSE connection ─────────────────────────────────────────────────────────────
+let eventCount = 0;
+const statusEl   = document.getElementById('status');
+const cntNodes   = document.getElementById('cnt-nodes');
+const cntEdges   = document.getElementById('cnt-edges');
+const cntEvents  = document.getElementById('cnt-events');
+const logEl      = document.getElementById('log');
+
+function addLog(msg, cls) {
+  const div = document.createElement('div');
+  div.className = 'log-entry' + (cls ? ' ' + cls : '');
+  div.textContent = new Date().toISOString().slice(11,23) + '  ' + msg;
+  logEl.appendChild(div);
+  if (logEl.children.length > 200) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function updateCounters() {
+  cntNodes.textContent  = nodes.length;
+  cntEdges.textContent  = edges.length;
+  cntEvents.textContent = eventCount;
+}
+
+function handleEvent(ev) {
+  eventCount++;
+  const t = ev.type;
+
+  if (t === 'node_discovered') {
+    if (!nodes.find(n => n.id === ev.ip)) {
+      nodes.push({ id: ev.ip, x: W/2 + (Math.random()-0.5)*200, y: H/2 + (Math.random()-0.5)*200,
+                   fx: 0, fy: 0, depth: ev.depth, colonized: false, confidence: 0, cve: null, pulse: 0 });
+      addLog(`discovered  ${ev.ip}  depth=${ev.depth}`);
+    }
+  } else if (t === 'node_colonized') {
+    let n = nodes.find(n => n.id === ev.ip);
+    if (!n) {
+      n = { id: ev.ip, x: W/2 + (Math.random()-0.5)*200, y: H/2 + (Math.random()-0.5)*200,
+            fx: 0, fy: 0, depth: ev.depth, colonized: false, confidence: 0, cve: null, pulse: 0 };
+      nodes.push(n);
+    }
+    n.colonized  = true;
+    n.confidence = ev.confidence || 0;
+    n.cve        = ev.cve || null;
+    n.pulse      = 1.0;
+    addLog(`colonized   ${ev.ip}  conf=${(ev.confidence||0).toFixed(2)}${ev.cve ? '  ' + ev.cve : ''}`, 'colonized');
+  } else if (t === 'edge_added') {
+    if (!edges.find(e => e.from === ev.from && e.to === ev.to)) {
+      edges.push({ from: ev.from, to: ev.to, conductivity: 0.5 });
+      addLog(`edge        ${ev.from} → ${ev.to}`, 'edge');
+    }
+  } else if (t === 'dij_updated') {
+    const e = edges.find(e => e.from === ev.from && e.to === ev.to);
+    if (e) {
+      e.conductivity = ev.conductivity;
+      addLog(`D_ij        ${ev.from}→${ev.to}  ${ev.conductivity.toFixed(3)}`, 'dij');
+    }
+  }
+
+  updateCounters();
+}
+
+function connect() {
+  statusEl.className   = 'connecting';
+  statusEl.textContent = 'connecting…';
+
+  // Load existing graph snapshot first
+  fetch('/graph')
+    .then(r => r.json())
+    .then(g => {
+      for (const n of g.nodes) {
+        if (!nodes.find(x => x.id === n.id)) {
+          nodes.push({ id: n.id, x: W/2 + (Math.random()-0.5)*300, y: H/2 + (Math.random()-0.5)*300,
+                       fx: 0, fy: 0, depth: n.depth, colonized: n.colonized,
+                       confidence: n.confidence, cve: n.cve, pulse: 0 });
+        }
+      }
+      for (const e of g.edges) {
+        if (!edges.find(x => x.from === e.from && x.to === e.to)) {
+          edges.push({ from: e.from, to: e.to, conductivity: e.conductivity });
+        }
+      }
+      updateCounters();
+    })
+    .catch(() => {});
+
+  const es = new EventSource('/events');
+
+  es.onopen = () => {
+    statusEl.className   = 'connected';
+    statusEl.textContent = 'live';
+    addLog('connected to organism event stream');
+  };
+
+  es.onmessage = e => {
+    try { handleEvent(JSON.parse(e.data)); } catch (_) {}
+  };
+
+  es.onerror = () => {
+    statusEl.className   = 'disconnected';
+    statusEl.textContent = 'reconnecting…';
+    es.close();
+    setTimeout(connect, 3000);
+  };
+}
+
+// ── boot ──────────────────────────────────────────────────────────────────────
+addLog('physarum organism graph — waiting for events');
+loop();
+connect();
+</script>
+</body>
+</html>
