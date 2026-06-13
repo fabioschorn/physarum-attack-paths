@@ -85,7 +85,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── Etapa 2: build Linux x86_64 ───────────────────────────────────────────
+  # ── Etapa 2a: build Linux x86_64 (glibc) ─────────────────────────────────
   build-release:
     name: Build (x86_64-unknown-linux-gnu)
     needs: create-release
@@ -116,7 +116,6 @@ jobs:
           cargo build --release --locked --target x86_64-unknown-linux-gnu -p physarum-scanner --bin physarum-scan
           cargo build --release --locked --target x86_64-unknown-linux-gnu -p physarum-sporangium --bin physarum-spore
 
-      # ── Empacotamento (.tar.gz) ────────────────────────────────────────────
       - name: Package binaries
         shell: bash
         run: |
@@ -137,10 +136,57 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # ── Etapa 2b: build Linux x86_64 (musl static) — physarum-maze only ───────
+  # physarum-maze is the propagation binary deployed to target hosts.
+  # The musl variant has zero glibc dependency and runs on any Linux kernel,
+  # which is required when propagating into older targets (e.g. vulhub images).
+  build-release-musl:
+    name: Build (x86_64-unknown-linux-musl)
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.86.0 + musl target
+        uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-unknown-linux-musl
+
+      - name: Build physarum-maze (musl static)
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl -p physarum-maze
+
+      - name: Package physarum-maze musl binary
+        shell: bash
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          TARGET=x86_64-unknown-linux-musl
+          BINARY=physarum-maze
+          ASSET_NAME="${BINARY}-${VERSION}-${TARGET}"
+          STAGING="${ASSET_NAME}"
+
+          mkdir -p "$STAGING"
+          cp "target/${TARGET}/release/${BINARY}" "$STAGING/"
+          cp README.md LICENSE NOTICE "$STAGING/"
+
+          tar -czf "${STAGING}.tar.gz" "$STAGING"
+          gh release upload "$VERSION" "${STAGING}.tar.gz" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # ── Etapa 3: publica a Release (tira do modo draft) ───────────────────────
   publish-release:
     name: Publish Release
-    needs: [create-release, build-release]
+    needs: [create-release, build-release, build-release-musl]
     runs-on: ubuntu-latest
 
     steps:
