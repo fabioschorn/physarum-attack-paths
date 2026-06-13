@@ -4,7 +4,7 @@ This document captures exploratory ideas, research insights, and future directio
 
 It is intentionally separate from the operational prototype roadmap. The roadmap defines what we are building next. This document preserves promising ideas that may influence future architecture, research positioning, or invention framing.
 
-**Last reviewed:** 2026-06-09 — updated with the `pentest-active` / `analysis-only` execution-mode distinction and the June 2026 adaptive self-replicating AI worm research comparison.
+**Last reviewed:** 2026-06-12 — added RAG + RLEF template generation loop (Issue #156), live WASM graph visualization (Issue #161), and inter-hop evidence relay via SSH back-channel.
 
 ---
 
@@ -352,23 +352,66 @@ The organism memory must not.
 
 ---
 
-## 12. Future visualization idea: wasm-lab
+## 12. Live organism graph: physarum-maze --server + Leptos WASM visualization
 
-> **Status:** Research/backlog idea only. Not part of the current implementation roadmap.
+> **Status (2026-06-12):** Active — Issue #161 opened. Implementation pending.
 
-A browser-based `wasm-lab` may still be useful later as a visualization and teaching tool for the organism model.
+The seed node (`physarum-maze --server`) doubles as an HTTP API server and static asset host. No external service, no separate repository. One binary. One flag.
 
-Possible value:
+### Architecture
 
 ```text
-show q_ema / D_ij reinforcement over time
-animate PF-1/PF-2 lineage expansion
-visualize secondary_conduits and already-colonized behavior
-replay saved GraphSnapshot or lineage JSON evidence
-explain organism behavior to non-engineering audiences
+physarum-maze --server :8080
+├── maze agent loop (existing — propagates, senses, reasons, records lineage)
+├── Arc<RwLock<OrganismGraph>> — shared mutable graph updated on each colonization
+├── mpsc broadcast channel — emits ColonizationEvent on each state change
+└── axum HTTP server
+      ├── GET /         → Leptos WASM app (served from include_bytes!)
+      ├── GET /graph    → full OrganismGraph snapshot (JSON)
+      └── GET /events   → SSE stream of ColonizationEvent
 ```
 
-This should remain separate from the main README status table until there is an actual implementation issue or prototype.
+### Why WASM and not plain JavaScript
+
+The Leptos WASM frontend shares types directly from `physarum-protocol` (`OrganismGraph`, `ColonizationEvent`, `OrganismNode`, `OrganismEdge`). The same structs serialized by the backend are deserialized in the browser with zero schema drift. The graph layout (Fruchterman–Reingold force-directed) runs in pure Rust at 60fps inside the browser — no D3.js or external library dependency.
+
+Real-time update path:
+
+```text
+colonization event
+  -> broadcast channel
+  -> SSE /events
+  -> browser EventSource (web-sys)
+  -> Leptos reactive signal
+  -> Canvas re-render (web-sys CanvasRenderingContext2d)
+```
+
+### Visual encoding
+
+| Signal | Visual |
+|--------|--------|
+| Node colonized | Pulse animation + physarum-orange fill |
+| D_ij weight | Edge thickness + color (blue → orange gradient) |
+| LLM confidence | Node radius (0.7 → 1.0 range) |
+| Lineage depth | Vertical layer (seed at top) |
+| CVE exploited | Badge overlaid on node |
+
+### Relationship to back-channel
+
+When the SSH callback back-channel (Section 19) is implemented, each `ColonizationReport` received by the seed feeds directly into `OrganismGraph.apply()`, which the SSE stream immediately pushes to the browser. The WASM page is the visual output of the back-channel reinforcement loop.
+
+### Presentation scenario (AWS lab)
+
+```text
+aws $ physarum-maze --server --targets 172.31.0.0/24 --llm-endpoint $LLM
+
+browser → http://seed-host:8080
+         ↳ WASM loads from binary
+         ↳ seed node appears
+         ↳ host-b colonized → edge appears, node pulses
+         ↳ host-c colonized via host-b → second edge, depth=2
+         ↳ D_ij weights animate as evidence accumulates
+```
 
 ---
 
@@ -845,3 +888,148 @@ The `nuclei-legacy` template directory contains YAML files that are highly repet
 ### Operational result
 
 The binary carries both the Exploit-DB index (in-memory, section 16) and the template library (extracted to `/tmp`, this section). After SCP delivery, the agent initializes, extracts templates, loads exploit references, and begins the full sensing → LLM → PolicyGate → lineage pipeline — identically in Docker and AWS, with zero external dependencies.
+
+---
+
+## 18. RAG + LLM-generated Nuclei templates with RLEF training loop
+
+> **Status (2026-06-12):** Brainstorm — Issue #156. Roadmap position: after Gate N (#89). This is the natural next step after Issue #144 (LLM generates `OgnlExec.commands` from Exploit-DB metadata): the LLM generating full *detection templates* when none exist in the catalog.
+
+### Proposed loop
+
+```text
+Exploit-DB consulted → CVE identified with NO matching template in catalog
+  → LLM receives: nuclei YAML schema + Exploit-DB entry + N similar validated templates (RAG)
+  → LLM GENERATES nuclei YAML template candidate
+  → Sporangium executes generated template against target
+  → If Phase 2 colonization succeeds (ground truth confirmed):
+      → Template persisted to catalog with confidence_score
+      → Triplet (Exploit-DB entry, generated template, outcome) → RAG corpus
+  → Next host with similar CVE:
+      → RAG retrieves N most similar validated templates
+      → LLM uses as few-shot examples → more accurate generation
+```
+
+### Correct ordering
+
+Sporangium runs existing templates **first**. LLM template generation is a **fallback** only for CVEs with no existing template — not a replacement for confirmed sporangium evidence.
+
+```text
+1. Sporangium runs catalog templates → confirmed findings
+2. Exploit-DB enrichment → CVE has no template → LLM generation fallback
+3. Never generate before sporangium — without confirmed evidence Exploit-DB is blind to which CVE applies
+```
+
+### Architectural notes
+
+**Valid YAML is the bottleneck.** Nuclei YAML has rigid structure (matchers, extractors, path templates). The LLM must receive the full schema as mandatory context, not just a free-form prompt.
+
+**Ground truth = Phase 2 colonization success**, not just matcher firing. A false positive from sporangium would pollute the RAG corpus with unvalidated training triplets.
+
+**RLEF (Reinforcement Learning from Exploitation Feedback).** The reward signal is binary: colonization confirmed or not. No human subjectivity. This is one of the strongest possible feedback signals for template quality.
+
+**RAG corpus structure:**
+
+```text
+(Exploit-DB entry, generated template YAML, exploitation outcome)
+```
+
+Each validated triplet improves future generation by providing the LLM with few-shot examples of templates that actually worked against the specific CVE class and platform.
+
+**Self-expanding catalog:** the organism grows its own detection repertoire through validated exploitation experience. Each generation cycle adds validated templates that make the next generation more accurate.
+
+### Relationship to current components
+
+| Component | Role in RLEF loop |
+|-----------|------------------|
+| `physarum-sporangium` | Executes generated template; produces ground truth |
+| `physarum-llm` | Generates template YAML from schema + RAG context |
+| Exploit-DB (embedded) | Provides CVE metadata and technique hints |
+| Lineage | Records generated template, execution outcome, and corpus update |
+| PolicyGate | Required before generated template execution in any lab |
+
+### What does not change
+
+```text
+- Existing template catalog: unchanged — generated templates are additive
+- PolicyGate: mandatory for any generated template execution
+- physarum-scanner sensing: unchanged
+- LLM Turn 1 / Turn 2 flow: unchanged — generation is a Turn 2b fallback
+- Lineage: unchanged — generation event appended like any other evidence
+```
+
+### Roadmap position
+
+```text
+#144 (complete) — LLM generates OgnlExec.commands from Exploit-DB metadata
+#89  (next)     — Gate N.0 mTLS and secure organism continuity design
+#156 (this)     — LLM generates full Nuclei YAML templates with RLEF feedback
+```
+
+---
+
+## 19. Inter-hop evidence relay and D_ij reinforcement via SSH back-channel
+
+> **Status (2026-06-12):** Brainstorm / design proposal. No issue opened yet. This section captures the design discussed after reviewing the Toronto AI worm paper (arXiv:2606.03811v1) and the current fire-and-forget propagation model.
+
+### Problem
+
+After Phase 2 propagation (`172.21.0.2 → .4 → .3 → .5`), each hop is autonomous and self-contained. The seed (host-a) has no feedback from child hops after it launches them. Colonization evidence stays local on each hop. The physarum path-reinforcement model (D_ij update) operates only on the seed's local graph.
+
+### Proposed solution: SSH callback over port 22
+
+No new ports. No persistent connection. Uses only the SSH port already open for propagation.
+
+**On seed startup:**
+
+```text
+1. Generate callback_keypair (ed25519, ephemeral — discarded after the run)
+2. Add callback_pubkey to seed's own ~/.ssh/authorized_keys
+3. Embed callback_privkey + seed_ip in the PropagationLineage struct
+   (lineage already travels via --lineage-b64 to every hop)
+```
+
+**On successful colonization (any downstream hop):**
+
+```text
+hop-N uses callback_privkey to open an SSH session to seed_ip
+  → appends ColonizationReport JSON to ~/.physarum/callbacks/{hop_id}.json
+  → session closes immediately (fire-and-forget, no persistent shell)
+```
+
+**On seed:**
+
+```text
+watches ~/.physarum/callbacks/ (inotify or periodic poll)
+  → each new ColonizationReport → OrganismGraph.apply(report)
+  → D_ij updated for the edge that led to that hop
+  → OrganismGraph broadcast → SSE → WASM browser update
+```
+
+### Why SSH and not a dedicated port
+
+```text
+port 22: already open in Docker lab and AWS Security Group
+port 8080: opened only when --server is passed (WASM visualization)
+no other ports required
+```
+
+A dedicated back-channel port would require SG rule changes in AWS and a new Docker Compose `ports:` entry — unnecessary complexity when port 22 is already available and trusted.
+
+### Topology: star callback (not chain relay)
+
+Any hop calls back directly to the seed. This is simpler than a chain relay (host-d → host-c → host-b → host-a) and avoids the single-point-of-failure fragility of a linear chain. Since all propagated hosts are in the same VPC/subnet, direct SSH to the seed is always reachable.
+
+```text
+host-b ──[ssh :22 callback]──┐
+host-c ──[ssh :22 callback]──┤──> host-a (seed) → OrganismGraph → SSE → WASM
+host-d ──[ssh :22 callback]──┘
+```
+
+### Connection to Gate N
+
+The callback key is ephemeral and discarded after the run. Gate N.2 will upgrade this raw SSH callback to mTLS with signed `ColonizationReport` payloads using `ed25519-dalek` (already in workspace). The structure of the callback does not change — only the transport security is upgraded.
+
+### Connection to WASM visualization (Section 12)
+
+The back-channel is the data source for the live graph. Every `ColonizationReport` that arrives at the seed triggers an `OrganismGraph.apply()` call, which immediately propagates via SSE to the browser. Without the back-channel, the WASM page can only show what the seed itself discovers directly. With it, the page shows the full distributed organism state as it evolves across all hops in real-time.
