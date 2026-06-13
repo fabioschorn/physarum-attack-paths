@@ -70,7 +70,7 @@ async fn events_handler(
         let mut max_seq: Option<u64> = last_seq;
         let events: Vec<Event> = log
             .iter()
-            .filter(|e| last_seq.map_or(false, |seq| e.seq > seq))
+            .filter(|e| last_seq.is_some_and(|seq| e.seq > seq))
             .filter_map(|e| {
                 max_seq = Some(max_seq.map_or(e.seq, |m| m.max(e.seq)));
                 let data = serde_json::to_string(e).ok()?;
@@ -85,7 +85,7 @@ async fn events_handler(
     let live_stream = BroadcastStream::new(rx).filter_map(move |result| {
         let event = result.ok()?;
         // Drop events already covered by the replay window.
-        if cutoff.map_or(false, |c| event.seq <= c) {
+        if cutoff.is_some_and(|c| event.seq <= c) {
             return None;
         }
         let data = serde_json::to_string(&event).ok()?;
