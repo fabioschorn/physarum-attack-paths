@@ -67,8 +67,10 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Issue #144 — Exploit-DB enrichment + `OgnlExec` BootstrapAction, host-d validation | ✔ complete — PR #157 |
 | Issue #158 — Propagation bug fixes: lineage-b64 injection, musl static binary, SSH-hang | ✔ complete — PR #159 |
 | `physarum-maze` musl static binary (zero glibc dependency — propagation target binary) | ✔ v0.4.0 — `x86_64-unknown-linux-musl` |
+| `physarum-maze --server`: live organism API + Leptos WASM real-time graph (Issue #161) | implementation pending |
+| Inter-hop evidence relay and D_ij reinforcement via SSH back-channel | brainstorm — planned before Gate N.2 |
 | AWS Lab with real LLM | planned — after Gate N |
-| Gate N secure identity / mTLS / signed lineage | next milestone |
+| Gate N.0 (Issue #89) — secure organism continuity, identity, mTLS, and lineage threat model | next milestone — design only |
 
 The current release line uses these primary binaries:
 
@@ -405,6 +407,7 @@ Local upstream source clones used for analysis (e.g. `nuclei/`) are ignored by `
 | `docker/docker-compose-pf6.yml` + `docker/pf6-lab.sh` | PF-6 Phase 1 — four-container lab, LLM two-turn selection, dual-CVE evidence (host-a/b/c/d) | ✔ complete — PR #140 |
 | `docker/pf6-lab.sh --phase2` | PF-6 Phase 2 — chain propagation via ephemeral-key SCP, musl binary, lineage continuation | ✔ complete — PR #159; evidence: `examples/evidence/pf6-phase2-ephemeral-key-scp-lineage.json` |
 | `docker/physarum-target-ognlexec.Dockerfile` (host-d) | Issue #144 — LLM Exploit-DB lookup + autonomous OgnlExec delivery against Struts 2.5.29 | ✔ complete — PR #157 |
+| `physarum-maze --server` + WASM page (Issue #161) | Live organism graph: seed exposes axum SSE API + Leptos WASM app served from binary; force-directed layout at 60fps | planned — implementation pending |
 | Future AWS LLM Lab | Real LLM reasoning in owned AWS lab | planned — after Gate N |
 | `formal/tla` | Formal models checked with TLC | ✔ implemented |
 
@@ -588,8 +591,11 @@ Git helper scripts live under `git-scripts/`:
 | PF-6 Phase 2 | Ephemeral-key SCP propagation, chain lineage, musl static binary | ✔ done — PR #159 |
 | Issue #144 | Exploit-DB enrichment embedded in binary + autonomous `OgnlExec` delivery (host-d) | ✔ done — PR #157 |
 | Issue #158 | Propagation bug fixes: lineage-b64 injection, musl binary, SSH-hang root cause | ✔ done — PR #159 |
+| Issue #156 | RAG + LLM-generated Nuclei templates with RLEF training loop — brainstorm captured in `INSIGHTS_AND_BRAINSTORM.md` | ✔ closed — PR #162 |
+| Issue #161 | `physarum-maze --server`: live organism API (axum/SSE) + Leptos WASM real-time graph visualization — embedded in binary | implementation pending |
+| Back-channel | Inter-hop evidence relay and D_ij reinforcement via SSH callback (star topology, port 22 only) | brainstorm — planned before Gate N.2 |
 | AWS LLM Lab | Real LLM in owned AWS lab | planned — after Gate N |
-| Gate N | Secure organism identity, mTLS, signed lineage, anti-replay | next milestone |
+| Gate N.0 (Issue #89) | Secure organism continuity, identity, mTLS, and lineage threat model — **design document only, no implementation** | next milestone |
 
 ---
 
@@ -605,17 +611,26 @@ The following milestones were closed in v0.4.0 (current release):
 
 **Issue #158 (PR #159)** — three propagation bugs fixed: `--lineage-b64` injection into `SshCommand`, musl static binary in Docker builder stage, and the SSH-hang root cause (`&&`-chain child bash entering `do_wait()` with pipe FDs open; fixed by subshell nohup `(nohup ... </dev/null >log 2>&1 &)`).
 
-### Gate N — next milestone — secure organism identity
+### Near-term — Issue #161 and back-channel
 
-Gate N will define and implement:
+**Issue #161 — `physarum-maze --server`:** the seed node will expose a live organism graph API (axum + SSE) and serve a Leptos WASM frontend embedded in the binary via `include_bytes!`. The browser page shows each hop colonized in real time, with D_ij edge weights animating as evidence accumulates and node size reflecting LLM confidence. Zero external files — the same binary that propagates also serves the visualization. Validated first in the pf6 Docker lab, then in the AWS lab.
+
+**Back-channel (pre-Gate N.2):** each propagated hop will call back to the seed over SSH port 22 (already open) using an ephemeral callback keypair embedded in the `lineage-b64` payload. The `ColonizationReport` updates D_ij on the seed and feeds the WASM live graph. No extra ports. Gate N.2 will upgrade the transport to mTLS.
+
+### Gate N.0 (Issue #89) — next milestone — design only
+
+Gate N.0 is a **design and threat-model document**. No implementation code is produced until the design is complete. The scope covers:
 
 ```text
-mTLS node identity
-signed lineage / hop records
-anti-replay controls
-capability-aware authorization
-clear lab mode vs secure mode separation
+secure organism continuity and Agent DNA model
+node identity bootstrap and certificate/key strategy
+TLS vs mTLS scope separation
+signed lineage ledger and evidence hash model
+Online Cortex Mode and Offline Cortex Capsule Mode trust boundaries
+dev/lab mode vs secure mode separation
 ```
+
+Gate N implementation follows in sub-gates N.1 (Agent DNA), N.2 (mTLS node-to-node), N.3 (signed lineage ledger), N.4 (policy roots), N.5 (cortex mode behavior), N.6 (Docker lab), N.7 (AWS lab).
 
 The AWS controlled LLM Lab (real LLM in an owned EC2/VPC environment) is planned to follow Gate N.
 
@@ -627,10 +642,11 @@ The AWS controlled LLM Lab (real LLM in an owned EC2/VPC environment) is planned
 2. Becchetti, L., Bonifaci, V., Dirnberger, M., Karrenbauer, A., Mehlhorn, K. (2013). *Physarum can compute shortest paths: convergence proofs and complexity bounds.* ICALP.
 3. Liu, Y., Gao, C., Zhang, Z., Lu, Y., Chen, S., Liang, M., Tao, L. (2017). *An improved Physarum polycephalum algorithm for the shortest path problem.* Scientific World Journal.
 4. Nakagaki, T., Yamada, H., Tóth, Á. (2000). *Maze-solving by an amoeboid organism.* Nature, 407(6803), 470.
+5. Zhao, E., Jia, J., Ba, J., Goldenberg, A., Papernot, N. (2026). *AI Agents Enable Adaptive Computer Worms.* arXiv:2606.03811. University of Toronto / Vector Institute.
 
 For Rust-side dependencies of architectural significance:
 
-- `axum` — HTTP framework for earlier coordinator/API components
+- `axum` — HTTP framework for coordinator/API components and the `--server` live graph endpoint (Issue #161)
 - `tokio` — async runtime
 - `petgraph` — graph data structures
 - `aya` — pure-Rust eBPF library
