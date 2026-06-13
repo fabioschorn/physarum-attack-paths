@@ -190,12 +190,15 @@ a strategy:
   - Do NOT include another enrichment_request — one round-trip per attempt.
 
 WHEN TO REQUEST ENRICHMENT:
-  - CVE is in the Apache Struts S2 family and you do not know whether the technique
-    requires one command per request or can chain commands.
-  - CVE involves a Java evaluator (EL, OGNL, SpEL, Groovy, FreeMarker) and you need
-    the delivery constraint details.
-  - Enrichment is NOT needed when the technique is obvious from context (e.g.
-    CVE-2015-3306 is always FtpModCopy regardless of what Exploit-DB says).
+  Rule: if available_enrichment_capabilities contains \"ExploitDb\" AND you have
+  identified at least one CVE candidate — ALWAYS request enrichment before
+  proposing a final strategy. Do not assume you already know the delivery
+  technique even for well-known CVEs; the Exploit-DB entry may contain
+  constraints (encoding, per-request limits, parameter format, class names)
+  that differ from your training data and are required for correct execution.
+
+  Skip enrichment ONLY when available_enrichment_capabilities is empty, or
+  when no CVE candidate has been identified for this target.
 
 Step 2 — ScpUpload: transfer the physarum-maze binary to the target.
   local_path: \"__self__\"   (executor substitutes the actual agent binary path)

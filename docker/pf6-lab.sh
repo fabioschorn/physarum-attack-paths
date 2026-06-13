@@ -162,4 +162,5 @@ PYEOF
 }
 
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans --pull=never
+echo -e "  [${PASS}] organism graph → ${BOLD}http://localhost:8080/${NC}"
 docker compose -f "$COMPOSE_FILE" logs -f host-a

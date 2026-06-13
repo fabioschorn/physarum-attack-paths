@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 mod agent;
@@ -6,10 +7,12 @@ mod discovery;
 #[cfg(target_os = "linux")]
 mod ebpf;
 mod exploit_db;
+mod graph_sink;
 mod icmp;
 mod lineage;
 mod llm_loop;
 mod propagation;
+mod server;
 mod tcp;
 mod vuln_intel;
 
@@ -114,6 +117,12 @@ pub struct Cli {
     /// Lab-only. Do NOT enable outside an isolated test environment.
     #[arg(long, default_value_t = false, env = "PHYSARUM_EXPLOIT_ENABLED")]
     pub exploit_enabled: bool,
+
+    /// Start the live organism graph server on the given port (default 8080).
+    /// Serves the organism visualization frontend at / and the SSE event stream
+    /// at /events. Seed mode only. Lab-use — no authentication on the API.
+    #[arg(long, value_name = "PORT", default_missing_value = "8080", num_args = 0..=1, env = "PHYSARUM_SERVER_PORT")]
+    pub server: Option<u16>,
 }
 
 #[tokio::main]
@@ -125,5 +134,19 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    agent::run(cli).await
+
+    let sink = if let Some(port) = cli.server {
+        let sink = Arc::new(graph_sink::GraphSink::new());
+        let sink_server = Arc::clone(&sink);
+        tokio::spawn(async move {
+            if let Err(e) = server::start(port, sink_server).await {
+                tracing::error!(err = %e, "organism server stopped");
+            }
+        });
+        Some(sink)
+    } else {
+        None
+    };
+
+    agent::run(cli, sink).await
 }

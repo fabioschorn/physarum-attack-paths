@@ -43,6 +43,13 @@ physarum-sporangium = { path = "../physarum-sporangium" }
 # Async combinators for concurrent pattern probing
 futures = { workspace = true }
 
+# HTTP server for --server live organism API (axum SSE + embedded frontend)
+axum         = { workspace = true }
+tokio-stream = { workspace = true }
+
+# Shared organism graph types (OrganismGraph, ColonizationEvent)
+physarum-protocol = { path = "../physarum-protocol" }
+
 # HTTP execution in LLM bootstrap steps (HttpGet / HttpPost actions)
 reqwest = { workspace = true }
 
