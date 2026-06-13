@@ -7,316 +7,423 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    background: #0d0d0d;
-    color: #ccc;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 13px;
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    overflow: hidden;
+    background: #0a0a0a; color: #bbb;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 13px; display: flex; flex-direction: column;
+    height: 100vh; overflow: hidden;
   }
   header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 10px 18px;
-    border-bottom: 1px solid #1e1e1e;
-    background: #111;
-    flex-shrink: 0;
+    display: flex; align-items: center; gap: 14px;
+    padding: 8px 16px; background: #0f0f0f;
+    border-bottom: 1px solid #1c1c1c; flex-shrink: 0;
   }
-  header h1 { font-size: 14px; color: #e8724a; letter-spacing: 0.04em; }
+  header h1 { font-size: 12px; color: #e8724a; letter-spacing: 0.08em; text-transform: uppercase; }
   #status {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 3px;
-    background: #1a1a1a;
-    border: 1px solid #333;
+    font-size: 10px; padding: 2px 9px; border-radius: 3px;
+    background: #141414; border: 1px solid #2a2a2a;
   }
-  #status.connected { color: #4caf7d; border-color: #2a5c3f; }
-  #status.connecting { color: #e8b34a; border-color: #5c4a2a; }
-  #status.disconnected { color: #e84a4a; border-color: #5c2a2a; }
-  #counters { margin-left: auto; color: #555; font-size: 11px; }
-  #counters span { color: #888; margin-left: 12px; }
+  #status.connected    { color: #4caf7d; border-color: #1e4a30; }
+  #status.connecting   { color: #e8b34a; border-color: #4a3a1a; }
+  #status.disconnected { color: #e84a4a; border-color: #4a1a1a; }
+  #counters { margin-left: auto; color: #333; font-size: 11px; }
+  #counters span { color: #666; margin-left: 14px; }
+  #counters span b { color: #999; font-weight: normal; }
   main { flex: 1; position: relative; overflow: hidden; }
-  canvas { display: block; width: 100%; height: 100%; }
+  canvas { position: absolute; top: 0; left: 0; }
   #log {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 110px;
-    background: rgba(10,10,10,0.92);
-    border-top: 1px solid #1e1e1e;
-    overflow-y: auto;
-    padding: 6px 12px;
-    font-size: 11px;
-    line-height: 1.6;
+    position: absolute; bottom: 0; left: 0; right: 0;
+    height: 140px; background: rgba(6,6,6,0.97);
+    border-top: 1px solid #222; overflow-y: scroll;
+    padding: 5px 14px; font-size: 11px; line-height: 1.75;
   }
-  .log-entry { color: #555; }
-  .log-entry.colonized { color: #e8724a; }
-  .log-entry.edge { color: #4a8ce8; }
-  .log-entry.dij { color: #6a4ae8; }
+  #log::-webkit-scrollbar       { width: 6px; }
+  #log::-webkit-scrollbar-track { background: #0a0a0a; }
+  #log::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  .log-entry            { color: #383838; }
+  .log-entry.info       { color: #464646; }
+  .log-entry.discovered { color: #2a5a80; }
+  .log-entry.colonized  { color: #b85525; }
+  .log-entry.edge       { color: #1e4e82; }
 </style>
 </head>
 <body>
 <header>
   <h1>physarum organism</h1>
   <div id="status" class="connecting">connecting…</div>
-  <div id="counters">nodes: <span id="cnt-nodes">0</span> &nbsp; edges: <span id="cnt-edges">0</span> &nbsp; events: <span id="cnt-events">0</span></div>
+  <div id="counters">
+    nodes <span id="cnt-nodes"><b>0</b></span>
+    edges <span id="cnt-edges"><b>0</b></span>
+    events <span id="cnt-events"><b>0</b></span>
+  </div>
 </header>
 <main>
   <canvas id="c"></canvas>
   <div id="log"></div>
 </main>
-
 <script>
-// ── state ───────────────────────────────────────────────────────────────────
-const nodes = [];   // { id, x, y, fx, fy, depth, colonized, confidence, cve, pulse }
-const edges = [];   // { from, to, conductivity }
+// ── state ──────────────────────────────────────────────────────────────────────
+const nodes = [];   // {id,x,y,vx,vy,fx,fy,depth,colonized,confidence,cve,pulse,seed}
+const edges = [];   // {from,to,conductivity}
 
-// ── canvas setup ─────────────────────────────────────────────────────────────
+// ── canvas setup ──────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
-let W = 0, H = 0;
+let W = 0, H = 0, CH = 0;
 
 function resize() {
-  const rect = canvas.parentElement.getBoundingClientRect();
-  W = canvas.width  = rect.width;
-  H = canvas.height = rect.height - 110; // subtract log height
+  const m = canvas.parentElement;
+  W  = canvas.width  = m.offsetWidth;
+  H  = canvas.height = m.offsetHeight;
+  CH = H - 140; // canvas area above the log panel
 }
 window.addEventListener('resize', resize);
-resize();
 
-// ── force-directed layout (Fruchterman-Reingold, one step per frame) ─────────
-const K_BASE = 120;
+// ── node helpers ──────────────────────────────────────────────────────────────
+function findNode(id) {
+  for (let i = 0; i < nodes.length; i++) if (nodes[i].id === id) return nodes[i];
+  return null;
+}
 
-function layoutStep() {
+function nodeRadius(n) { return (n.seed ? 36 : 26) + (n.confidence || 0) * 14; }
+
+const RING_RADIUS = 200; // px per depth level
+
+// Count how many nodes already exist at a given depth (for angle distribution).
+function nodesAtDepth(d) { return nodes.filter(n => n.depth === d).length; }
+
+// Place a new node exactly on its depth ring, angle evenly distributed
+// among siblings to avoid collisions.
+function addNode(id, depth, colonized, confidence, cve, seed) {
+  if (findNode(id)) return null;
+  const cx = W / 2, cy = CH / 2;
+  let x, y;
+  if (seed || depth === 0) {
+    x = cx; y = cy;
+  } else {
+    // Evenly distribute siblings around the ring; start offset by -90° so
+    // first node appears at the top rather than the right.
+    const siblings = nodesAtDepth(depth);
+    const total    = Math.max(siblings + 1, 1);
+    const angle    = -Math.PI / 2 + (siblings / total) * Math.PI * 2;
+    const r        = Math.min(depth, 5) * RING_RADIUS;
+    x = cx + Math.cos(angle) * r;
+    y = cy + Math.sin(angle) * r;
+  }
+  const n = { id, depth, colonized: !!colonized, confidence: confidence || 0,
+               cve: cve || null, pulse: 0, seed: !!(seed || depth === 0),
+               x, y, vx: 0, vy: 0, fx: 0, fy: 0 };
+  nodes.push(n);
+  return n;
+}
+
+// ── force-directed layout (Fruchterman-Reingold + depth-ring gravity + cooling) ──
+let temperature = 25;  // start cool — ring gravity + prewarm do the heavy work
+
+function layoutStep(dt) {
   if (nodes.length < 2) return;
-  const k = K_BASE * Math.sqrt(W * H / nodes.length) / Math.max(W, H) * K_BASE;
+  const k  = 1.4 * Math.sqrt((W * CH) / nodes.length);
+  const k2 = k * k;
+  const cx = W / 2, cy = CH / 2;
 
   for (const n of nodes) { n.fx = 0; n.fy = 0; }
 
-  // repulsion
+  // repulsion between all pairs
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
-      const dx = nodes[i].x - nodes[j].x || 0.1;
-      const dy = nodes[i].y - nodes[j].y || 0.1;
-      const d2 = dx*dx + dy*dy || 0.01;
+      let dx = nodes[i].x - nodes[j].x || 0.01;
+      let dy = nodes[i].y - nodes[j].y || 0.01;
+      const d2 = dx*dx + dy*dy || 0.0001;
       const d  = Math.sqrt(d2);
-      const f  = k * k / d;
-      nodes[i].fx += f * dx / d;  nodes[i].fy += f * dy / d;
-      nodes[j].fx -= f * dx / d;  nodes[j].fy -= f * dy / d;
+      const f  = k2 / d;
+      const ux = dx/d, uy = dy/d;
+      nodes[i].fx += f*ux; nodes[i].fy += f*uy;
+      nodes[j].fx -= f*ux; nodes[j].fy -= f*uy;
     }
   }
 
   // attraction along edges
   for (const e of edges) {
-    const u = nodes.find(n => n.id === e.from);
-    const v = nodes.find(n => n.id === e.to);
-    if (!u || !v) continue;
+    const u = findNode(e.from), v = findNode(e.to);
+    if (!u || !v || u === v) continue;
     const dx = v.x - u.x, dy = v.y - u.y;
     const d  = Math.sqrt(dx*dx + dy*dy) || 0.1;
-    const f  = d * d / k;
-    u.fx += f * dx / d;  u.fy += f * dy / d;
-    v.fx -= f * dx / d;  v.fy -= f * dy / d;
+    const f  = (d*d) / k;
+    const ux = dx/d, uy = dy/d;
+    if (!u.seed) { u.fx += f*ux; u.fy += f*uy; }
+    if (!v.seed) { v.fx -= f*ux; v.fy -= f*uy; }
   }
 
-  const cap = 40;
+  // Depth-ring gravity — each node is pulled toward its ideal orbit radius.
+  // This enforces connection ORDER visually: depth 1 = inner ring, depth 2 = outer, etc.
+  // Angular position remains free (driven by edge attraction), only radius is constrained.
   for (const n of nodes) {
-    n.x += Math.max(-cap, Math.min(cap, n.fx * 0.5));
-    n.y += Math.max(-cap, Math.min(cap, n.fy * 0.5));
-    const pad = 50;
-    n.x = Math.max(pad, Math.min(W - pad, n.x));
-    n.y = Math.max(pad, Math.min(H - 10, n.y));
+    if (n.seed) continue;
+    const dx   = n.x - cx, dy = n.y - cy;
+    const dist  = Math.sqrt(dx*dx + dy*dy) || 1;
+    const target = n.depth * RING_RADIUS;
+    const drift  = dist - target;          // positive = too far, negative = too close
+    const strength = 0.04;                // stronger ring enforcement
+    n.fx -= (dx / dist) * drift * strength;
+    n.fy -= (dy / dist) * drift * strength;
   }
+
+  const pad = 80;
+  for (const n of nodes) {
+    if (n.seed) { n.x = cx; n.y = cy; continue; }
+    // clamp displacement to current temperature
+    const fx = Math.max(-temperature, Math.min(temperature, n.fx));
+    const fy = Math.max(-temperature, Math.min(temperature, n.fy));
+    n.vx = (n.vx + fx * dt) * 0.75;
+    n.vy = (n.vy + fy * dt) * 0.75;
+    n.x  = Math.max(pad, Math.min(W  - pad, n.x + n.vx));
+    n.y  = Math.max(pad, Math.min(CH - pad, n.y + n.vy));
+  }
+
+  // cool down — layout converges and eventually freezes
+  temperature = Math.max(1, temperature * 0.985);
+}
+
+// Pre-warm: run layout synchronously so nodes start in good positions
+function prewarm(iterations) {
+  for (let i = 0; i < iterations; i++) layoutStep(0.3);
 }
 
 // ── rendering ─────────────────────────────────────────────────────────────────
-function dijColor(c) {
-  // blue (low D_ij) → orange (high D_ij)
+function conductivityColor(c) {
   const r = Math.round(74  + (232 - 74)  * c);
   const g = Math.round(140 + (114 - 140) * c);
   const b = Math.round(232 + (74  - 232) * c);
   return `rgb(${r},${g},${b})`;
 }
 
-function draw() {
-  ctx.clearRect(0, 0, W, H);
+function drawArrow(x1, y1, x2, y2, rEnd, color, lw) {
+  const dx = x2-x1, dy = y2-y1;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const ux = dx/len, uy = dy/len;
+  const ex = x2 - ux*rEnd, ey = y2 - uy*rEnd;
+  ctx.beginPath();
+  ctx.moveTo(x1 + ux*8, y1 + uy*8);
+  ctx.lineTo(ex, ey);
+  ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.stroke();
+  // arrowhead
+  const s = 8;
+  const ax = ex - ux*s, ay = ey - uy*s;
+  ctx.beginPath();
+  ctx.moveTo(ex, ey);
+  ctx.lineTo(ax - uy*s*0.42, ay + ux*s*0.42);
+  ctx.lineTo(ax + uy*s*0.42, ay - ux*s*0.42);
+  ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+}
 
-  // edges
+function draw() {
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  // subtle dot grid
+  ctx.fillStyle = '#111';
+  const gs = 46;
+  for (let gx = gs; gx < W; gx += gs)
+    for (let gy = gs; gy < CH; gy += gs) {
+      ctx.beginPath(); ctx.arc(gx, gy, 0.7, 0, Math.PI*2); ctx.fill();
+    }
+
+  // edges with directed arrows
   for (const e of edges) {
-    const u = nodes.find(n => n.id === e.from);
-    const v = nodes.find(n => n.id === e.to);
-    if (!u || !v) continue;
-    ctx.beginPath();
-    ctx.moveTo(u.x, u.y);
-    ctx.lineTo(v.x, v.y);
-    ctx.strokeStyle = dijColor(e.conductivity);
-    ctx.lineWidth   = 1 + e.conductivity * 3;
-    ctx.globalAlpha = 0.55 + e.conductivity * 0.35;
-    ctx.stroke();
+    const u = findNode(e.from), v = findNode(e.to);
+    if (!u || !v || u === v) continue;
+    const color = conductivityColor(Math.min(1, e.conductivity));
+    const lw    = 1 + e.conductivity * 2;
+    ctx.globalAlpha = 0.4 + e.conductivity * 0.5;
+    drawArrow(u.x, u.y, v.x, v.y, nodeRadius(v), color, lw);
     ctx.globalAlpha = 1;
   }
 
   // nodes
   for (const n of nodes) {
-    const r = 16 + n.confidence * 14;
+    const r = nodeRadius(n);
 
-    // pulse ring on newly colonized
+    // pulse ring on colonization event
     if (n.pulse > 0) {
       ctx.beginPath();
-      ctx.arc(n.x, n.y, r + (1 - n.pulse) * 28, 0, Math.PI * 2);
-      ctx.strokeStyle = '#e8724a';
-      ctx.lineWidth   = 2;
-      ctx.globalAlpha = n.pulse * 0.6;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      n.pulse -= 0.025;
-      if (n.pulse < 0) n.pulse = 0;
+      ctx.arc(n.x, n.y, r + (1-n.pulse)*38, 0, Math.PI*2);
+      ctx.strokeStyle = '#e8724a'; ctx.lineWidth = 1.5;
+      ctx.globalAlpha = n.pulse * 0.5; ctx.stroke(); ctx.globalAlpha = 1;
+      n.pulse = Math.max(0, n.pulse - 0.016);
+    }
+
+    // seed outer glow ring
+    if (n.seed) {
+      ctx.beginPath(); ctx.arc(n.x, n.y, r+10, 0, Math.PI*2);
+      ctx.strokeStyle = '#e8724a'; ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.18; ctx.stroke(); ctx.globalAlpha = 1;
     }
 
     // node fill
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-    ctx.fillStyle   = n.colonized ? '#e8724a' : '#2a2a2a';
-    ctx.strokeStyle = n.colonized ? '#ff9a6c' : '#444';
-    ctx.lineWidth   = 1.5;
-    ctx.fill();
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI*2);
+    ctx.fillStyle   = n.seed       ? '#7a2810'
+                    : n.colonized  ? '#5a1e0e'
+                    :                '#0e2438';
+    ctx.strokeStyle = n.seed       ? '#e8724a'
+                    : n.colonized  ? '#b04828'
+                    :                '#1c4870';
+    ctx.lineWidth   = n.seed ? 2.5 : 1.5;
+    ctx.fill(); ctx.stroke();
+
+    // confidence arc (green — outer ring showing exploit confidence)
+    if ((n.colonized || n.seed) && n.confidence > 0) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r+3.5, -Math.PI/2, -Math.PI/2 + n.confidence*Math.PI*2);
+      ctx.strokeStyle = '#3a9a5c'; ctx.lineWidth = 2.5; ctx.stroke();
+    }
 
     // IP label
-    ctx.fillStyle  = n.colonized ? '#fff' : '#888';
-    ctx.font       = '10px monospace';
-    ctx.textAlign  = 'center';
-    ctx.fillText(n.id, n.x, n.y + 1);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillStyle = n.seed || n.colonized ? '#f0ddd5' : '#3a7aaa';
+    ctx.fillText(n.id, n.x, n.y - 5);
 
-    // depth badge
-    ctx.fillStyle = '#555';
-    ctx.font      = '9px monospace';
-    ctx.fillText(`d${n.depth}`, n.x, n.y + 13);
+    // depth / role badge
+    ctx.font = '9px monospace';
+    ctx.fillStyle = n.seed ? '#d86030' : n.colonized ? '#885040' : '#2a5a78';
+    ctx.fillText(n.seed ? '[ seed ]' : `depth ${n.depth}`, n.x, n.y + 8);
 
-    // CVE badge
+    // CVE badge above node
     if (n.cve) {
-      ctx.fillStyle = '#e8b34a';
-      ctx.font      = '8px monospace';
-      ctx.fillText(n.cve, n.x, n.y - r - 5);
+      ctx.font = 'bold 9px monospace';
+      const tw = ctx.measureText(n.cve).width;
+      const bw = tw + 10, bh = 14;
+      const bx = n.x - bw/2, by = n.y - r - bh - 5;
+      ctx.fillStyle = '#1e1000'; ctx.strokeStyle = '#a07018'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 3); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#c89030'; ctx.textBaseline = 'middle';
+      ctx.fillText(n.cve, n.x, by + bh/2);
     }
   }
 }
 
-let frameId;
+// ── animation loop ─────────────────────────────────────────────────────────────
 function loop() {
-  layoutStep();
+  layoutStep(0.25);
   draw();
-  frameId = requestAnimationFrame(loop);
+  requestAnimationFrame(loop);
 }
 
-// ── SSE connection ─────────────────────────────────────────────────────────────
+// ── log helpers ────────────────────────────────────────────────────────────────
 let eventCount = 0;
-const statusEl   = document.getElementById('status');
-const cntNodes   = document.getElementById('cnt-nodes');
-const cntEdges   = document.getElementById('cnt-edges');
-const cntEvents  = document.getElementById('cnt-events');
-const logEl      = document.getElementById('log');
+const logEl       = document.getElementById('log');
+const statusEl    = document.getElementById('status');
+const cntNodesEl  = document.getElementById('cnt-nodes');
+const cntEdgesEl  = document.getElementById('cnt-edges');
+const cntEventsEl = document.getElementById('cnt-events');
 
 function addLog(msg, cls) {
-  const div = document.createElement('div');
-  div.className = 'log-entry' + (cls ? ' ' + cls : '');
-  div.textContent = new Date().toISOString().slice(11,23) + '  ' + msg;
-  logEl.appendChild(div);
-  if (logEl.children.length > 200) logEl.removeChild(logEl.firstChild);
-  logEl.scrollTop = logEl.scrollHeight;
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+  const d = document.createElement('div');
+  d.className   = 'log-entry' + (cls ? ' '+cls : '');
+  d.textContent = new Date().toISOString().slice(11,23) + '  ' + msg;
+  logEl.appendChild(d);
+  if (logEl.children.length > 400) logEl.removeChild(logEl.firstChild);
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
 
 function updateCounters() {
-  cntNodes.textContent  = nodes.length;
-  cntEdges.textContent  = edges.length;
-  cntEvents.textContent = eventCount;
+  cntNodesEl.innerHTML  = `<b>${nodes.length}</b>`;
+  cntEdgesEl.innerHTML  = `<b>${edges.length}</b>`;
+  cntEventsEl.innerHTML = `<b>${eventCount}</b>`;
 }
 
+// ── event handling ─────────────────────────────────────────────────────────────
 function handleEvent(ev) {
   eventCount++;
-  const t = ev.type;
+  if (ev.type === 'node_discovered') {
+    if (!findNode(ev.ip)) {
+      addNode(ev.ip, ev.depth, false, 0, null, false);
+      addLog(`discovered   ${ev.ip}   depth=${ev.depth}`, 'discovered');
+    }
 
-  if (t === 'node_discovered') {
-    if (!nodes.find(n => n.id === ev.ip)) {
-      nodes.push({ id: ev.ip, x: W/2 + (Math.random()-0.5)*200, y: H/2 + (Math.random()-0.5)*200,
-                   fx: 0, fy: 0, depth: ev.depth, colonized: false, confidence: 0, cve: null, pulse: 0 });
-      addLog(`discovered  ${ev.ip}  depth=${ev.depth}`);
+  } else if (ev.type === 'node_colonized') {
+    let n = findNode(ev.ip);
+    if (!n) n = addNode(ev.ip, ev.depth, false, 0, null, false);
+    if (n) {
+      n.colonized  = true;
+      n.confidence = ev.confidence || 0;
+      n.cve        = ev.cve || null;
+      n.pulse      = 1.0;
+      temperature  = Math.max(temperature, 30); // reheat on new colonization
     }
-  } else if (t === 'node_colonized') {
-    let n = nodes.find(n => n.id === ev.ip);
-    if (!n) {
-      n = { id: ev.ip, x: W/2 + (Math.random()-0.5)*200, y: H/2 + (Math.random()-0.5)*200,
-            fx: 0, fy: 0, depth: ev.depth, colonized: false, confidence: 0, cve: null, pulse: 0 };
-      nodes.push(n);
-    }
-    n.colonized  = true;
-    n.confidence = ev.confidence || 0;
-    n.cve        = ev.cve || null;
-    n.pulse      = 1.0;
-    addLog(`colonized   ${ev.ip}  conf=${(ev.confidence||0).toFixed(2)}${ev.cve ? '  ' + ev.cve : ''}`, 'colonized');
-  } else if (t === 'edge_added') {
+    addLog(`colonized    ${ev.ip}   conf=${(ev.confidence||0).toFixed(2)}${ev.cve ? '  '+ev.cve : ''}`, 'colonized');
+
+  } else if (ev.type === 'edge_added') {
+    if (ev.from === ev.to) return;
+    if (!findNode(ev.from)) addNode(ev.from, 0, true, 1.0, null, true);
+    if (!findNode(ev.to))   addNode(ev.to,   1, false, 0,   null, false);
     if (!edges.find(e => e.from === ev.from && e.to === ev.to)) {
-      edges.push({ from: ev.from, to: ev.to, conductivity: 0.5 });
-      addLog(`edge        ${ev.from} → ${ev.to}`, 'edge');
+      edges.push({ from: ev.from, to: ev.to, conductivity: ev.conductivity || 0.6 });
+      temperature = Math.max(temperature, 20);
+      addLog(`edge         ${ev.from} → ${ev.to}`, 'edge');
     }
-  } else if (t === 'dij_updated') {
+
+  } else if (ev.type === 'dij_updated') {
     const e = edges.find(e => e.from === ev.from && e.to === ev.to);
-    if (e) {
-      e.conductivity = ev.conductivity;
-      addLog(`D_ij        ${ev.from}→${ev.to}  ${ev.conductivity.toFixed(3)}`, 'dij');
-    }
+    if (e) e.conductivity = ev.conductivity;
   }
 
   updateCounters();
 }
 
+// ── SSE + graph snapshot ───────────────────────────────────────────────────────
 function connect() {
-  statusEl.className   = 'connecting';
+  statusEl.className = 'connecting';
   statusEl.textContent = 'connecting…';
 
-  // Load existing graph snapshot first
-  fetch('/graph')
-    .then(r => r.json())
-    .then(g => {
-      for (const n of g.nodes) {
-        if (!nodes.find(x => x.id === n.id)) {
-          nodes.push({ id: n.id, x: W/2 + (Math.random()-0.5)*300, y: H/2 + (Math.random()-0.5)*300,
-                       fx: 0, fy: 0, depth: n.depth, colonized: n.colonized,
-                       confidence: n.confidence, cve: n.cve, pulse: 0 });
-        }
+  fetch('/graph').then(r => r.json()).then(g => {
+    // depth=0 is always the seed — backend emits NodeDiscovered for itself first
+    const seedNode = (g.nodes||[]).find(n => n.depth === 0);
+    const seedIp   = seedNode ? seedNode.id : null;
+
+    // Seed first — rendered at center before anything else
+    if (seedIp) {
+      addNode(seedIp, 0, seedNode.colonized, seedNode.confidence || 1.0, seedNode.cve, true);
+    }
+
+    // Remaining nodes in depth order
+    const sorted = (g.nodes||[]).filter(n => n.id !== seedIp)
+                                 .sort((a,b) => a.depth - b.depth);
+    for (const n of sorted) {
+      addNode(n.id, n.depth, n.colonized, n.confidence, n.cve, false);
+    }
+
+    // Edges — ensure from/to nodes exist even if not yet discovered
+    for (const e of (g.edges||[])) {
+      if (e.from === e.to) continue;
+      if (!findNode(e.from)) addNode(e.from, 0, true, 1.0, null, e.from === seedIp);
+      if (!findNode(e.to))   addNode(e.to,   1, false, 0,  null, false);
+      if (!edges.find(x => x.from === e.from && x.to === e.to)) {
+        edges.push({ from: e.from, to: e.to, conductivity: e.conductivity || 0.6 });
       }
-      for (const e of g.edges) {
-        if (!edges.find(x => x.from === e.from && x.to === e.to)) {
-          edges.push({ from: e.from, to: e.to, conductivity: e.conductivity });
-        }
-      }
-      updateCounters();
-    })
-    .catch(() => {});
+    }
+
+    // Settle layout before first paint — no bounce on load/refresh
+    if (nodes.length > 1) prewarm(800);
+    updateCounters();
+    addLog(`snapshot loaded — ${nodes.length} nodes, ${edges.length} edges`, 'info');
+  }).catch(() => {});
 
   const es = new EventSource('/events');
-
   es.onopen = () => {
-    statusEl.className   = 'connected';
-    statusEl.textContent = 'live';
-    addLog('connected to organism event stream');
+    statusEl.className = 'connected'; statusEl.textContent = 'live';
+    addLog('connected to organism event stream', 'info');
   };
-
-  es.onmessage = e => {
-    try { handleEvent(JSON.parse(e.data)); } catch (_) {}
-  };
-
-  es.onerror = () => {
-    statusEl.className   = 'disconnected';
-    statusEl.textContent = 'reconnecting…';
-    es.close();
-    setTimeout(connect, 3000);
+  es.onmessage = e => { try { handleEvent(JSON.parse(e.data)); } catch(_) {} };
+  es.onerror   = () => {
+    statusEl.className = 'disconnected'; statusEl.textContent = 'reconnecting…';
+    es.close(); setTimeout(connect, 3000);
   };
 }
 
 // ── boot ──────────────────────────────────────────────────────────────────────
-addLog('physarum organism graph — waiting for events');
+resize();
+addLog('physarum organism graph — waiting for events', 'info');
 loop();
 connect();
 </script>

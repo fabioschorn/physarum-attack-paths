@@ -165,6 +165,16 @@ pub async fn run(mut cli: Cli, sink: Option<std::sync::Arc<GraphSink>>) -> Resul
     let binary_path = std::env::current_exe()?;
     let local_ip = resolve_local_ip(&cli, &lineage);
 
+    // Seed node: always announce self first so the canvas has an anchor
+    // before any discovery events arrive.
+    if let (Some(s), Some(ip)) = (&sink, local_ip) {
+        s.emit(EventKind::NodeDiscovered {
+            ip: ip.to_string(),
+            depth: 0,
+        })
+        .await;
+    }
+
     let mut icmp_rx = crate::icmp::start(cli.interface.clone());
     let mut tcp_rx = crate::tcp::start(cli.interface.clone());
     let mut ebpf_rx: Option<mpsc::Receiver<Ipv4Addr>> = init_ebpf(&cli);
@@ -339,6 +349,9 @@ async fn handle_candidate(
 
     tracing::info!(%src_ip, stimulus, "candidate accepted — starting evidence pipeline");
 
+    // Capture parent before llm_loop::run() mutates lineage via extend()
+    let parent_ip = lineage.path.last().cloned().unwrap_or_else(|| lineage.origin.clone());
+
     if let Some(s) = sink {
         s.emit(EventKind::NodeDiscovered {
             ip: ip_str.clone(),
@@ -363,8 +376,7 @@ async fn handle_candidate(
             LlmOutcome::Propagated { confidence, cve } => {
                 tracing::info!(%src_ip, "LLM propagation succeeded");
                 if let Some(s) = sink {
-                    let from = lineage.path.last().cloned().unwrap_or_else(|| lineage.origin.clone());
-                    s.emit(EventKind::EdgeAdded { from: from.clone(), to: ip_str.clone() }).await;
+                    s.emit(EventKind::EdgeAdded { from: parent_ip.clone(), to: ip_str.clone() }).await;
                     s.emit(EventKind::NodeColonized {
                         ip: ip_str.clone(),
                         depth: lineage.hops as u32 + 1,

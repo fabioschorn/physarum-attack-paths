@@ -120,6 +120,8 @@ services:
       # Extend stimulus scan to include FTP (:21) for TCP template probing.
       # Override via env or compose .env — no recompile required.
       PHYSARUM_STIMULUS_PORTS: "${PHYSARUM_STIMULUS_PORTS:-21,22,80,443,8080,8090,8443}"
+    ports:
+      - "8080:8080"   # live organism graph — http://localhost:8080/
     command: >
       --mode seed
       --llm-endpoint ${PHYSARUM_LLM_ENDPOINT:-mock-http}
@@ -127,6 +129,7 @@ services:
       --llm-allowed-cidr 172.16.0.0/12
       --discovery-interval-secs 5
       --stimulus-timeout-secs 120
+      --server 8080
     volumes:
       - ./lineage:/tmp
       - ../examples/advisory-cache:/advisory-cache:ro
