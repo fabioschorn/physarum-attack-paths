@@ -165,19 +165,19 @@ This keeps the LLM useful for reasoning without making it the authority. The LLM
 │  LLM Turn 2a — ordered propagation strategy                  │
 │        │                                                     │
 │        ▼ (optional enrichment round-trip)                    │
-│  LLM Turn 2b — Exploit-DB lookup + OgnlExec delivery        │
+│  LLM Turn 2b — Exploit-DB lookup + OgnlExec delivery         │
 │        │                                                     │
 │        ▼                                                     │
 │  PolicyGate                                                  │
 │        │                                                     │
 │        ▼                                                     │
-│  bootstrap execution (SshCommand / SCP / OgnlExec)          │
+│  bootstrap execution (SshCommand / SCP / OgnlExec)           │
 │        │                                                     │
 │        ▼                                                     │
-│  SCP __self__ (musl) → propagated agent (next hop)          │
+│  SCP __self__ (musl) → propagated agent (next hop)           │
 │        │                                                     │
 │        ▼                                                     │
-│  LlmAttemptEvidence / lineage (hop recorded)                │
+│  LlmAttemptEvidence / lineage (hop recorded)                 │
 └──────────────────────────────────────────────────────────────┘
 ```
 
