@@ -1,4 +1,4 @@
-# wasm-lab — Live Organism Graph Visualization
+# server-graph-lab — Live Organism Graph Visualization
 
 > **Status:** Complete — Issue #161 / v0.5.0 / PR #170
 

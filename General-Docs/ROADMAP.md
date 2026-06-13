@@ -140,7 +140,7 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 | `docker/docker-compose-pf6.yml` + `docker/pf6-lab.sh` | PF-6 Phase 1 — four-container lab, LLM two-turn, dual-CVE | ✔ complete — PR #140 |
 | `docker/pf6-lab.sh --phase2` | PF-6 Phase 2 — chain propagation, ephemeral-key SCP, musl binary | ✔ complete — PR #159 |
 | `docker/physarum-target-ognlexec.Dockerfile` (host-d) | Issue #144 — Exploit-DB + autonomous OgnlExec against Struts 2.5.29 | ✔ complete — PR #157 |
-| `physarum-maze --server` + pf6-lab (Issue #161) | Live organism graph: axum SSE + Canvas HTML, depth rings, CVE badges, noise sensing nodes | ✔ complete — PR #170 / v0.5.0 |
+| `examples/server-graph-lab` + pf6-lab (Issue #161) | Live organism graph: axum SSE + Canvas HTML, depth rings, CVE badges, noise sensing nodes | ✔ complete — PR #170 / v0.5.0 |
 | AWS LLM Lab | Real LLM in owned AWS VPC | planned — after Gate N |
 | `formal/tla` | Formal models checked with TLC | ✔ implemented |
 
@@ -200,11 +200,9 @@ Wired into the PF-6 four-container lab (`./docker/pf6-lab.sh --phase2` → open 
 - Seed node guaranteed at center — `NodeDiscovered{depth:0}` emitted on startup
 - Exploit-DB enrichment policy updated — mandatory when `ExploitDb` capability available and CVE identified (no longer conditional on model uncertainty)
 
-### Next — back-channel
-
 ### Pre-Gate N.2 — back-channel (next)
 
-Each propagated hop calls back to the seed over SSH port 22 using an ephemeral callback keypair embedded in `lineage-b64`. The `ColonizationReport` updates D_ij on the seed and feeds the WASM live graph. No extra ports. Gate N.2 upgrades the transport to mTLS.
+Each propagated hop calls back to the seed over SSH port 22 using an ephemeral callback keypair embedded in `lineage-b64`. The `ColonizationReport` updates D_ij on the seed and feeds the live organism graph (`examples/server-graph-lab`). No extra ports. Gate N.2 upgrades the transport to mTLS.
 
 ### Gate N.1–N.7
 
