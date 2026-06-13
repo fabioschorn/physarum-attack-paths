@@ -1,20 +1,13 @@
 # General Documentation
 
-This directory contains the current general project documentation that supports the main `physarum-attack-paths` README (6 documents).
+Supporting documents for the physarum-attack-paths project. The main `README.md` covers vision, architecture summary, and quick-start. This directory holds design documents and technical deep-dives.
 
-## Available documents
+## Documents
 
 | Document | Purpose |
 |---|---|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Full system architecture — all four generations (server/agent → eBPF → physarum-maze → physarum-llm) |
-| [QUALITY_GATE.md](./QUALITY_GATE.md) | Gate definitions, acceptance criteria, evidence links (Gates A–PF-2) |
-| [ROLE_FLUID_AGENT_ARCHITECTURE.md](./ROLE_FLUID_AGENT_ARCHITECTURE.md) | eBPF direction + role-fluid agent design intent (Issue #63) |
+| [GATE_N0_THREAT_MODEL.md](./GATE_N0_THREAT_MODEL.md) | Gate N.0 — secure organism continuity: threat model, 4-pillar security design, invariants, Gate N.1–N.7 sequence |
+| [ROLE_FLUID_AGENT_ARCHITECTURE.md](./ROLE_FLUID_AGENT_ARCHITECTURE.md) | Role-fluid agent design — eBPF direction and organism architecture intent |
 | [EBPF_FLOW_OBSERVATION_DESIGN.md](./EBPF_FLOW_OBSERVATION_DESIGN.md) | eBPF Stage 0 design — Aya stack, TCP state tracepoint, sidecar model |
-| [INSIGHTS_AND_BRAINSTORM.md](./INSIGHTS_AND_BRAINSTORM.md) | Exploratory ideas, MCPM, MCTS, Micromouse framing — not authoritative |
-| [DOCUMENTATION_GUIDELINES.md](./DOCUMENTATION_GUIDELINES.md) | Documentation ownership model and contribution rules |
-
-## Purpose
-
-The main `README.md` keeps the high-level project vision, architecture summary, and quick-start instructions.
-
-This `General-Docs/` directory holds practical planning documents, design intent, implementation roadmaps, and lab operational notes that should not make the main README too long.
+| [NUCLEI_REEVALUATION_FOR_PHYSARUM_SPORE.md](./NUCLEI_REEVALUATION_FOR_PHYSARUM_SPORE.md) | How and why Nuclei templates were adapted into physarum-sporangium |
+| [SPORANGIUM_TEMPLATE_CATALOG_AND_LLM_INTEGRATION.md](./SPORANGIUM_TEMPLATE_CATALOG_AND_LLM_INTEGRATION.md) | Sporangium template catalog structure and LLM integration design |
