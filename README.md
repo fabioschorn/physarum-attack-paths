@@ -6,7 +6,7 @@
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](https://github.com/fabioschorn/physarum-attack-paths/releases)
 [![CI](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml/badge.svg)](https://github.com/fabioschorn/physarum-attack-paths/actions/workflows/ci.yml)
 
-> **Bio-inspired attack-path organism for controlled security research.** `physarum-attack-paths` is a Rust research prototype that turns local network observations, adaptive sensing, pattern evidence, LLM reasoning, policy decisions, and lineage memory into a living attack-path discovery organism.
+> **Self-propagating bio-inspired attack-path organism for controlled security research.** `physarum-attack-paths` is a Rust research prototype that turns local network observations, adaptive sensing, pattern evidence, LLM-driven exploit selection, policy decisions, and cryptographic lineage memory into a living, chain-propagating organism.
 
 <p align="center">
   <img src="assets/branding/physarum-attack-paths-logo-tech-dark.png" alt="Physarum Attack Paths logo" width="600">
@@ -63,18 +63,24 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Adaptive startup/runtime sensing profiles | ✔ PF-5 / Issue #126 validated (PR #127) |
 | Dynamic vulnerability intelligence pipeline (`VulnerabilityIntelService`: LocalAdvisoryCache + OsvFeed) | ✔ PF-5.2 / Issue #131 — real LLM Docker Lab evidence committed (PR #132, #133) |
 | PF-6 Phase 1 — LLM two-turn selection, multi-target Docker Lab evidence | ✔ complete via PR #140 (host-a/host-b/host-c) |
-| PF-6 Phase 2 — ephemeral-key SCP propagation and lineage continuation | active — Issue #141 |
-| AWS Lab with real LLM | planned after Issue #141 |
-| Gate N secure identity / mTLS / signed lineage | planned after Docker/AWS validation |
+| PF-6 Phase 2 — ephemeral-key SCP propagation and lineage continuation | ✔ complete — PR #159 (chain: host-a → host-b → host-c → host-d) |
+| Issue #144 — Exploit-DB enrichment + `OgnlExec` BootstrapAction, host-d validation | ✔ complete — PR #157 |
+| Issue #158 — Propagation bug fixes: lineage-b64 injection, musl static binary, SSH-hang | ✔ complete — PR #159 |
+| `physarum-maze` musl static binary (zero glibc dependency — propagation target binary) | ✔ v0.4.0 — `x86_64-unknown-linux-musl` |
+| AWS Lab with real LLM | planned — after Gate N |
+| Gate N secure identity / mTLS / signed lineage | next milestone |
 
 The current release line uses these primary binaries:
 
 ```text
-physarum-maze       # organism runtime / evidence loop / lineage
-physarum-scan       # native scanner binary
-physarum-spore      # native Nuclei-inspired evidence-pattern binary
-physarum-sporangium # pattern runner / evidence engine crate
+physarum-maze (x86_64-unknown-linux-gnu)   # organism runtime / evidence loop / lineage — local and CI use
+physarum-maze (x86_64-unknown-linux-musl)  # static propagation binary — zero glibc dependency, runs on any Linux target
+physarum-scan                              # native scanner binary
+physarum-spore                             # native Nuclei-inspired evidence-pattern binary
+physarum-sporangium                        # pattern runner / evidence engine crate
 ```
+
+The musl variant is the binary SCP'd to remote hosts during propagation. It carries no glibc dependency and is self-contained, which is required when the organism hops into heterogeneous targets (e.g. older vulhub images with glibc 2.17–2.28).
 
 Older coordinator-oriented crates still exist for graph research and historical gates, but the active organism work now centers on `physarum-maze` and its embedded sensing/evidence/LLM loop.
 
@@ -156,16 +162,22 @@ This keeps the LLM useful for reasoning without making it the authority. The LLM
 │  DiscoveryQuery                                              │
 │        │                                                     │
 │        ▼                                                     │
-│  LLM Turn 2 — ordered propagation strategy                   │
+│  LLM Turn 2a — ordered propagation strategy                  │
+│        │                                                     │
+│        ▼ (optional enrichment round-trip)                    │
+│  LLM Turn 2b — Exploit-DB lookup + OgnlExec delivery        │
 │        │                                                     │
 │        ▼                                                     │
 │  PolicyGate                                                  │
 │        │                                                     │
 │        ▼                                                     │
-│  controlled bootstrap execution                              │
+│  bootstrap execution (SshCommand / SCP / OgnlExec)          │
 │        │                                                     │
 │        ▼                                                     │
-│  LlmAttemptEvidence / lineage                                │
+│  SCP __self__ (musl) → propagated agent (next hop)          │
+│        │                                                     │
+│        ▼                                                     │
+│  LlmAttemptEvidence / lineage (hop recorded)                │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -173,7 +185,7 @@ This keeps the LLM useful for reasoning without making it the authority. The LLM
 
 | Component | Role |
 |---|---|
-| `physarum-maze` | Organism controller/runtime: seed/propagated behavior, two-turn LLM evidence loop, policy-gated propagation, lineage |
+| `physarum-maze` | Organism controller/runtime: seed/propagated behavior, two-turn LLM evidence loop (Turn 2a + optional Turn 2b enrichment), policy-gated propagation, SCP self-replication, chain lineage |
 | `physarum-scan` / `physarum-scanner` | Native scanner binary / scanner library — structured sensing profiles |
 | `physarum-spore` / `physarum-sporangium` | Evidence-pattern binary / Nuclei-compatible evidence engine used by `physarum-maze` for HTTP and TCP template execution |
 | `physarum-llm` | Provider-neutral LLM contracts and clients — `TemplateSelectionQuery`/`Response`, `DiscoveryQuery`, two-turn `PropagationStrategy`, evidence records |
@@ -204,17 +216,20 @@ The startup path is important: the Docker lab should not require an external pin
 The evidence pipeline is intentionally layered.
 
 ```text
-1. Startup or runtime stimulus
-2. Adaptive scanner profile
-3. Open ports, banners, service guesses, version hints
-4. LLM Turn 1 — dynamic template selection
-5. physarum-sporangium HTTP/TCP template execution
-6. PatternFindingSummary
-7. VulnerabilityIntelService → vulnerability_candidates (first-class stage, not optional)
-8. DiscoveryQuery to LLM
-9. LLM Turn 2 — ordered propagation strategy proposal
-10. PolicyGate decision
-11. Lineage record
+ 1. Startup or runtime stimulus
+ 2. Adaptive scanner profile
+ 3. Open ports, banners, service guesses, version hints
+ 4. LLM Turn 1 — dynamic template selection
+ 5. physarum-sporangium HTTP/TCP template execution
+ 6. PatternFindingSummary
+ 7. VulnerabilityIntelService → vulnerability_candidates (first-class stage, not optional)
+ 8. DiscoveryQuery to LLM
+ 9. LLM Turn 2a — ordered propagation strategy proposal
+10. [optional] LLM Turn 2b — enrichment round-trip: Exploit-DB lookup, OgnlExec delivery generation
+11. PolicyGate decision
+12. Controlled bootstrap execution (SshCommand, SCP __self__, OgnlExec, FtpModCopy …)
+13. SCP musl binary → propagated agent starts on next hop
+14. Lineage record (hop recorded, colonized flag, rejected_strategies carried forward)
 ```
 
 ### PF-5.2 — Dynamic vulnerability intelligence pipeline (completed)
@@ -246,7 +261,29 @@ host-c — ProFTPD / Wing FTP target (distinct CVE paths)
 
 **PF-6 Phase 1 (complete via PR #140):** the dynamic pipeline runs end to end with no hardcoded paths — startup sensing discovers host-b/host-c, LLM Turn 1 selects applicable templates, `physarum-sporangium` executes them, `VulnerabilityIntelService` enriches the findings, and LLM Turn 2 proposes an ordered strategy that `PolicyGate` evaluates and lineage records. Evidence: `examples/evidence/pf6-tcp-probing-dualcve-phase1.json` and `examples/lab-evidence/physarum-lineage-pf6-phase1-dryrun-docker-lab.json`.
 
-**PF-6 Phase 2 (active — Issue #141):** validates propagation through the unchanged Phase 1 pipeline using a temporary SSH keypair generated by `host-a`. Only the temporary public key is introduced on the selected target through the approved lab path; the private key never leaves `host-a` (and is never sent to the LLM or written to lineage). `host-a` then uses SCP with that key to transfer the `__self__` binary and start the propagated-mode organism. `colonized` is recorded only after real, evidenced success — Phase 2 is not a scripted demonstration or a marker-file proof.
+**PF-6 Phase 2 (complete — PR #159):** validates end-to-end chain propagation through the Phase 1 pipeline with a temporary SSH keypair generated by `host-a`. Only the temporary public key is introduced on the selected target through the approved lab path; the private key never leaves `host-a` and is never sent to the LLM or written to lineage. `host-a` uses SCP with that key to transfer the musl static `__self__` binary and starts the propagated-mode organism. `colonized` is recorded only after real, evidenced success — not a scripted demonstration or marker-file proof.
+
+Chain propagation validated in the four-container lab: `host-a (172.21.0.2) → host-b (.4, hops=0) → host-c (.3, hops=1) → host-d (.5, hops=2)`. The musl static binary is required at each hop because target glibc versions are heterogeneous and unknown in advance. SSH sessions return in under 600 ms via the subshell nohup pattern (`(nohup ... </dev/null >log 2>&1 &)`), which ensures `physarum-maze` is immediately reparented to PID 1 rather than keeping SSH pipe file descriptors open. Evidence: `examples/evidence/pf6-phase2-ephemeral-key-scp-lineage.json`.
+
+### Issue #144 — Exploit-DB enrichment and OgnlExec BootstrapAction (completed)
+
+Issue #144 (PR #157) validated the LLM's ability to autonomously discover exploit techniques via Exploit-DB enrichment and generate an `OgnlExec.commands` array without any hardcoded template or sentinel.
+
+The Exploit-DB CSV (~2 MB compressed) is embedded in the `physarum-maze` binary via `include_bytes!` + zstd decompression, parsed in memory at startup, and made available to the LLM enrichment path. No volumes or external config are required in Docker or AWS deployments.
+
+The four-container lab topology for this validation:
+
+```text
+host-a (physarum-maze:lab)             — seed agent, subnet /24 sensing
+host-b (physarum-target-pf6:lab)       — Struts 2.5.25  (CVE-2020-17530, HTTP :8080) + sshd
+host-c (physarum-target-dualcve:lab)   — ProFTPD 1.3.5 mock (CVE-2015-3306, FTP :21)
+                                         Wing FTP 7.4.3 mock (CVE-2025-47812, HTTP :80) + sshd
+host-d (physarum-target-ognlexec:lab)  — Struts 2.5.29  (CVE-2021-31805, HTTP :8090) + sshd
+                                         OgnlExec target: LLM must query Exploit-DB and generate
+                                         commands array autonomously — no hardcoded payloads
+```
+
+`PolicyGate` validates the `OgnlExec` action before execution: shell metacharacter injection (`|`, `;`, `&`, backtick) is blocked in every element of `commands`, and the `exploit_enabled` flag must be set in the policy configuration. The Nuclei template library (~300–700 KB compressed) is similarly embedded in the binary and extracted to `/tmp/physarum/templates/` on startup.
 
 ---
 
@@ -365,8 +402,10 @@ Local upstream source clones used for analysis (e.g. `nuclei/`) are ignored by `
 | `examples/aws-lab/terraform-pf1` | 7-node autonomous expansion maze | ✔ validated |
 | `examples/aws-lab/terraform-pf2` | 9-node adaptive re-routing with TCP stimulus and secondary conduits | ✔ validated |
 | `examples/lab-evidence/physarum-lineage-pf52-docker-lab.json` | PF-5.2 real LLM — CVE-2021-23017 enrichment, full pipeline evidence | ✔ Issue #131 (PR #132, #133) |
-| `docker/docker-compose-pf6.yml` + `docker/pf6-lab.sh` | PF-6 multi-target lab (host-a/host-b/host-c) — LLM two-turn selection, dual-CVE evidence | ✔ Phase 1 complete (PR #140); Phase 2 active — Issue #141 |
-| Future AWS LLM Lab | Real LLM reasoning in owned AWS lab | planned after Issue #141 |
+| `docker/docker-compose-pf6.yml` + `docker/pf6-lab.sh` | PF-6 Phase 1 — four-container lab, LLM two-turn selection, dual-CVE evidence (host-a/b/c/d) | ✔ complete — PR #140 |
+| `docker/pf6-lab.sh --phase2` | PF-6 Phase 2 — chain propagation via ephemeral-key SCP, musl binary, lineage continuation | ✔ complete — PR #159; evidence: `examples/evidence/pf6-phase2-ephemeral-key-scp-lineage.json` |
+| `docker/physarum-target-ognlexec.Dockerfile` (host-d) | Issue #144 — LLM Exploit-DB lookup + autonomous OgnlExec delivery against Struts 2.5.29 | ✔ complete — PR #157 |
+| Future AWS LLM Lab | Real LLM reasoning in owned AWS lab | planned — after Gate N |
 | `formal/tla` | Formal models checked with TLC | ✔ implemented |
 
 ---
@@ -437,6 +476,20 @@ PHYSARUM_LLM_LOG_PROMPTS=false
 ```
 
 Never commit `.env.local` or any real API key.
+
+### PF-6 Docker Lab: Phase 2 — chain propagation
+
+Phase 2 extends Phase 1 with ephemeral-key SCP propagation. The musl binary is SCP'd to each target and a propagated-mode agent starts on the next hop.
+
+```bash
+# Phase 1 only (LLM sensing + exploit selection, no actual propagation)
+./docker/pf6-lab.sh
+
+# Phase 2 (requires Manager / policy approval — exploit_enabled=true)
+./docker/pf6-lab.sh --phase2
+```
+
+Phase 2 produces chain lineage evidence. Validated propagation path: `172.21.0.2 → .4 (hops=0) → .3 (hops=1) → .5 (hops=2)`.
 
 ### Classic graph Docker lab
 
@@ -531,45 +584,30 @@ Git helper scripts live under `git-scripts/`:
 | Issue #135 | PF-6 end-to-end Docker Lab design | ✔ done — design complete via #138 |
 | Issue #138 | PF-6 design, template catalog, README update | ✔ done |
 | Issue #139 | PF-6 YAML templates wired into maze runner + compose/advisory | ✔ done |
-| PF-6 Phase 1 | LLM two-turn selection, multi-target dynamic pipeline evidence | ✔ done — Issue #140 |
-| PF-6 Phase 2 | Ephemeral-key SCP propagation and lineage continuation | active — Issue #141 |
-| AWS LLM Lab | Real LLM in owned AWS lab | planned after Issue #141 |
-| Gate N | Secure organism identity, mTLS, signed lineage | planned after Docker/AWS validation |
+| PF-6 Phase 1 | LLM two-turn selection, multi-target dynamic pipeline evidence | ✔ done — PR #140 |
+| PF-6 Phase 2 | Ephemeral-key SCP propagation, chain lineage, musl static binary | ✔ done — PR #159 |
+| Issue #144 | Exploit-DB enrichment embedded in binary + autonomous `OgnlExec` delivery (host-d) | ✔ done — PR #157 |
+| Issue #158 | Propagation bug fixes: lineage-b64 injection, musl binary, SSH-hang root cause | ✔ done — PR #159 |
+| AWS LLM Lab | Real LLM in owned AWS lab | planned — after Gate N |
+| Gate N | Secure organism identity, mTLS, signed lineage, anti-replay | next milestone |
 
 ---
 
 ## Planned evolution
 
-### PF-6 Phase 2 — ephemeral-key SCP propagation (active, Issue #141)
+### v0.4.0 — what is complete
 
-PF-6 Phase 1 already proved the complete dynamic pipeline against the multi-target lab with no hardcoded paths (see `General-Docs/PF6_TWO_CONTAINER_END_TO_END_DOCKER_LAB.md`). Phase 2 reuses that unchanged pipeline and adds the controlled propagation step:
+The following milestones were closed in v0.4.0 (current release):
 
-```text
-Phase 1 (unchanged baseline)
-  startup-sensing
-    → physarum-scan discovers host-b/host-c dynamically
-    → LLM Turn 1 selects applicable templates
-    → physarum-sporangium executes HTTP/TCP templates
-    → VulnerabilityIntelService enriches findings into vulnerability_candidates
-    → LLM Turn 2 proposes an ordered propagation strategy
-    → PolicyGate evaluates with Phase 2 explicitly enabled
+**PF-6 Phase 2 (PR #159)** — chain propagation through the four-container lab with ephemeral-key SCP, musl static binary, and subshell-nohup SSH fix. Validated chain: `172.21.0.2 → .4 → .3 → .5`. `colonized` recorded only after real, evidenced success — not a scripted demonstration.
 
-Phase 2 (new step, Issue #141)
-  → physarum-maze generates a temporary SSH keypair
-  → only the temporary public key is introduced on the selected target
-    through the approved lab path
-  → the private key remains only on host-a (never sent to the LLM or lineage)
-  → host-a uses SCP with the temporary key to transfer the __self__ binary
-  → the propagated node starts in SSH-propagated mode
-  → lineage continues, and `colonized` is recorded only after real,
-    evidenced success — no hardcoded targets, CVEs, or results
-```
+**Issue #144 (PR #157)** — Exploit-DB CSV (zstd-compressed, embedded via `include_bytes!`) and Nuclei template library (tar.zst, embedded) are both self-contained in the binary. The LLM autonomously queries Exploit-DB at enrichment time and generates an `OgnlExec.commands` array targeting host-d (CVE-2021-31805 / Struts 2.5.29). `PolicyGate` validates each element for shell metacharacter injection before execution.
 
-The AWS controlled LLM Lab is planned to begin only after Issue #141 proves this propagation path end to end.
+**Issue #158 (PR #159)** — three propagation bugs fixed: `--lineage-b64` injection into `SshCommand`, musl static binary in Docker builder stage, and the SSH-hang root cause (`&&`-chain child bash entering `do_wait()` with pipe FDs open; fixed by subshell nohup `(nohup ... </dev/null >log 2>&1 &)`).
 
-### Gate N — secure organism identity
+### Gate N — next milestone — secure organism identity
 
-After the LLM/evidence loop stabilizes, Gate N will define and implement:
+Gate N will define and implement:
 
 ```text
 mTLS node identity
@@ -578,6 +616,8 @@ anti-replay controls
 capability-aware authorization
 clear lab mode vs secure mode separation
 ```
+
+The AWS controlled LLM Lab (real LLM in an owned EC2/VPC environment) is planned to follow Gate N.
 
 ---
 
