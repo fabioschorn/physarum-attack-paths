@@ -97,7 +97,7 @@ The LLM proposes. `PolicyGate` decides. Lineage remembers.
 
 | Component | Role |
 |---|---|
-| `physarum-maze` | Organism controller: seed/propagated behavior, two-turn LLM evidence loop, policy-gated propagation, SCP self-replication, chain lineage |
+| `physarum-maze` | Organism controller: seed/propagated behavior, two-turn LLM evidence loop, policy-gated propagation, SCP self-replication, chain lineage, live graph server (`--server`) |
 | `physarum-scan` / `physarum-scanner` | Native scanner — structured `SensingProfile` / `SensingResult` evidence |
 | `physarum-spore` / `physarum-sporangium` | Nuclei-compatible evidence engine — HTTP/TCP template execution |
 | `physarum-llm` | Provider-neutral LLM contracts — `TemplateSelectionQuery`, `DiscoveryQuery`, `PropagationStrategy`, `PolicyGate` |
@@ -203,17 +203,18 @@ source .env.local && cd ../../../..
 ./Utilities/docker-lab.sh
 ```
 
-### PF-6 Lab — chain propagation
+### PF-6 Lab — chain propagation + live graph
 
 ```bash
-# Phase 1: LLM sensing + exploit selection
+# Phase 1: LLM sensing + CVE identification
 ./docker/pf6-lab.sh
 
-# Phase 2: ephemeral-key SCP propagation (requires exploit_enabled=true)
+# Phase 2: ephemeral-key SCP propagation + live organism graph
 ./docker/pf6-lab.sh --phase2
+# Open http://localhost:8080/ to watch the graph grow in real time
 ```
 
-Validated chain: `172.21.0.2 → .4 (hops=0) → .3 (hops=1) → .5 (hops=2)`.
+Validated chain: `172.21.0.2 (seed) → 172.21.0.3 CVE-2020-17530 → 172.21.0.4 CVE-2015-3306 → 172.21.0.5 CVE-2021-31805`.
 
 ---
 

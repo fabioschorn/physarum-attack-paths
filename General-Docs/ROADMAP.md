@@ -54,7 +54,7 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Issue #158 — Propagation bug fixes: lineage-b64, musl binary, SSH-hang | ✔ complete — PR #159 |
 | `physarum-maze` musl static binary (`x86_64-unknown-linux-musl`) | ✔ v0.4.0 |
 | Gate N.0 — secure organism continuity threat model | ✔ design complete — PR #164 |
-| `physarum-maze --server`: live organism API + Leptos WASM real-time graph (Issue #161) | implementation pending |
+| `physarum-maze --server`: live organism graph API + Canvas HTML frontend (Issue #161) | ✔ complete — PR #170 / v0.5.0 |
 | Inter-hop evidence relay and D_ij reinforcement via SSH back-channel | planned — before Gate N.2 |
 | AWS Lab with real LLM | planned — after Gate N |
 
@@ -140,7 +140,7 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 | `docker/docker-compose-pf6.yml` + `docker/pf6-lab.sh` | PF-6 Phase 1 — four-container lab, LLM two-turn, dual-CVE | ✔ complete — PR #140 |
 | `docker/pf6-lab.sh --phase2` | PF-6 Phase 2 — chain propagation, ephemeral-key SCP, musl binary | ✔ complete — PR #159 |
 | `docker/physarum-target-ognlexec.Dockerfile` (host-d) | Issue #144 — Exploit-DB + autonomous OgnlExec against Struts 2.5.29 | ✔ complete — PR #157 |
-| `physarum-maze --server` + 3-container WASM lab (Issue #161) | Live organism graph: axum SSE + Leptos WASM, seed → 2 hops | planned — implementation pending |
+| `physarum-maze --server` + pf6-lab (Issue #161) | Live organism graph: axum SSE + Canvas HTML, depth rings, CVE badges, noise sensing nodes | ✔ complete — PR #170 / v0.5.0 |
 | AWS LLM Lab | Real LLM in owned AWS VPC | planned — after Gate N |
 | `formal/tla` | Formal models checked with TLC | ✔ implemented |
 
@@ -166,7 +166,7 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 | Issue #144 | Exploit-DB enrichment + autonomous `OgnlExec` delivery | ✔ done — PR #157 |
 | Issue #158 | Propagation bug fixes: lineage-b64, musl binary, SSH-hang | ✔ done — PR #159 |
 | Issue #89 / Gate N.0 | Secure organism continuity threat model — design only | ✔ done — PR #164 |
-| Issue #161 | `physarum-maze --server`: axum SSE API + Leptos WASM graph, embedded in binary | next — implementation |
+| Issue #161 | `physarum-maze --server`: axum SSE API + Canvas HTML graph, embedded in binary | ✔ done — PR #170 / v0.5.0 |
 | Back-channel | SSH callback: hop → seed, evidence relay, D_ij reinforcement (port 22 only) | planned — before Gate N.2 |
 | Gate N.1 | Agent DNA: identity capsule design and bootstrap | planned — after Issue #161 |
 | Gate N.2 | mTLS: node-to-node and hop-to-seed authenticated channel | planned |
@@ -189,11 +189,20 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 
 **Gate N.0 (PR #164)** — threat model document: 4-pillar security design (Identity, Communication, Lineage, Policy/Cortex), 6 security invariants, Gate N.1–N.7 sequence. Design only — no implementation code.
 
-### Next — Issue #161
+### v0.5.0 — Issue #161 (complete — PR #170)
 
-`physarum-maze --server` exposes a live organism graph API (axum + SSE) and serves a Leptos WASM frontend embedded in the binary. The browser page shows each hop colonized in real time, D_ij edge weights animating, node size reflecting LLM confidence. Validated in a 3-container Docker lab (seed → 2 hops), then AWS. Zero extra runtime files.
+`physarum-maze --server <PORT>` exposes a live organism graph API (axum + SSE) and serves a Canvas HTML frontend embedded in the binary via `include_str!`. The browser page shows each hop colonized in real time: seed node anchored at center, nodes positioned on depth rings, CVE badges on colonized hosts, noise nodes showing passive sensing activity, directed edges reflecting propagation order. Scrollable log panel with smart auto-scroll.
 
-### Pre-Gate N.2 — back-channel
+Wired into the PF-6 four-container lab (`./docker/pf6-lab.sh --phase2` → open `http://localhost:8080/`). Zero extra runtime files — same musl binary that propagates also serves the visualization.
+
+**Bug fixes in this release:**
+- Self-edge eliminated — `parent_ip` now captured before `lineage.extend()` mutates the path
+- Seed node guaranteed at center — `NodeDiscovered{depth:0}` emitted on startup
+- Exploit-DB enrichment policy updated — mandatory when `ExploitDb` capability available and CVE identified (no longer conditional on model uncertainty)
+
+### Next — back-channel
+
+### Pre-Gate N.2 — back-channel (next)
 
 Each propagated hop calls back to the seed over SSH port 22 using an ephemeral callback keypair embedded in `lineage-b64`. The `ColonizationReport` updates D_ij on the seed and feeds the WASM live graph. No extra ports. Gate N.2 upgrades the transport to mTLS.
 
