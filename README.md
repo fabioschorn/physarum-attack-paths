@@ -260,7 +260,7 @@ Patent applications covering methods and systems embodied in this software have 
 
 ## Contributing
 
-Contributions require signing the Contributor License Agreement (CLA). See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow and [SECURITY.md](./SECURITY.md) for responsible disclosure.
+Security issues should be reported according to [SECURITY.md](./SECURITY.md).
 
 ---
 
