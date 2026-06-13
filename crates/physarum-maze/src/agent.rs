@@ -25,9 +25,9 @@ use crate::{
     vuln_intel::VulnerabilityIntelService,
     Cli, Mode,
 };
-use physarum_protocol::EventKind;
 use anyhow::Result;
 use physarum_llm::{MockLlmClient, OpenAiCompatibleClient, PolicyGate, PropagationMethodClass};
+use physarum_protocol::EventKind;
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::path::Path;
@@ -350,7 +350,11 @@ async fn handle_candidate(
     tracing::info!(%src_ip, stimulus, "candidate accepted — starting evidence pipeline");
 
     // Capture parent before llm_loop::run() mutates lineage via extend()
-    let parent_ip = lineage.path.last().cloned().unwrap_or_else(|| lineage.origin.clone());
+    let parent_ip = lineage
+        .path
+        .last()
+        .cloned()
+        .unwrap_or_else(|| lineage.origin.clone());
 
     if let Some(s) = sink {
         s.emit(EventKind::NodeDiscovered {
@@ -376,7 +380,11 @@ async fn handle_candidate(
             LlmOutcome::Propagated { confidence, cve } => {
                 tracing::info!(%src_ip, "LLM propagation succeeded");
                 if let Some(s) = sink {
-                    s.emit(EventKind::EdgeAdded { from: parent_ip.clone(), to: ip_str.clone() }).await;
+                    s.emit(EventKind::EdgeAdded {
+                        from: parent_ip.clone(),
+                        to: ip_str.clone(),
+                    })
+                    .await;
                     s.emit(EventKind::NodeColonized {
                         ip: ip_str.clone(),
                         depth: lineage.hops as u32 + 1,
@@ -418,8 +426,16 @@ async fn handle_candidate(
         Outcome::Success => {
             tracing::info!(%src_ip, hops = next_lineage.hops, "propagation success");
             if let Some(s) = sink {
-                let from = lineage.path.last().cloned().unwrap_or_else(|| lineage.origin.clone());
-                s.emit(EventKind::EdgeAdded { from: from.clone(), to: ip_str.clone() }).await;
+                let from = lineage
+                    .path
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| lineage.origin.clone());
+                s.emit(EventKind::EdgeAdded {
+                    from: from.clone(),
+                    to: ip_str.clone(),
+                })
+                .await;
                 s.emit(EventKind::NodeColonized {
                     ip: ip_str.clone(),
                     depth: next_lineage.hops as u32,
@@ -439,7 +455,11 @@ async fn handle_candidate(
                 .cloned()
                 .unwrap_or_else(|| lineage.origin.clone());
             if let Some(s) = sink {
-                s.emit(EventKind::EdgeAdded { from: from.clone(), to: ip_str.clone() }).await;
+                s.emit(EventKind::EdgeAdded {
+                    from: from.clone(),
+                    to: ip_str.clone(),
+                })
+                .await;
             }
             lineage.mark_colonized(&ip_str);
             lineage.add_secondary_conduit(&from, &ip_str);
