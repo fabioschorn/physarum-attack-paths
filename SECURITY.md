@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-The Physarum team takes security issues seriously. We appreciate your
+The maintainer takes security issues seriously. We appreciate your
 efforts to responsibly disclose your findings, and will make every
 effort to acknowledge your contributions.
 
@@ -61,13 +61,19 @@ only. Production deployments before 1.0 are not recommended.
 
 ## Threat Model Scope
 
-The threats actively addressed by Physarum's design are documented in
-[`docs/threat-model.md`](./docs/threat-model.md). Out-of-scope threats
-include:
+The security design for the organism is documented in
+[`General-Docs/GATE_N0_THREAT_MODEL.md`](./General-Docs/GATE_N0_THREAT_MODEL.md).
+
+Gate N.0 is a design document — it defines principles, invariants, and the
+Gate N.1–N.7 implementation sequence. Security controls (mTLS, signed lineage,
+Agent DNA) are planned, not yet implemented. The current organism is a
+**lab-only research prototype** with no production security guarantees.
+
+Out-of-scope threats:
 
 - Compromise of the agent host kernel (eBPF observations cannot be
   trusted on a rooted host)
-- Denial-of-service of the coordinator (handled at deployment layer)
+- Denial-of-service of the `--server` API (lab-only surface, no auth by design)
 - Side-channel inference of network topology by passive observers
 
 Reports falling outside these boundaries are still welcome but may

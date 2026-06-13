@@ -64,7 +64,7 @@ The LLM proposes. `PolicyGate` decides. Lineage remembers.
 │                                                              │
 │  startup_sensing / ICMP / TCP-eBPF stimulus                  │
 │        │                                                     │
-│        ▼                                                     ��
+│        ▼                                                     │
 │  physarum-scanner  →  SensingResult / PortScan               │
 │        │                                                     │
 │        ▼                                                     │
@@ -189,7 +189,7 @@ Utilities/        Build, validation, Docker Lab, release, and helper scripts
 cargo test --workspace
 ```
 
-### Docker Maze Lab
+### Docker Maze Labs — [`examples/`](./examples/)
 
 ```bash
 # Default — organic startup sensing, mock LLM
@@ -260,7 +260,7 @@ Patent applications covering methods and systems embodied in this software have 
 
 ## Contributing
 
-Contributions require signing the Contributor License Agreement (CLA). See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow and [SECURITY.md](./SECURITY.md) for responsible disclosure.
+Security issues should be reported according to [SECURITY.md](./SECURITY.md).
 
 ---
 
