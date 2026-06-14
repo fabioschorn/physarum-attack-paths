@@ -27,7 +27,7 @@ Those belong in Gate N.1 through N.7, written when code exists and tests can val
 
 ## Organism state at this design point
 
-The organism as of v0.4.0 is a self-propagating binary that:
+The organism as of v0.5.0 is a self-propagating binary that:
 
 - Scans, discovers, and colonizes lab hosts via SCP + SSH
 - Reasons via LLM (policy-gated, lab-only)
