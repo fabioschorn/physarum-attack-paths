@@ -43,3 +43,36 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  # ── Docker smoke test ────────────────────────────────────────────────────────
+  # Builds the image from scratch on every PR to catch Dockerfile regressions:
+  # missing ENTRYPOINT, missing runtime deps (openssh-client, sshpass), etc.
+  # These bugs are invisible to cargo build/test but break the live lab.
+  docker-smoke:
+    name: Docker smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: physarum-maze:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify runtime binaries
+        run: |
+          docker run --rm --entrypoint sh physarum-maze:ci -c \
+            "which physarum-maze ssh scp ssh-keygen sshpass"
+
+      - name: Verify ENTRYPOINT + agent starts
+        run: |
+          docker run --rm physarum-maze:ci --help 2>&1 | grep -qi "physarum"
