@@ -174,6 +174,7 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 | Gate N.4–N.5 | Policy roots, Online/Offline Cortex secure mode | planned |
 | Gate N.6–N.7 | Secure-mode Docker + AWS validation labs | planned |
 | AWS LLM Lab | Real LLM in owned AWS VPC after Gate N | planned |
+| LLM template generation + RAG corpus | LLM auto-generates Nuclei templates for CVEs with no existing template; colonization outcome as ground truth; validated templates seed a RAG corpus for few-shot generation | future — after Gate N |
 
 ---
 
@@ -207,3 +208,30 @@ Each propagated hop calls back to the seed over SSH port 22 using an ephemeral c
 ### Gate N.1–N.7
 
 Full implementation sequence for secure organism continuity. Design captured in `General-Docs/GATE_N0_THREAT_MODEL.md`. Implementation starts after Issue #161 is complete.
+
+### Future — LLM template generation + RAG corpus (post-Gate N)
+
+When Exploit-DB identifies a CVE with no matching Nuclei template, the agent is blind — sporangium has nothing to run. The long-term direction is to close this gap generically, without manually curating templates for every future lab.
+
+**Proposed loop:**
+
+```text
+Exploit-DB entry found → no template in catalog for this CVE
+  → LLM receives: Nuclei YAML schema + Exploit-DB entry + N similar validated templates (RAG)
+  → LLM generates a candidate Nuclei YAML template
+  → physarum-sporangium executes the generated template against the target
+  → If Phase 2 colonization succeeds (ground truth = real access):
+      → Template persisted in catalog with confidence score
+      → Triplet (Exploit-DB entry, generated template, outcome) appended to RAG corpus
+  → Next host with similar CVE:
+      → RAG retrieves N most similar validated templates
+      → LLM uses them as few-shot examples → progressively more accurate generation
+```
+
+**Key design constraints:**
+- Sporangium runs existing templates first — LLM generation only triggers for confirmed CVEs with no matching template
+- Ground truth is Phase 2 success, not sporangium matcher alone (false positive in detection ≠ real access)
+- RAG corpus grows from validated triplets only — no untested templates enter the few-shot pool
+- YAML schema must be in the LLM context — Nuclei YAML structure is rigid (matchers, extractors, path templates)
+
+**Relation to existing work:** Issue #144 validated that the LLM can autonomously generate `OgnlExec.commands` from Exploit-DB metadata. This extends the same pattern from command generation to full template generation. Gate N mTLS provides the trust foundation before extending the agent's generative surface.
