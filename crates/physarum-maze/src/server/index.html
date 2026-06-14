@@ -63,7 +63,7 @@
 <script>
 // ── state ──────────────────────────────────────────────────────────────────────
 const nodes = [];   // {id,x,y,vx,vy,fx,fy,depth,colonized,confidence,cve,pulse,seed}
-const edges = [];   // {from,to,conductivity}
+const edges = [];   // {from,to,conductivity,targetConductivity}
 
 // ── canvas setup ──────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
@@ -181,6 +181,13 @@ function layoutStep(dt) {
 
   // cool down — layout converges and eventually freezes
   temperature = Math.max(1, temperature * 0.985);
+
+  // Lerp each edge conductivity toward its target for smooth visual animation
+  for (const e of edges) {
+    if (e.targetConductivity !== undefined) {
+      e.conductivity += (e.targetConductivity - e.conductivity) * 0.04;
+    }
+  }
 }
 
 // Pre-warm: run layout synchronously so nodes start in good positions
@@ -358,14 +365,18 @@ function handleEvent(ev) {
     if (!findNode(ev.from)) addNode(ev.from, 0, true, 1.0, null, true);
     if (!findNode(ev.to))   addNode(ev.to,   1, false, 0,   null, false);
     if (!edges.find(e => e.from === ev.from && e.to === ev.to)) {
-      edges.push({ from: ev.from, to: ev.to, conductivity: ev.conductivity || 0.6 });
+      const c0 = ev.conductivity || 0.6;
+      edges.push({ from: ev.from, to: ev.to, conductivity: c0, targetConductivity: c0 });
       temperature = Math.max(temperature, 20);
       addLog(`edge         ${ev.from} → ${ev.to}`, 'edge');
     }
 
   } else if (ev.type === 'dij_updated') {
     const e = edges.find(e => e.from === ev.from && e.to === ev.to);
-    if (e) e.conductivity = ev.conductivity;
+    if (e) {
+      e.targetConductivity = ev.conductivity;
+      addLog(`D_ij        ${ev.from} → ${ev.to}   c=${ev.conductivity.toFixed(3)}`, 'edge');
+    }
   }
 
   updateCounters();
@@ -399,7 +410,8 @@ function connect() {
       if (!findNode(e.from)) addNode(e.from, 0, true, 1.0, null, e.from === seedIp);
       if (!findNode(e.to))   addNode(e.to,   1, false, 0,  null, false);
       if (!edges.find(x => x.from === e.from && x.to === e.to)) {
-        edges.push({ from: e.from, to: e.to, conductivity: e.conductivity || 0.6 });
+        const c0 = e.conductivity || 0.6;
+        edges.push({ from: e.from, to: e.to, conductivity: c0, targetConductivity: c0 });
       }
     }
 
