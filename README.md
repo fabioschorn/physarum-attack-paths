@@ -255,8 +255,6 @@ Licensed under the [PolyForm Noncommercial License 1.0.0](./LICENSE).
 
 Permitted for academic research, education, and security testing in owned and authorized lab environments. Commercial use requires a separate agreement. Contact: fabio.schorn@expertsonline.com.br
 
-Patent applications covering methods and systems embodied in this software have been filed by Fábio Schorn. See [NOTICE](./NOTICE) for details.
-
 ---
 
 ## Contributing
