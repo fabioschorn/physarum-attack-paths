@@ -18,7 +18,8 @@ use std::sync::Arc;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
 
-static INDEX_HTML: &str = include_str!("server/index.html");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+static INDEX_HTML_TPL: &str = include_str!("server/index.html");
 
 const AUTH_USER: &str = "admin";
 const AUTH_PASS: &str = "Physarum-M@z&";
@@ -85,10 +86,8 @@ pub async fn start(port: u16, sink: Arc<GraphSink>) -> anyhow::Result<()> {
 }
 
 async fn index_handler() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        INDEX_HTML,
-    )
+    let html = INDEX_HTML_TPL.replace("{{PHYSARUM_VERSION}}", &format!("v{VERSION}"));
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html)
 }
 
 /// Receive a colonization report from a propagated agent and update the organism graph.
