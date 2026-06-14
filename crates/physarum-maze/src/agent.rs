@@ -422,6 +422,19 @@ async fn handle_candidate(
             }
             LlmOutcome::DeadEnd => {
                 tracing::warn!(%src_ip, "LLM exhausted — marking dead end");
+                if let Some(s) = sink {
+                    s.emit(EventKind::EdgeAdded {
+                        from: parent_ip.clone(),
+                        to: ip_str.clone(),
+                    })
+                    .await;
+                    s.emit(EventKind::DijUpdated {
+                        from: parent_ip.clone(),
+                        to: ip_str.clone(),
+                        conductivity: 0.05,
+                    })
+                    .await;
+                }
                 lineage.mark_dead_end(&ip_str);
                 lineage.save()?;
                 return Ok(());

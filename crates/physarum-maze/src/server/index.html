@@ -63,7 +63,7 @@
 <script>
 // ── state ──────────────────────────────────────────────────────────────────────
 const nodes = [];   // {id,x,y,vx,vy,fx,fy,depth,colonized,confidence,cve,pulse,seed}
-const edges = [];   // {from,to,conductivity}
+const edges = [];   // {from,to,conductivity,targetConductivity}
 
 // ── canvas setup ──────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
@@ -181,6 +181,13 @@ function layoutStep(dt) {
 
   // cool down — layout converges and eventually freezes
   temperature = Math.max(1, temperature * 0.985);
+
+  // Lerp each edge conductivity toward its target for smooth visual animation
+  for (const e of edges) {
+    if (e.targetConductivity !== undefined) {
+      e.conductivity += (e.targetConductivity - e.conductivity) * 0.04;
+    }
+  }
 }
 
 // Pre-warm: run layout synchronously so nodes start in good positions
@@ -246,7 +253,7 @@ function draw() {
     if (n.pulse > 0) {
       ctx.beginPath();
       ctx.arc(n.x, n.y, r + (1-n.pulse)*38, 0, Math.PI*2);
-      ctx.strokeStyle = '#e8724a'; ctx.lineWidth = 1.5;
+      ctx.strokeStyle = (n.colonized && !n.seed) ? '#FFD700' : '#8E8900'; ctx.lineWidth = 1.5;
       ctx.globalAlpha = n.pulse * 0.5; ctx.stroke(); ctx.globalAlpha = 1;
       n.pulse = Math.max(0, n.pulse - 0.016);
     }
@@ -254,17 +261,17 @@ function draw() {
     // seed outer glow ring
     if (n.seed) {
       ctx.beginPath(); ctx.arc(n.x, n.y, r+10, 0, Math.PI*2);
-      ctx.strokeStyle = '#e8724a'; ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.18; ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#8E8900'; ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.28; ctx.stroke(); ctx.globalAlpha = 1;
     }
 
     // node fill
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI*2);
-    ctx.fillStyle   = n.seed       ? '#7a2810'
-                    : n.colonized  ? '#5a1e0e'
+    ctx.fillStyle   = n.seed       ? '#8E8900'
+                    : n.colonized  ? '#FFD700'
                     :                '#0e2438';
-    ctx.strokeStyle = n.seed       ? '#e8724a'
-                    : n.colonized  ? '#b04828'
+    ctx.strokeStyle = n.seed       ? '#6a6600'
+                    : n.colonized  ? '#c8a800'
                     :                '#1c4870';
     ctx.lineWidth   = n.seed ? 2.5 : 1.5;
     ctx.fill(); ctx.stroke();
@@ -279,12 +286,12 @@ function draw() {
     // IP label
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = 'bold 11px monospace';
-    ctx.fillStyle = n.seed || n.colonized ? '#f0ddd5' : '#3a7aaa';
+    ctx.fillStyle = n.seed ? '#1a1800' : n.colonized ? '#1a1200' : '#3a7aaa';
     ctx.fillText(n.id, n.x, n.y - 5);
 
     // depth / role badge
     ctx.font = '9px monospace';
-    ctx.fillStyle = n.seed ? '#d86030' : n.colonized ? '#885040' : '#2a5a78';
+    ctx.fillStyle = n.seed ? '#1a1800' : n.colonized ? '#1a1400' : '#2a5a78';
     ctx.fillText(n.seed ? '[ seed ]' : `depth ${n.depth}`, n.x, n.y + 8);
 
     // CVE badge above node
@@ -358,14 +365,18 @@ function handleEvent(ev) {
     if (!findNode(ev.from)) addNode(ev.from, 0, true, 1.0, null, true);
     if (!findNode(ev.to))   addNode(ev.to,   1, false, 0,   null, false);
     if (!edges.find(e => e.from === ev.from && e.to === ev.to)) {
-      edges.push({ from: ev.from, to: ev.to, conductivity: ev.conductivity || 0.6 });
+      const c0 = ev.conductivity || 0.6;
+      edges.push({ from: ev.from, to: ev.to, conductivity: c0, targetConductivity: c0 });
       temperature = Math.max(temperature, 20);
       addLog(`edge         ${ev.from} → ${ev.to}`, 'edge');
     }
 
   } else if (ev.type === 'dij_updated') {
     const e = edges.find(e => e.from === ev.from && e.to === ev.to);
-    if (e) e.conductivity = ev.conductivity;
+    if (e) {
+      e.targetConductivity = ev.conductivity;
+      addLog(`D_ij        ${ev.from} → ${ev.to}   c=${ev.conductivity.toFixed(3)}`, 'edge');
+    }
   }
 
   updateCounters();
@@ -399,7 +410,8 @@ function connect() {
       if (!findNode(e.from)) addNode(e.from, 0, true, 1.0, null, e.from === seedIp);
       if (!findNode(e.to))   addNode(e.to,   1, false, 0,  null, false);
       if (!edges.find(x => x.from === e.from && x.to === e.to)) {
-        edges.push({ from: e.from, to: e.to, conductivity: e.conductivity || 0.6 });
+        const c0 = e.conductivity || 0.6;
+        edges.push({ from: e.from, to: e.to, conductivity: c0, targetConductivity: c0 });
       }
     }
 
