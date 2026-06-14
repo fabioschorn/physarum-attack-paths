@@ -74,10 +74,15 @@ pub async fn propagate(target: Ipv4Addr, local_bin: &Path, lineage_b64: &str) ->
     // Run as root so the binary can open a raw ICMP socket.
     // systemd-run --no-block creates a transient unit completely detached from the
     // SSH session — no parent wait, no fd inheritance, returns immediately.
+    // Inject the lineage crypto key so the propagated agent can decrypt lineage-b64.
+    let key_env = crate::lineage_crypto::hex_key()
+        .map(|k| format!("--setenv=PHYSARUM_LINEAGE_KEY={k} "))
+        .unwrap_or_default();
     let remote_cmd = format!(
-        "chmod +x {bin} && sudo systemd-run --no-block --collect --unit=physarum-maze {bin} --mode propagated --lineage-b64 {b64}",
+        "chmod +x {bin} && sudo systemd-run --no-block --collect --unit=physarum-maze {key_env}{bin} --mode propagated --lineage-b64 {b64}",
         bin = REMOTE_BIN,
         b64 = lineage_b64,
+        key_env = key_env,
     );
 
     let ssh_ok = Command::new("sshpass")

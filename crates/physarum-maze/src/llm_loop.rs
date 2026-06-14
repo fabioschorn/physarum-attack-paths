@@ -1444,11 +1444,16 @@ fn inject_lineage_b64_if_needed(action: &BootstrapAction, lineage_b64: &str) -> 
             // after forking nohup, so physarum-maze is reparented to PID 1 and SSH
             // returns within milliseconds.
             let injected = if injected.contains("nohup") && !injected.contains("(nohup") {
+                // Prepend `env PHYSARUM_LINEAGE_KEY=<hex>` before the binary when a
+                // crypto key is active, so the spawned propagated agent can decrypt lineage.
+                let nohup_prefix = match crate::lineage_crypto::hex_key() {
+                    Some(k) => {
+                        format!("(nohup env PHYSARUM_LINEAGE_KEY={k} /tmp/physarum/physarum-maze")
+                    }
+                    None => "(nohup /tmp/physarum/physarum-maze".to_string(),
+                };
                 injected
-                    .replace(
-                        "nohup /tmp/physarum/physarum-maze",
-                        "(nohup /tmp/physarum/physarum-maze",
-                    )
+                    .replace("nohup /tmp/physarum/physarum-maze", &nohup_prefix)
                     .replace(
                         ">/tmp/physarum/agent.log 2>&1 &",
                         "</dev/null >/tmp/physarum/agent.log 2>&1 &)",

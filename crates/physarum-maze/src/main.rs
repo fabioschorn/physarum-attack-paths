@@ -10,6 +10,7 @@ mod exploit_db;
 mod graph_sink;
 mod icmp;
 mod lineage;
+mod lineage_crypto;
 mod llm_loop;
 mod propagation;
 mod server;
@@ -134,6 +135,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+
+    // Initialise lineage crypto key before any lineage serialisation occurs.
+    match &cli.mode {
+        Mode::Seed => lineage_crypto::init_seed(),
+        Mode::Propagated => lineage_crypto::init_from_env(),
+        Mode::KeygenTest => {}
+    }
 
     let sink = if let Some(port) = cli.server {
         let sink = Arc::new(graph_sink::GraphSink::new());
