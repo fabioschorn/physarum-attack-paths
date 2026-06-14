@@ -28,6 +28,10 @@ libc = "0.2"
 # Base64 encoding for passing lineage JSON as CLI argument
 base64 = "0.22"
 
+# AES-256-GCM lineage payload encryption (Issue #187)
+aes-gcm = { workspace = true }
+rand    = { workspace = true }
+
 # Interface IP lookup
 if-addrs = "0.7"
 

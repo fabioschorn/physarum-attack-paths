@@ -158,11 +158,24 @@ impl Lineage {
         let bytes = STANDARD
             .decode(encoded)
             .context("base64 decode of lineage failed")?;
+        // When a key is active and payload is long enough, try AES-GCM decrypt first.
+        // Falls back to plaintext on decryption failure (e.g. legacy unencrypted lineage).
+        if crate::lineage_crypto::is_active() && bytes.len() >= 28 {
+            if let Ok(plain) = crate::lineage_crypto::decrypt(&bytes) {
+                return serde_json::from_slice(&plain)
+                    .context("lineage JSON parse after decrypt failed");
+            }
+        }
         serde_json::from_slice(&bytes).context("lineage JSON parse failed")
     }
 
     pub fn to_b64(&self) -> Result<String> {
         let json = serde_json::to_string(self).context("lineage serialise failed")?;
+        if crate::lineage_crypto::is_active() {
+            let encrypted = crate::lineage_crypto::encrypt(json.as_bytes())
+                .context("lineage encrypt failed")?;
+            return Ok(STANDARD.encode(&encrypted));
+        }
         Ok(STANDARD.encode(json.as_bytes()))
     }
 
