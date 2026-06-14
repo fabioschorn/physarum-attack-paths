@@ -112,8 +112,8 @@ pub struct Cli {
     /// Enable exploit-class propagation (CVE RCE → binary copy).
     /// Off by default. Requires --llm-endpoint. When enabled:
     ///   - PolicyGate allows PropagationMethod::Exploit
-    ///   - A mini HTTP server on port 8001 serves the physarum-maze binary
-    ///     so the OGNL payload on the target can download and execute it.
+    ///   - OGNL FileOutputStream plants the ephemeral pubkey on the target
+    ///     so the binary can be delivered exclusively via SCP.
     ///
     /// Lab-only. Do NOT enable outside an isolated test environment.
     #[arg(long, default_value_t = false, env = "PHYSARUM_EXPLOIT_ENABLED")]
