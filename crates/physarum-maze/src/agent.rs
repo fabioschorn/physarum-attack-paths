@@ -27,7 +27,7 @@ use crate::{
 };
 use anyhow::Result;
 use physarum_llm::{MockLlmClient, OpenAiCompatibleClient, PolicyGate, PropagationMethodClass};
-use physarum_protocol::EventKind;
+use physarum_protocol::{ColonizationReport, EventKind};
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::path::Path;
@@ -151,6 +151,10 @@ pub async fn run(mut cli: Cli, sink: Option<std::sync::Arc<GraphSink>>) -> Resul
     });
     let intel = std::sync::Arc::new(intel);
     let mut lineage = init_lineage(&cli)?;
+    // Embed the --server port so propagated hops can call back via HTTP.
+    if matches!(cli.mode, Mode::Seed) {
+        lineage.server_port = cli.server;
+    }
     lineage.save()?;
 
     if lineage.hops >= cli.max_hops {
@@ -379,7 +383,9 @@ async fn handle_candidate(
         {
             LlmOutcome::Propagated { confidence, cve } => {
                 tracing::info!(%src_ip, "LLM propagation succeeded");
+                let depth = lineage.hops as u32 + 1;
                 if let Some(s) = sink {
+                    // Seed path: update the organism graph immediately.
                     s.emit(EventKind::EdgeAdded {
                         from: parent_ip.clone(),
                         to: ip_str.clone(),
@@ -387,11 +393,28 @@ async fn handle_candidate(
                     .await;
                     s.emit(EventKind::NodeColonized {
                         ip: ip_str.clone(),
-                        depth: lineage.hops as u32 + 1,
+                        depth,
                         confidence,
-                        cve,
+                        cve: cve.clone(),
                     })
                     .await;
+                    // Phase 1 D_ij approximation: use LLM confidence directly.
+                    // True reinforcement (Phase 2) requires the back-channel from Issue #179.
+                    s.emit(EventKind::DijUpdated {
+                        from: parent_ip.clone(),
+                        to: ip_str.clone(),
+                        conductivity: confidence,
+                    })
+                    .await;
+                } else {
+                    // Propagated agent: report colonization to seed via HTTP back-channel.
+                    let report = ColonizationReport {
+                        hop_ip: ip_str.clone(),
+                        depth,
+                        confidence,
+                        cve_ids: cve.into_iter().collect(),
+                    };
+                    fire_back_channel(report, lineage).await;
                 }
                 lineage.mark_colonized(&ip_str);
                 lineage.save()?;
@@ -478,6 +501,58 @@ async fn handle_candidate(
     }
 
     Ok(())
+}
+
+/// Send a `ColonizationReport` to the seed's HTTP server.
+///
+/// Called by propagated agents after each successful colonization. The seed
+/// uses the report to update the organism graph with downstream hops it cannot
+/// observe directly (no `GraphSink` on propagated instances).
+///
+/// The callback URL is fully dynamic: `http://<lineage.origin>:<lineage.server_port>/report-colonization`.
+/// Failures are logged as warnings and never block the propagation chain.
+async fn fire_back_channel(report: physarum_protocol::ColonizationReport, lineage: &Lineage) {
+    let Some(port) = lineage.server_port else {
+        tracing::debug!("back-channel skipped — no server_port in lineage");
+        return;
+    };
+    let url = format!("http://{}:{}/report-colonization", lineage.origin, port);
+    tracing::info!(
+        url = %url,
+        hop = %report.hop_ip,
+        depth = report.depth,
+        confidence = report.confidence,
+        "back-channel: reporting colonization to seed"
+    );
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(err = %e, "back-channel: reqwest client build failed");
+            return;
+        }
+    };
+    match client.post(&url).json(&report).send().await {
+        Ok(r) if r.status().is_success() => {
+            tracing::info!(hop = %report.hop_ip, "back-channel: seed acknowledged");
+        }
+        Ok(r) => {
+            tracing::warn!(
+                hop = %report.hop_ip,
+                status = r.status().as_u16(),
+                "back-channel: seed returned non-2xx"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                hop = %report.hop_ip,
+                err = %e,
+                "back-channel: seed unreachable (propagation continues)"
+            );
+        }
+    }
 }
 
 fn init_lineage(cli: &Cli) -> Result<Lineage> {

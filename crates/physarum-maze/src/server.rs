@@ -1,16 +1,17 @@
 use crate::graph_sink::GraphSink;
 use axum::{
-    extract::State,
-    http::{header, HeaderMap},
+    extract::{ConnectInfo, State},
+    http::{header, HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse,
     },
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
-use physarum_protocol::OrganismGraph;
+use physarum_protocol::{ColonizationReport, EventKind, OrganismGraph};
 use std::convert::Infallible;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
@@ -28,12 +29,17 @@ pub async fn start(port: u16, sink: Arc<GraphSink>) -> anyhow::Result<()> {
         .route("/", get(index_handler))
         .route("/graph", get(graph_handler))
         .route("/events", get(events_handler))
+        .route("/report-colonization", post(report_colonization_handler))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
     tracing::info!("organism server → http://localhost:{port}/");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -42,6 +48,63 @@ async fn index_handler() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
         INDEX_HTML,
     )
+}
+
+/// Receive a colonization report from a propagated agent and update the organism graph.
+///
+/// The `from_ip` is inferred from the TCP source address — the reporting agent's
+/// real IP — so the graph edge is accurate regardless of what the agent knows
+/// about its own address. The seed emits `NodeDiscovered`, `EdgeAdded`,
+/// `NodeColonized`, and `DijUpdated` for the downstream hop.
+async fn report_colonization_handler(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    Json(report): Json<ColonizationReport>,
+) -> StatusCode {
+    let from_ip = addr.ip().to_string();
+    tracing::info!(
+        from = %from_ip,
+        hop = %report.hop_ip,
+        depth = report.depth,
+        confidence = report.confidence,
+        cve_ids = ?report.cve_ids,
+        "back-channel: colonization report received"
+    );
+
+    let sink = &state.sink;
+
+    // Ensure the colonized hop exists as a node.
+    sink.emit(EventKind::NodeDiscovered {
+        ip: report.hop_ip.clone(),
+        depth: report.depth,
+    })
+    .await;
+
+    // Edge from the reporting hop to the newly colonized host.
+    sink.emit(EventKind::EdgeAdded {
+        from: from_ip.clone(),
+        to: report.hop_ip.clone(),
+    })
+    .await;
+
+    // Mark the hop as colonized with LLM evidence.
+    sink.emit(EventKind::NodeColonized {
+        ip: report.hop_ip.clone(),
+        depth: report.depth,
+        confidence: report.confidence,
+        cve: report.cve_ids.first().cloned(),
+    })
+    .await;
+
+    // D_ij update: use LLM confidence as conductivity (Phase 1 approximation).
+    sink.emit(EventKind::DijUpdated {
+        from: from_ip,
+        to: report.hop_ip.clone(),
+        conductivity: report.confidence.clamp(0.1, 0.95),
+    })
+    .await;
+
+    StatusCode::OK
 }
 
 async fn graph_handler(State(state): State<AppState>) -> Json<OrganismGraph> {

@@ -34,6 +34,12 @@ pub struct Lineage {
     pub hops: usize,
     pub started_at: String,
     pub updated_at: String,
+    /// HTTP port of the seed's organism graph server (`--server <PORT>`).
+    /// Carried through the lineage chain so propagated agents can POST
+    /// `ColonizationReport` to `http://<origin>:<server_port>/report-colonization`.
+    /// `None` when the seed was started without `--server`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_port: Option<u16>,
     /// Structured evidence from every LLM reasoning attempt.
     /// Each entry records the query, policy decision, execution result, and next action.
     /// Secret material (PEM, API keys) never appears here — only SecretRef.key_id.
@@ -59,6 +65,7 @@ impl Lineage {
             hops: 0,
             started_at: now.clone(),
             updated_at: now,
+            server_port: None,
             llm_attempts: Vec::new(),
         }
     }

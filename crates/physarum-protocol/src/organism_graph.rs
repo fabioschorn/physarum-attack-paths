@@ -133,6 +133,24 @@ pub enum EventKind {
     },
 }
 
+/// Colonization evidence sent by a propagated agent back to the seed via
+/// `POST /report-colonization`. The seed uses this to update the organism
+/// graph with downstream hops it cannot observe directly.
+///
+/// `from_ip` is intentionally omitted — the server infers it from the
+/// HTTP connection's source address so the report cannot be spoofed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColonizationReport {
+    /// IP address that was colonized by the reporting hop.
+    pub hop_ip: String,
+    /// Depth of the colonized hop in the propagation chain.
+    pub depth: u32,
+    /// LLM strategy confidence at the successful attempt (0.0–1.0).
+    pub confidence: f64,
+    /// CVE identifiers referenced in the successful strategy.
+    pub cve_ids: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
