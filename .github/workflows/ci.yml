@@ -45,9 +45,10 @@ jobs:
         run: cargo test --workspace
 
   # ── Docker smoke test ────────────────────────────────────────────────────────
-  # Builds the image from scratch on every PR to catch Dockerfile regressions:
-  # missing ENTRYPOINT, missing runtime deps (openssh-client, sshpass), etc.
-  # These bugs are invisible to cargo build/test but break the live lab.
+  # Uses physarum-maze-lab.Dockerfile (builds only physarum-maze, musl static)
+  # instead of the root Dockerfile (builds all 7 workspace binaries).
+  # This catches Dockerfile regressions — missing ENTRYPOINT, missing runtime
+  # deps — that are invisible to cargo build/test but break the live PF6 lab.
   docker-smoke:
     name: Docker smoke test
     runs-on: ubuntu-latest
@@ -59,10 +60,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image
+      - name: Build image (physarum-maze-lab.Dockerfile)
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/physarum-maze-lab.Dockerfile
           load: true
           tags: physarum-maze:ci
           cache-from: type=gha
