@@ -253,7 +253,7 @@ function draw() {
     if (n.pulse > 0) {
       ctx.beginPath();
       ctx.arc(n.x, n.y, r + (1-n.pulse)*38, 0, Math.PI*2);
-      ctx.strokeStyle = '#e8724a'; ctx.lineWidth = 1.5;
+      ctx.strokeStyle = (n.colonized && !n.seed) ? '#FFD700' : '#e8724a'; ctx.lineWidth = 1.5;
       ctx.globalAlpha = n.pulse * 0.5; ctx.stroke(); ctx.globalAlpha = 1;
       n.pulse = Math.max(0, n.pulse - 0.016);
     }
@@ -268,10 +268,10 @@ function draw() {
     // node fill
     ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI*2);
     ctx.fillStyle   = n.seed       ? '#7a2810'
-                    : n.colonized  ? '#5a1e0e'
+                    : n.colonized  ? '#FFD700'
                     :                '#0e2438';
     ctx.strokeStyle = n.seed       ? '#e8724a'
-                    : n.colonized  ? '#b04828'
+                    : n.colonized  ? '#c8a800'
                     :                '#1c4870';
     ctx.lineWidth   = n.seed ? 2.5 : 1.5;
     ctx.fill(); ctx.stroke();
@@ -286,12 +286,12 @@ function draw() {
     // IP label
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = 'bold 11px monospace';
-    ctx.fillStyle = n.seed || n.colonized ? '#f0ddd5' : '#3a7aaa';
+    ctx.fillStyle = n.seed ? '#f0ddd5' : n.colonized ? '#1a1200' : '#3a7aaa';
     ctx.fillText(n.id, n.x, n.y - 5);
 
     // depth / role badge
     ctx.font = '9px monospace';
-    ctx.fillStyle = n.seed ? '#d86030' : n.colonized ? '#885040' : '#2a5a78';
+    ctx.fillStyle = n.seed ? '#d86030' : n.colonized ? '#1a1400' : '#2a5a78';
     ctx.fillText(n.seed ? '[ seed ]' : `depth ${n.depth}`, n.x, n.y + 8);
 
     // CVE badge above node
