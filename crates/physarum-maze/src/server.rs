@@ -1,14 +1,16 @@
 use crate::graph_sink::GraphSink;
 use axum::{
-    extract::{ConnectInfo, State},
+    extract::{ConnectInfo, Request, State},
     http::{header, HeaderMap, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse,
+        IntoResponse, Response,
     },
     routing::{get, post},
     Json, Router,
 };
+use base64::{engine::general_purpose::STANDARD, Engine};
 use physarum_protocol::{ColonizationReport, EventKind, OrganismGraph};
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -18,18 +20,57 @@ use tokio_stream::StreamExt as _;
 
 static INDEX_HTML: &str = include_str!("server/index.html");
 
+const AUTH_USER: &str = "admin";
+const AUTH_PASS: &str = "Physarum-M@z&";
+
 #[derive(Clone)]
 struct AppState {
     sink: Arc<GraphSink>,
 }
 
+/// HTTP Basic Auth middleware — protects browser-facing routes only.
+/// /report-colonization is excluded so propagated agents can call back freely.
+async fn require_basic_auth(req: Request, next: Next) -> Response {
+    let authorized = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Basic "))
+        .and_then(|b64| STANDARD.decode(b64).ok())
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .is_some_and(|creds| creds == format!("{}:{}", AUTH_USER, AUTH_PASS));
+
+    if authorized {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            [(
+                "WWW-Authenticate",
+                "Basic realm=\"physarum-maze\", charset=\"UTF-8\"",
+            )],
+            "Unauthorized",
+        )
+            .into_response()
+    }
+}
+
 pub async fn start(port: u16, sink: Arc<GraphSink>) -> anyhow::Result<()> {
     let state = AppState { sink };
-    let app = Router::new()
+
+    // Browser-facing routes — protected by Basic Auth.
+    let protected = Router::new()
         .route("/", get(index_handler))
         .route("/graph", get(graph_handler))
         .route("/events", get(events_handler))
-        .route("/report-colonization", post(report_colonization_handler))
+        .layer(middleware::from_fn(require_basic_auth));
+
+    // Agent back-channel — no auth, internal Docker network only.
+    let internal = Router::new().route("/report-colonization", post(report_colonization_handler));
+
+    let app = Router::new()
+        .merge(protected)
+        .merge(internal)
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
