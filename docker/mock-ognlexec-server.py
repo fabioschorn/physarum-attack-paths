@@ -107,6 +107,72 @@ def extract_command_from_ognl(ognl: str) -> tuple[str | None, bool]:
     return None, False
 
 
+def handle_file_write_ognl(ognl: str) -> bool:
+    """
+    Handle physarum WRITE_PUBKEY OGNL patterns.
+
+    Matches the current python-hex-exec variant produced by build_struts_file_write_ognl:
+
+      #arglist.add("python -c exec('HEXSTRING'.decode('hex'))")
+
+    where HEXSTRING is the hex encoding of:
+      open('PATH','a').write('CONTENT\\n')
+
+    Also handles legacy FileOutputStream pattern (kept for backward compatibility):
+      .(#bytes=#dec.decodeBuffer("B64CONTENT"))
+      .(#fos=new java.io.FileOutputStream("PATH",true))
+
+    Returns True if any pattern was matched and handled.
+    """
+    # Python hex-exec pattern (current) — produced by build_struts_file_write_ognl
+    py_m = re.search(
+        r'#arglist\.add\("python -c exec\(\'([0-9a-f]+)\'\.decode\(\'hex\'\)\)"\)',
+        ognl,
+    )
+    if py_m:
+        hex_code = py_m.group(1)
+        try:
+            code = bytes.fromhex(hex_code).decode()
+            write_m = re.match(r"open\('([^']+)','a'\)\.write\('(.+)\\n'\)$", code)
+            if write_m:
+                path = write_m.group(1)
+                content = write_m.group(2)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "a") as f:
+                    f.write(content + "\n")
+                app.logger.info(
+                    f"[CVE-2021-31805] python-hex WRITE: wrote {len(content)}B to {path!r}"
+                )
+            else:
+                app.logger.warning(
+                    f"[CVE-2021-31805] python-hex WRITE: unrecognised code pattern: {code!r}"
+                )
+        except Exception as e:
+            app.logger.warning(f"[CVE-2021-31805] python-hex WRITE failed: {e}")
+        return True
+
+    # FileOutputStream pattern (legacy — sun.misc.BASE64Decoder)
+    dec_m = re.search(r'#dec\.decodeBuffer\("([^"]+)"\)', ognl)
+    fos_m = re.search(r'#fos=new java\.io\.FileOutputStream\("([^"]+)"', ognl)
+    if not (dec_m and fos_m):
+        return False
+
+    import base64 as _b64
+    b64content = dec_m.group(1)
+    path = fos_m.group(1)
+    try:
+        content = _b64.b64decode(b64content)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "ab") as f:
+            f.write(content)
+        app.logger.info(
+            f"[CVE-2021-31805] FileOutputStream WRITE: wrote {len(content)}B to {path!r}"
+        )
+    except Exception as e:
+        app.logger.warning(f"[CVE-2021-31805] FileOutputStream WRITE failed: {e}")
+    return True
+
+
 def is_allowed(cmd: str) -> bool:
     return any(cmd.strip().startswith(p) for p in ALLOWED_CMD_PREFIXES)
 
@@ -118,6 +184,13 @@ def handle_ognl_request():
     # Strip outer %{...} wrapper if present
     if ognl.startswith("%{") and ognl.endswith("}"):
         ognl = ognl[2:-1]
+
+    # FileOutputStream WRITE_PUBKEY pattern — handle before command extraction.
+    if handle_file_write_ognl(ognl):
+        from flask import make_response
+        resp = make_response("<!DOCTYPE HTML><html><body>Apache Struts 2.5.29</body></html>", 200)
+        resp.headers["Server"] = "Apache Struts/2.5.29"
+        return resp
 
     cmd, is_probe = extract_command_from_ognl(ognl)
 

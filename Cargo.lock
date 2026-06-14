@@ -1764,7 +1764,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-agent"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "clap",
  "physarum-probe",
@@ -1775,7 +1775,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-ebpf-observer"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "aya",
@@ -1793,7 +1793,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-llm"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -1805,7 +1805,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-maze"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1837,7 +1837,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-node"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1850,7 +1850,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-node-runtime"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -1858,7 +1858,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-packet-observer"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "aya",
@@ -1876,7 +1876,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-probe"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1894,7 +1894,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-protocol"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "chrono",
  "serde",
@@ -1903,7 +1903,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-scanner"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "cidr-utils",
@@ -1925,7 +1925,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-server"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "axum",
  "chrono",
@@ -1942,7 +1942,7 @@ dependencies = [
 
 [[package]]
 name = "physarum-sporangium"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
