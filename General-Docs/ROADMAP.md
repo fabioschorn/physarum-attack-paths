@@ -55,8 +55,16 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | `physarum-maze` musl static binary (`x86_64-unknown-linux-musl`) | ✔ v0.4.0 |
 | Gate N.0 — secure organism continuity threat model | ✔ design complete — PR #164 |
 | `physarum-maze --server`: live organism graph API + Canvas HTML frontend (Issue #161) | ✔ complete — PR #170 / v0.5.0 |
-| Inter-hop evidence relay and D_ij reinforcement via SSH back-channel | planned — before Gate N.2 |
-| AWS Lab with real LLM | planned — after Gate N |
+| HTTP back-channel `POST /report-colonization` + Phase 1 D_ij emission (Issue #179) | ✔ complete — PR #181 |
+| HTTP Basic Auth em rotas do browser — `/`, `/graph`, `/events` (Issue #182) | ✔ complete — PR #182 |
+| CI Docker smoke test — `physarum-maze-lab.Dockerfile` + runtime deps (Issue #183) | ✔ complete — PR #184 |
+| D_ij edge animation — lerp conductivity, paleta fungo, dead-end edges (Issue #174) | ✔ complete — PR #185 |
+| lineage-b64 → AES-256-GCM — cifrar payload antes do base64 (Issue #187) | planned — pré-Gate N.1 |
+| bootstrap delivery via SCP — substituir wget + HTTP :8001 (Issue #188) | planned — pré-Gate N |
+| Gate N.2: mTLS — canal autenticado entre nós do organismo (Issue #189) | planned — Gate N.2 |
+| TLS no HTTP server do seed — browser e grafo sobre HTTPS (Issue #190) | planned — pré-Gate N.6 |
+| Back-channel via SSH — eliminar HTTP exposto no seed (Issue #186, documentado) | roadmap — sem data |
+| AWS Lab com LLM real | planned — after Gate N |
 
 ### Active binaries
 
@@ -167,12 +175,17 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 | Issue #158 | Propagation bug fixes: lineage-b64, musl binary, SSH-hang | ✔ done — PR #159 |
 | Issue #89 / Gate N.0 | Secure organism continuity threat model — design only | ✔ done — PR #164 |
 | Issue #161 | `physarum-maze --server`: axum SSE API + Canvas HTML graph, embedded in binary | ✔ done — PR #170 / v0.5.0 |
-| Back-channel via SSH (#186) | Substituir HTTP `/report-colonization` por SSH exec — seed expõe apenas porta 22; browser via túnel SSH | sem data — ver seção abaixo |
-| Gate N.1 | Agent DNA: identity capsule design and bootstrap | planned — after Issue #161 |
-| Gate N.2 | mTLS: node-to-node and hop-to-seed authenticated channel | planned |
-| Gate N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned |
+| Issue #179 | HTTP back-channel `POST /report-colonization` + Phase 1 D_ij emission | ✔ done — PR #181 |
+| Issue #174 | D_ij edge animation — lerp conductivity, paleta fungo, dead-end edges | ✔ done — PR #185 |
+| Issue #187 | lineage-b64 → AES-256-GCM — cifrar payload, fechar self-exposure OPSEC | planned — pré-Gate N.1 |
+| Issue #188 | bootstrap via SCP — substituir wget + HTTP :8001 por SCP direto | planned — pré-Gate N |
+| Issue #189 / Gate N.2 | mTLS: canal autenticado e cifrado entre nós do organismo | planned — Gate N.2 |
+| Issue #190 | TLS no HTTP server do seed — browser e grafo sobre HTTPS | planned — pré-Gate N.6 |
+| Back-channel via SSH (#186) | Substituir HTTP `/report-colonization` por SSH exec — seed expõe apenas porta 22 | sem data — ver seção abaixo |
+| Gate N.1 | Agent DNA: identity capsule design and bootstrap | planned — after Issue #187 |
+| Gate N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 |
 | Gate N.4–N.5 | Policy roots, Online/Offline Cortex secure mode | planned |
-| Gate N.6–N.7 | Secure-mode Docker + AWS validation labs | planned |
+| Gate N.6–N.7 | Secure-mode Docker + AWS validation labs | planned — after Issue #190 |
 | AWS LLM Lab | Real LLM in owned AWS VPC after Gate N | planned |
 | LLM template generation + RAG corpus | LLM auto-generates Nuclei templates for CVEs with no existing template; colonization outcome as ground truth; validated templates seed a RAG corpus for few-shot generation | future — after Gate N |
 
@@ -190,16 +203,32 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 
 **Gate N.0 (PR #164)** — threat model document: 4-pillar security design (Identity, Communication, Lineage, Policy/Cortex), 6 security invariants, Gate N.1–N.7 sequence. Design only — no implementation code.
 
-### v0.5.0 — Issue #161 (complete — PR #170)
+### v0.5.0 — Issue #161 + PRs #181 #182 #184 #185 (complete)
 
 `physarum-maze --server <PORT>` exposes a live organism graph API (axum + SSE) and serves a Canvas HTML frontend embedded in the binary via `include_str!`. The browser page shows each hop colonized in real time: seed node anchored at center, nodes positioned on depth rings, CVE badges on colonized hosts, noise nodes showing passive sensing activity, directed edges reflecting propagation order. Scrollable log panel with smart auto-scroll.
 
 Wired into the PF-6 four-container lab (`./docker/pf6-lab.sh --phase2` → open `http://localhost:8080/`). Zero extra runtime files — same musl binary that propagates also serves the visualization.
 
+**Additional v0.5.0 items:**
+- **Issue #179 / PR #181** — HTTP back-channel `POST /report-colonization`: propagated agents report colonization to seed; Phase 1 D_ij emission (`conductivity = LLM confidence`) wired from agent.rs
+- **PR #182** — HTTP Basic Auth middleware on browser routes (`/`, `/graph`, `/events`); `/report-colonization` intentionally unprotected (internal organism channel)
+- **Issue #183 / PR #184** — CI Docker smoke test using `physarum-maze-lab.Dockerfile` (single musl binary, ~60 s with cache); catches ENTRYPOINT and runtime dep regressions
+- **Issue #174 / PR #185** — D_ij edge animation: `targetConductivity` + lerp in `layoutStep()` (~2 s transition at 60 fps); dead-end edges emitted at conductivity 0.05; colonized nodes gold `#FFD700`, seed moss `#8E8900`, warm-black text
+
 **Bug fixes in this release:**
 - Self-edge eliminated — `parent_ip` now captured before `lineage.extend()` mutates the path
 - Seed node guaranteed at center — `NodeDiscovered{depth:0}` emitted on startup
 - Exploit-DB enrichment policy updated — mandatory when `ExploitDb` capability available and CVE identified (no longer conditional on model uncertainty)
+
+### Pré-Gate N — segurança de canal e OPSEC (Issues #187, #188)
+
+Dois itens independentes de Gate N que fecham vetores imediatos sem requerer PKI:
+
+**Issue #187 — lineage-b64 AES-256-GCM**: chave simétrica efêmera gerada no startup do seed; lineage JSON cifrado antes do base64; chave entregue ao propagado via sessão SSH já estabelecida (não na linha de comando). Fecha o `ps aux` leak do path de ataque completo no host comprometido.
+
+**Issue #188 — bootstrap via SCP**: substituir `wget http://seed:8001/bootstrap.sh` por SCP direto do seed para o alvo após confirmação de pubkey. Elimina o HTTP server temporário na porta `:8001`; toda a entrega fica dentro do canal SSH cifrado.
+
+---
 
 ### Back-channel via SSH — Issue #186 (sem data de implementação)
 
