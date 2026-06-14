@@ -167,7 +167,7 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 | Issue #158 | Propagation bug fixes: lineage-b64, musl binary, SSH-hang | ✔ done — PR #159 |
 | Issue #89 / Gate N.0 | Secure organism continuity threat model — design only | ✔ done — PR #164 |
 | Issue #161 | `physarum-maze --server`: axum SSE API + Canvas HTML graph, embedded in binary | ✔ done — PR #170 / v0.5.0 |
-| Back-channel | SSH callback: hop → seed, evidence relay, D_ij reinforcement (port 22 only) | planned — before Gate N.2 |
+| Back-channel via SSH (#186) | Substituir HTTP `/report-colonization` por SSH exec — seed expõe apenas porta 22; browser via túnel SSH | sem data — ver seção abaixo |
 | Gate N.1 | Agent DNA: identity capsule design and bootstrap | planned — after Issue #161 |
 | Gate N.2 | mTLS: node-to-node and hop-to-seed authenticated channel | planned |
 | Gate N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned |
@@ -201,9 +201,60 @@ Wired into the PF-6 four-container lab (`./docker/pf6-lab.sh --phase2` → open 
 - Seed node guaranteed at center — `NodeDiscovered{depth:0}` emitted on startup
 - Exploit-DB enrichment policy updated — mandatory when `ExploitDb` capability available and CVE identified (no longer conditional on model uncertainty)
 
-### Pre-Gate N.2 — back-channel (next)
+### Back-channel via SSH — Issue #186 (sem data de implementação)
 
-Each propagated hop calls back to the seed over SSH port 22 using an ephemeral callback keypair embedded in `lineage-b64`. The `ColonizationReport` updates D_ij on the seed and feeds the live organism graph (`examples/server-graph-lab`). No extra ports. Gate N.2 upgrades the transport to mTLS.
+> **Motivação:** o back-channel atual (`POST /report-colonization`) exige que o seed exponha uma porta HTTP na rede. Se o seed rodar em ambiente onde só SSH está disponível — AWS Security Group restrito, host endurecido, firewall corporativo — agentes propagados recebem `connection refused` em `:8080` e nenhum `ColonizationReport` chega ao seed. O grafo congela; o seed fica cego para colonizações downstream.
+
+#### Estado atual
+
+```
+propagado (.4/.3/.5)  ──POST http://seed:8080/report-colonization──▶  seed
+browser               ──GET  http://seed:8080/events──────────────▶  seed
+
+Portas expostas no seed: 22 (SSH) + 8080 (HTTP)
+```
+
+O `server_port: 8080` viaja no `lineage-b64` para que propagados saibam onde reportar. O HTTP server escuta em `0.0.0.0`. Credenciais Basic Auth (`admin:Physarum-M@z&`) trafegam em base64 — não criptografadas.
+
+#### Arquitetura proposta
+
+Substituir o back-channel HTTP por **SSH exec** contra o seed. O agente propagado, ao colonizar um host downstream, abre uma sessão SSH para o seed e invoca um subcomando de ingestão:
+
+```
+ssh seed_ip -i callback_key "physarum-maze --ingest-report '<json>'"
+```
+
+O seed registra a `callback_key.pub` no seu próprio `authorized_keys` antes de lançar o agente — o mesmo mecanismo já usado para colonizar alvos, só que invertido. O HTTP server passa a escutar apenas em `127.0.0.1`; o browser acessa via túnel:
+
+```
+ssh -L 8080:localhost:8080 seed_ip
+open http://localhost:8080/
+```
+
+```
+propagado (.4/.3/.5)  ──SSH exec──────────────────────────▶  seed:22
+browser               ──SSH tunnel + HTTP 127.0.0.1──────▶  seed:22
+seed:22  ─────────────────────────────────────────────────▶  alvo:22  (propagação, inalterado)
+
+Porta exposta no seed: apenas 22
+```
+
+#### Por que não tem data de implementação
+
+- Requer redesign do fluxo de keypair: o seed precisa gerar e autorizar uma keypair para **receber** conexões dos propagados, além da efêmera que já usa para **iniciar** conexões nos alvos
+- O subcomando `--ingest-report` precisa validar o payload contra injeção — o host propagado é comprometido e não é confiável
+- A migração para `127.0.0.1` quebra o lab Docker atual (browser externo precisaria de túnel ou proxy; `docker-compose` teria de mapear o tunnel)
+- Faz mais sentido como evolução natural após Gate N.2 (mTLS) estar definido — os dois abordam o mesmo problema por caminhos diferentes e a decisão entre eles deve ser consciente
+
+#### Valor para o projeto
+
+| Dimensão | Impacto |
+|---|---|
+| OPSEC | Seed com superfície mínima — só porta 22 visível na rede |
+| Resiliência | Funciona em ambientes que bloqueiam todas as portas exceto SSH |
+| Coerência | O organismo usa SSH para propagar *e* para reportar — modelo único, sem protocolo misto |
+| Segurança do canal | SSH já é criptografado e autenticado — resolve back-channel plaintext sem PKI adicional |
+| Alinhamento com Gate N.2 | Pode substituir ou complementar mTLS dependendo da decisão de design |
 
 ### Gate N.1–N.7
 
