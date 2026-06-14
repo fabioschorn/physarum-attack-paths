@@ -92,7 +92,8 @@ impl IntelMode {
 /// - `"nginx/1.18.0"` → `("nginx", "1.18.0")`
 /// - `"Apache/2.4.51"` → `("apache-httpd", "2.4.51")`
 /// - `"OpenSSH_8.4p1"` → `("openssh", "8.4")`
-/// - `"nginx"` (no version) → `("nginx", "")` — no version, no match
+/// - `"ProFTPD 1.3.5 Server"` → `("proftpd", "1.3.5")`
+/// - `"nginx"` (no version) → `None` — no version, no match
 pub fn parse_service_version(raw: &str) -> Option<(String, String)> {
     // "nginx/1.18.0" style
     if let Some(pos) = raw.find('/') {
@@ -113,6 +114,20 @@ pub fn parse_service_version(raw: &str) -> Option<(String, String)> {
             return None;
         }
         return Some((normalize_service_name(&svc), ver));
+    }
+    // "ProFTPD 1.3.5 Server" style — product name followed by version number.
+    // Produced by extract_non_http_banner_version() for FTP/SMTP 220 greetings.
+    use std::sync::OnceLock;
+    static SP_RE: OnceLock<regex_lite::Regex> = OnceLock::new();
+    let sp_re = SP_RE.get_or_init(|| {
+        regex_lite::Regex::new(r"^([A-Za-z][A-Za-z0-9_-]+)\s+(\d+\.\d+[\.\d]*)").expect("static")
+    });
+    if let Some(cap) = sp_re.captures(raw.trim()) {
+        let svc = cap[1].trim().to_ascii_lowercase();
+        let ver = cap[2].trim().to_string();
+        if !svc.is_empty() && !ver.is_empty() {
+            return Some((normalize_service_name(&svc), ver));
+        }
     }
     None
 }
@@ -516,6 +531,20 @@ mod tests {
         let (svc, ver) = parse_service_version("OpenSSH_8.4p1").unwrap();
         assert_eq!(svc, "openssh");
         assert_eq!(ver, "8.4");
+    }
+
+    #[test]
+    fn parse_ftp_banner_space_separated() {
+        let (svc, ver) = parse_service_version("ProFTPD 1.3.5 Server").unwrap();
+        assert_eq!(svc, "proftpd");
+        assert_eq!(ver, "1.3.5");
+    }
+
+    #[test]
+    fn parse_ftp_banner_two_token() {
+        let (svc, ver) = parse_service_version("vsftpd 3.0.3").unwrap();
+        assert_eq!(svc, "vsftpd");
+        assert_eq!(ver, "3.0.3");
     }
 
     #[test]
