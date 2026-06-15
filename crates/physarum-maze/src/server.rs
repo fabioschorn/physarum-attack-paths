@@ -1,6 +1,5 @@
 use crate::graph_sink::GraphSink;
 use crate::tls_store::TlsStore;
-use axum_server::tls_rustls::RustlsConfig;
 use axum::{
     extract::{ConnectInfo, Request, State},
     http::{header, HeaderMap, StatusCode},
@@ -12,6 +11,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use axum_server::tls_rustls::RustlsConfig;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use physarum_protocol::{ColonizationReport, EventKind, OrganismGraph};
 use std::convert::Infallible;

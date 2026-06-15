@@ -164,7 +164,9 @@ async fn main() -> anyhow::Result<()> {
                 let sink_mtls = Arc::clone(&sink);
                 let mtls_port = port + 1;
                 tokio::spawn(async move {
-                    if let Err(e) = server::start_mtls_backchannel(mtls_port, sink_mtls, store).await {
+                    if let Err(e) =
+                        server::start_mtls_backchannel(mtls_port, sink_mtls, store).await
+                    {
                         tracing::error!(err = %e, "mTLS back-channel stopped");
                     }
                 });
