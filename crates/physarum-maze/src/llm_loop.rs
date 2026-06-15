@@ -1412,9 +1412,26 @@ async fn execute_bootstrap(
         }
     };
 
-    // Serialise the current lineage once so SshCommand steps that launch
-    // `--mode propagated` can inject `--lineage-b64` into the remote command.
-    let lineage_b64 = lineage.to_b64().unwrap_or_default();
+    // Embed per-agent mTLS cert into a lineage copy before serialisation (Issue #189).
+    // The propagated agent uses ca_cert_pem to verify the seed's TLS server cert and
+    // agent_cert_pem/agent_key_pem to authenticate itself on POST /report-colonization.
+    let lineage_b64 = {
+        let mut l = lineage.clone();
+        if let Some(store) = crate::tls_store::STORE.get() {
+            match store.issue_agent_cert(&target.to_string()) {
+                Ok((cert_pem, key_pem)) => {
+                    l.ca_cert_pem = Some(store.ca_cert_pem.clone());
+                    l.agent_cert_pem = Some(cert_pem);
+                    l.agent_key_pem = Some(key_pem);
+                    tracing::debug!(%target, "mTLS client cert embedded in lineage");
+                }
+                Err(e) => {
+                    tracing::warn!(%target, err = %e, "agent cert issuance failed — back-channel will use http");
+                }
+            }
+        }
+        l.to_b64().unwrap_or_default()
+    };
 
     let mut http_fallback_done = false;
     let mut scp_fail_count: u32 = 0;
