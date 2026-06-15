@@ -25,6 +25,7 @@ The project is inspired by *Physarum polycephalum*, a slime mold that reinforces
 | Document | Purpose |
 |---|---|
 | [`General-Docs/ROADMAP.md`](./General-Docs/ROADMAP.md) | Current status, evidence pipeline, labs, roadmap, planned evolution, safety and scope |
+| [`General-Docs/CHANNEL_SECURITY_DESIGN.md`](./General-Docs/CHANNEL_SECURITY_DESIGN.md) | Channel security stack (v0.5.4): AES-256-GCM lineage, SCP delivery, mTLS back-channel, HTTPS dashboard |
 | [`General-Docs/GATE_N0_THREAT_MODEL.md`](./General-Docs/GATE_N0_THREAT_MODEL.md) | Gate N.0 — secure organism continuity: threat model, 4-pillar security design, invariants |
 | [`General-Docs/PHYSARUM_SCANNER_DESIGN.md`](./General-Docs/PHYSARUM_SCANNER_DESIGN.md) | physarum-scanner — SensingProfile variants, SensingResult evidence model |
 | [`General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md`](./General-Docs/ROLE_FLUID_AGENT_ARCHITECTURE.md) | Role-fluid agent design and eBPF architecture intent |
@@ -97,7 +98,9 @@ The LLM proposes. `PolicyGate` decides. Lineage remembers.
 
 | Component | Role |
 |---|---|
-| `physarum-maze` | Organism controller: seed/propagated behavior, two-turn LLM evidence loop, policy-gated propagation, SCP self-replication, chain lineage, live graph server (`--server`) |
+| `physarum-maze` | Organism controller: seed/propagated behavior, two-turn LLM evidence loop, policy-gated propagation, SCP self-replication, chain lineage, live graph server (`--server`, `--tls`) |
+| `tls_store` | Ephemeral PKI: CA + mTLS back-channel cert + browser HTTPS cert; per-agent client cert issuance; `DistinguishedName` CN/O = "Physarum Attack Path" |
+| `lineage_crypto` | AES-256-GCM encryption for `--lineage-b64` payload; per-run key, random nonce, key delivered via SSH session |
 | `physarum-scan` / `physarum-scanner` | Native scanner — structured `SensingProfile` / `SensingResult` evidence |
 | `physarum-spore` / `physarum-sporangium` | Nuclei-compatible evidence engine — HTTP/TCP template execution |
 | `physarum-llm` | Provider-neutral LLM contracts — `TemplateSelectionQuery`, `DiscoveryQuery`, `PropagationStrategy`, `PolicyGate` |
@@ -206,15 +209,17 @@ source .env.local && cd ../../../..
 ### PF-6 Lab — chain propagation + live graph
 
 ```bash
-# Phase 1: LLM sensing + CVE identification
+# Phase 1: LLM sensing + CVE identification (plain HTTP dashboard)
 ./docker/pf6-lab.sh
-
-# Phase 2: ephemeral-key SCP propagation + live organism graph
-./docker/pf6-lab.sh --phase2
 # Open http://localhost:8080/ to watch the graph grow in real time
+
+# Phase 2: SCP propagation + mTLS back-channel + HTTPS dashboard
+./docker/pf6-lab.sh --phase2
+# Open https://localhost:8443/ (click Advanced → Proceed on first visit)
+# Browser cert CN/O: "Physarum Attack Path" — issued by "Physarum Attack Path CA"
 ```
 
-Validated chain: `172.21.0.2 (seed) → 172.21.0.3 CVE-2020-17530 → 172.21.0.4 CVE-2015-3306 → 172.21.0.5 CVE-2021-31805`.
+Validated chain (Phase 2, v0.5.4): `172.21.0.2 (seed) → 172.21.0.3 CVE-2020-17530 → 172.21.0.4 CVE-2015-3306 → 172.21.0.5 CVE-2021-31805` — all three targets report colonization via mTLS back-channel with HTTPS active.
 
 ---
 

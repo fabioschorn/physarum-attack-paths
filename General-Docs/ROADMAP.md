@@ -31,7 +31,7 @@ Secure identity, mTLS, signed lineage, and stronger trust controls are defined i
 
 ## Current status
 
-The current project focus is the `physarum-maze` organism path: LLM-driven template selection, dynamic vulnerability intelligence, multi-target evidence-driven propagation, and lineage-recorded policy decisions.
+The current project focus is the `physarum-maze` organism path: LLM-driven template selection, dynamic vulnerability intelligence, multi-target evidence-driven propagation, lineage-recorded policy decisions, and a full channel security stack (encrypted lineage, authenticated delivery, mTLS back-channel, HTTPS browser dashboard).
 
 | Area | State |
 |---|---|
@@ -56,15 +56,18 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Gate N.0 — secure organism continuity threat model | ✔ design complete — PR #164 |
 | `physarum-maze --server`: live organism graph API + Canvas HTML frontend (Issue #161) | ✔ complete — PR #170 / v0.5.0 |
 | HTTP back-channel `POST /report-colonization` + Phase 1 D_ij emission (Issue #179) | ✔ complete — PR #181 |
-| HTTP Basic Auth em rotas do browser — `/`, `/graph`, `/events` (Issue #182) | ✔ complete — PR #182 |
+| HTTP Basic Auth on browser-facing routes — `/`, `/graph`, `/events` (Issue #182) | ✔ complete — PR #182 |
 | CI Docker smoke test — `physarum-maze-lab.Dockerfile` + runtime deps (Issue #183) | ✔ complete — PR #184 |
-| D_ij edge animation — lerp conductivity, paleta fungo, dead-end edges (Issue #174) | ✔ complete — PR #185 |
-| lineage-b64 → AES-256-GCM — cifrar payload antes do base64 (Issue #187) | planned — pré-Gate N.1 |
-| bootstrap delivery via SCP — substituir wget + HTTP :8001 (Issue #188) | planned — pré-Gate N |
-| Gate N.2: mTLS — canal autenticado entre nós do organismo (Issue #189) | planned — Gate N.2 |
-| TLS no HTTP server do seed — browser e grafo sobre HTTPS (Issue #190) | planned — pré-Gate N.6 |
-| Back-channel via SSH — eliminar HTTP exposto no seed (Issue #186, documentado) | roadmap — sem data |
-| AWS Lab com LLM real | planned — after Gate N |
+| D_ij edge animation — lerp conductivity, fungal palette, dead-end edges (Issue #174) | ✔ complete — PR #185 |
+| Issue #187 — lineage-b64 AES-256-GCM encryption | ✔ complete — PR #192 / v0.5.4 |
+| Issue #188 — bootstrap delivery via SCP (replaces wget + HTTP :8001) | ✔ complete — PR #193 / v0.5.4 |
+| Issue #189 / Gate N.2 — mTLS back-channel, ephemeral CA, per-agent client certs | ✔ complete — PR #194 / v0.5.4 |
+| Issue #190 — HTTPS browser dashboard, ephemeral self-signed cert | ✔ complete — PR #195 / v0.5.4 |
+| Back-channel via SSH — eliminate HTTP exposure on seed (Issue #186, documented) | roadmap — no date |
+| Gate N.1 — Agent DNA: identity capsule design and bootstrap | planned — after Issue #187 |
+| Gate N.3 — Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 |
+| Gate N.4–N.7 — Policy roots, Online/Offline Cortex, secure-mode validation labs | planned |
+| AWS Lab with real LLM | planned — after Gate N |
 
 ### Active binaries
 
@@ -97,7 +100,8 @@ The evidence pipeline is intentionally layered. Each stage produces structured o
 11. PolicyGate decision
 12. Controlled bootstrap execution (SshCommand, SCP __self__, OgnlExec …)
 13. SCP musl binary → propagated agent starts on next hop
-14. Lineage record (hop recorded, colonized flag, rejected_strategies carried forward)
+14. mTLS back-channel: propagated agent reports colonization to seed (port+1)
+15. Lineage record (hop recorded, colonized flag, rejected_strategies carried forward)
 ```
 
 ### PF-5.2 — Dynamic vulnerability intelligence (complete)
@@ -131,6 +135,17 @@ Validated chain: `172.21.0.2 → .4 (hops=0) → .3 (hops=1) → .5 (hops=2)`. S
 
 Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed in memory at startup. The LLM autonomously queries it at enrichment time and generates an `OgnlExec.commands` array targeting host-d (CVE-2021-31805 / Struts 2.5.29) — no hardcoded payloads. `PolicyGate` validates each command element for shell metacharacter injection before execution.
 
+### Channel security stack (complete — v0.5.4, Issues #187–#190)
+
+Four independent hardening items shipped as a single release milestone. See [`General-Docs/CHANNEL_SECURITY_DESIGN.md`](./CHANNEL_SECURITY_DESIGN.md) for full design rationale.
+
+| Issue | What changed |
+|---|---|
+| #187 / PR #192 | `--lineage-b64` payload encrypted with AES-256-GCM before base64; symmetric key generated once per seed run and delivered to propagated agents via the already-established SSH session — not on the command line |
+| #188 / PR #193 | Propagated agents delivered via SCP only (pubkey injected by CVE exploit); falls back to HTTP pull when OgnlExec is available and SCP auth fails; temporary `:8001` HTTP server eliminated |
+| #189 / PR #194 | Seed generates an ephemeral CA on startup; each propagated agent receives a unique client cert (AES-GCM lineage); back-channel port (`server+1`) requires a valid client cert; validated 3/3 in Docker lab |
+| #190 / PR #195 | `--tls` / `PHYSARUM_TLS=true` enables HTTPS dashboard on port 8443; browser cert and mTLS cert both carry `DistinguishedName` CN/O = "Physarum Attack Path"; CA PEM exported to `/tmp/physarum/ca.pem` |
+
 ---
 
 ## Labs
@@ -146,7 +161,7 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 | `examples/aws-lab/terraform-pf2` | 9-node adaptive re-routing, TCP stimulus, secondary conduits | ✔ validated |
 | `examples/lab-evidence/physarum-lineage-pf52-docker-lab.json` | PF-5.2 real LLM — CVE-2021-23017 enrichment, full pipeline | ✔ Issue #131 |
 | `docker/docker-compose-pf6.yml` + `docker/pf6-lab.sh` | PF-6 Phase 1 — four-container lab, LLM two-turn, dual-CVE | ✔ complete — PR #140 |
-| `docker/pf6-lab.sh --phase2` | PF-6 Phase 2 — chain propagation, ephemeral-key SCP, musl binary | ✔ complete — PR #159 |
+| `docker/pf6-lab.sh --phase2` | PF-6 Phase 2 — chain propagation, ephemeral-key SCP, musl binary, mTLS back-channel, HTTPS dashboard | ✔ complete — v0.5.4 |
 | `docker/physarum-target-ognlexec.Dockerfile` (host-d) | Issue #144 — Exploit-DB + autonomous OgnlExec against Struts 2.5.29 | ✔ complete — PR #157 |
 | `examples/server-graph-lab` + pf6-lab (Issue #161) | Live organism graph: axum SSE + Canvas HTML, depth rings, CVE badges, noise sensing nodes | ✔ complete — PR #170 / v0.5.0 |
 | AWS LLM Lab | Real LLM in owned AWS VPC | planned — after Gate N |
@@ -176,16 +191,16 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 | Issue #89 / Gate N.0 | Secure organism continuity threat model — design only | ✔ done — PR #164 |
 | Issue #161 | `physarum-maze --server`: axum SSE API + Canvas HTML graph, embedded in binary | ✔ done — PR #170 / v0.5.0 |
 | Issue #179 | HTTP back-channel `POST /report-colonization` + Phase 1 D_ij emission | ✔ done — PR #181 |
-| Issue #174 | D_ij edge animation — lerp conductivity, paleta fungo, dead-end edges | ✔ done — PR #185 |
-| Issue #187 | lineage-b64 → AES-256-GCM — cifrar payload, fechar self-exposure OPSEC | planned — pré-Gate N.1 |
-| Issue #188 | bootstrap via SCP — substituir wget + HTTP :8001 por SCP direto | planned — pré-Gate N |
-| Issue #189 / Gate N.2 | mTLS: canal autenticado e cifrado entre nós do organismo | planned — Gate N.2 |
-| Issue #190 | TLS no HTTP server do seed — browser e grafo sobre HTTPS | planned — pré-Gate N.6 |
-| Back-channel via SSH (#186) | Substituir HTTP `/report-colonization` por SSH exec — seed expõe apenas porta 22 | sem data — ver seção abaixo |
+| Issue #174 | D_ij edge animation — lerp conductivity, fungal palette, dead-end edges | ✔ done — PR #185 |
+| Issue #187 | lineage-b64 → AES-256-GCM — encrypt payload, close ps-aux OPSEC leak | ✔ done — PR #192 / v0.5.4 |
+| Issue #188 | Bootstrap via SCP — replace wget + HTTP :8001 with direct SCP delivery | ✔ done — PR #193 / v0.5.4 |
+| Issue #189 / Gate N.2 | mTLS: authenticated and encrypted channel between organism nodes | ✔ done — PR #194 / v0.5.4 |
+| Issue #190 | HTTPS browser dashboard — ephemeral self-signed cert, `Physarum Attack Path` DN | ✔ done — PR #195 / v0.5.4 |
+| Back-channel via SSH (#186) | Replace HTTP `/report-colonization` with SSH exec — seed exposes port 22 only | no date — see section below |
 | Gate N.1 | Agent DNA: identity capsule design and bootstrap | planned — after Issue #187 |
 | Gate N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 |
 | Gate N.4–N.5 | Policy roots, Online/Offline Cortex secure mode | planned |
-| Gate N.6–N.7 | Secure-mode Docker + AWS validation labs | planned — after Issue #190 |
+| Gate N.6–N.7 | Secure-mode Docker + AWS validation labs | planned |
 | AWS LLM Lab | Real LLM in owned AWS VPC after Gate N | planned |
 | LLM template generation + RAG corpus | LLM auto-generates Nuclei templates for CVEs with no existing template; colonization outcome as ground truth; validated templates seed a RAG corpus for few-shot generation | future — after Gate N |
 
@@ -207,53 +222,59 @@ Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed
 
 `physarum-maze --server <PORT>` exposes a live organism graph API (axum + SSE) and serves a Canvas HTML frontend embedded in the binary via `include_str!`. The browser page shows each hop colonized in real time: seed node anchored at center, nodes positioned on depth rings, CVE badges on colonized hosts, noise nodes showing passive sensing activity, directed edges reflecting propagation order. Scrollable log panel with smart auto-scroll.
 
-Wired into the PF-6 four-container lab (`./docker/pf6-lab.sh --phase2` → open `http://localhost:8080/`). Zero extra runtime files — same musl binary that propagates also serves the visualization.
+Wired into the PF-6 four-container lab (`./docker/pf6-lab.sh --phase2`). Zero extra runtime files — same musl binary that propagates also serves the visualization.
 
 **Additional v0.5.0 items:**
 - **Issue #179 / PR #181** — HTTP back-channel `POST /report-colonization`: propagated agents report colonization to seed; Phase 1 D_ij emission (`conductivity = LLM confidence`) wired from agent.rs
 - **PR #182** — HTTP Basic Auth middleware on browser routes (`/`, `/graph`, `/events`); `/report-colonization` intentionally unprotected (internal organism channel)
-- **Issue #183 / PR #184** — CI Docker smoke test using `physarum-maze-lab.Dockerfile` (single musl binary, ~60 s with cache); catches ENTRYPOINT and runtime dep regressions
-- **Issue #174 / PR #185** — D_ij edge animation: `targetConductivity` + lerp in `layoutStep()` (~2 s transition at 60 fps); dead-end edges emitted at conductivity 0.05; colonized nodes gold `#FFD700`, seed moss `#8E8900`, warm-black text
+- **Issue #183 / PR #184** — CI Docker smoke test using `physarum-maze-lab.Dockerfile` (~60 s with cache); catches ENTRYPOINT and runtime dep regressions
+- **Issue #174 / PR #185** — D_ij edge animation: `targetConductivity` + lerp in `layoutStep()` (~2 s transition at 60 fps); dead-end edges emitted at conductivity 0.05
 
 **Bug fixes in this release:**
 - Self-edge eliminated — `parent_ip` now captured before `lineage.extend()` mutates the path
 - Seed node guaranteed at center — `NodeDiscovered{depth:0}` emitted on startup
-- Exploit-DB enrichment policy updated — mandatory when `ExploitDb` capability available and CVE identified (no longer conditional on model uncertainty)
+- Exploit-DB enrichment policy updated — mandatory when `ExploitDb` capability available and CVE identified
 
-### Pré-Gate N — segurança de canal e OPSEC (Issues #187, #188)
+### v0.5.4 — channel security stack (Issues #187–#190, complete)
 
-Dois itens independentes de Gate N que fecham vetores imediatos sem requerer PKI:
+Four independent hardening items that close the main OPSEC exposure vectors before Gate N implementation begins. See [`General-Docs/CHANNEL_SECURITY_DESIGN.md`](./CHANNEL_SECURITY_DESIGN.md) for full design.
 
-**Issue #187 — lineage-b64 AES-256-GCM**: chave simétrica efêmera gerada no startup do seed; lineage JSON cifrado antes do base64; chave entregue ao propagado via sessão SSH já estabelecida (não na linha de comando). Fecha o `ps aux` leak do path de ataque completo no host comprometido.
+**Issue #187 / PR #192 — AES-256-GCM lineage encryption:**
+`--lineage-b64` payload is encrypted with AES-256-GCM. Key generated once per seed run, delivered to propagated agents via the already-established SSH session (not on the command line). Closes the `ps aux` leak of the full attack path on compromised hosts.
 
-**Issue #188 — bootstrap via SCP**: substituir `wget http://seed:8001/bootstrap.sh` por SCP direto do seed para o alvo após confirmação de pubkey. Elimina o HTTP server temporário na porta `:8001`; toda a entrega fica dentro do canal SSH cifrado.
+**Issue #188 / PR #193 — SCP bootstrap delivery:**
+Propagated agents delivered exclusively via SCP after pubkey injection by the CVE exploit. Falls back to HTTP pull when OgnlExec is available and SCP auth fails. Eliminates the temporary HTTP server on port `:8001`; all delivery stays inside the encrypted SSH channel.
+
+**Issue #189 / PR #194 — mTLS back-channel:**
+Seed generates an ephemeral CA on startup. Each propagated agent receives a unique TLS client cert (embedded in the AES-GCM encrypted lineage) before deployment. The back-channel port (`server_port + 1`) uses `WebPkiClientVerifier` — no cert, no report. Validated 3/3 back-channel reports in the Docker lab (`.4` depth=1, `.3` depth=2, `.5` depth=3).
+
+**Issue #190 / PR #195 — HTTPS browser dashboard:**
+`--tls` / `PHYSARUM_TLS=true` switches the dashboard to HTTPS (default port 8443). Seed issues a browser cert (SAN=`localhost` + `127.0.0.1`) signed by the same ephemeral CA. All three certs (CA, browser, mTLS back-channel) carry `DistinguishedName` CN/O = **Physarum Attack Path**. CA PEM exported to `/tmp/physarum/ca.pem` for optional trust import. Server binds `0.0.0.0` so Docker port-forwarding works. `pf6-lab.sh --phase2` now opens `https://localhost:8443/` automatically.
 
 ---
 
-### Back-channel via SSH — Issue #186 (sem data de implementação)
+## Back-channel via SSH — Issue #186 (no implementation date)
 
-> **Motivação:** o back-channel atual (`POST /report-colonization`) exige que o seed exponha uma porta HTTP na rede. Se o seed rodar em ambiente onde só SSH está disponível — AWS Security Group restrito, host endurecido, firewall corporativo — agentes propagados recebem `connection refused` em `:8080` e nenhum `ColonizationReport` chega ao seed. O grafo congela; o seed fica cego para colonizações downstream.
+> **Motivation:** the current back-channel (`POST /report-colonization`) requires the seed to expose an HTTP port. If the seed runs in an environment where only SSH is available — restricted AWS Security Group, hardened host, corporate firewall — propagated agents receive `connection refused` on `:8080` and no `ColonizationReport` reaches the seed. The graph freezes; the seed becomes blind to downstream colonizations.
 
-#### Estado atual
+### Current state
 
 ```
-propagado (.4/.3/.5)  ──POST http://seed:8080/report-colonization──▶  seed
+propagated (.4/.3/.5)  ──POST http://seed:8080/report-colonization──▶  seed
 browser               ──GET  http://seed:8080/events──────────────▶  seed
 
-Portas expostas no seed: 22 (SSH) + 8080 (HTTP)
+Ports exposed on seed: 22 (SSH) + 8080/8443 (HTTP/HTTPS)
 ```
 
-O `server_port: 8080` viaja no `lineage-b64` para que propagados saibam onde reportar. O HTTP server escuta em `0.0.0.0`. Credenciais Basic Auth (`admin:Physarum-M@z&`) trafegam em base64 — não criptografadas.
+### Proposed architecture
 
-#### Arquitetura proposta
-
-Substituir o back-channel HTTP por **SSH exec** contra o seed. O agente propagado, ao colonizar um host downstream, abre uma sessão SSH para o seed e invoca um subcomando de ingestão:
+Replace the HTTP back-channel with **SSH exec** against the seed. When a propagated agent colonizes a downstream host, it opens an SSH session to the seed and invokes an ingestion subcommand:
 
 ```
 ssh seed_ip -i callback_key "physarum-maze --ingest-report '<json>'"
 ```
 
-O seed registra a `callback_key.pub` no seu próprio `authorized_keys` antes de lançar o agente — o mesmo mecanismo já usado para colonizar alvos, só que invertido. O HTTP server passa a escutar apenas em `127.0.0.1`; o browser acessa via túnel:
+The seed registers `callback_key.pub` in its own `authorized_keys` before launching the agent — the same mechanism already used to colonize targets, only inverted. The HTTP server then listens on `127.0.0.1` only; the browser connects via tunnel:
 
 ```
 ssh -L 8080:localhost:8080 seed_ip
@@ -261,35 +282,39 @@ open http://localhost:8080/
 ```
 
 ```
-propagado (.4/.3/.5)  ──SSH exec──────────────────────────▶  seed:22
+propagated (.4/.3/.5)  ──SSH exec──────────────────────────▶  seed:22
 browser               ──SSH tunnel + HTTP 127.0.0.1──────▶  seed:22
-seed:22  ─────────────────────────────────────────────────▶  alvo:22  (propagação, inalterado)
+seed:22  ─────────────────────────────────────────────────▶  target:22  (propagation, unchanged)
 
-Porta exposta no seed: apenas 22
+Port exposed on seed: port 22 only
 ```
 
-#### Por que não tem data de implementação
+### Why there is no implementation date
 
-- Requer redesign do fluxo de keypair: o seed precisa gerar e autorizar uma keypair para **receber** conexões dos propagados, além da efêmera que já usa para **iniciar** conexões nos alvos
-- O subcomando `--ingest-report` precisa validar o payload contra injeção — o host propagado é comprometido e não é confiável
-- A migração para `127.0.0.1` quebra o lab Docker atual (browser externo precisaria de túnel ou proxy; `docker-compose` teria de mapear o tunnel)
-- Faz mais sentido como evolução natural após Gate N.2 (mTLS) estar definido — os dois abordam o mesmo problema por caminhos diferentes e a decisão entre eles deve ser consciente
+- Requires keypair flow redesign: the seed must generate and authorize a keypair to **receive** connections from propagated agents, in addition to the ephemeral key already used to **initiate** connections to targets
+- The `--ingest-report` subcommand must validate the payload against injection — the propagated host is compromised and not trusted
+- Migrating to `127.0.0.1` breaks the current Docker lab (external browser would need a tunnel or proxy; `docker-compose` port mapping would need to be redesigned)
+- Fits more naturally as an evolution after Gate N.2 (mTLS) is defined — both address the same problem from different angles; the decision between them should be conscious
 
-#### Valor para o projeto
+### Value for the project
 
-| Dimensão | Impacto |
+| Dimension | Impact |
 |---|---|
-| OPSEC | Seed com superfície mínima — só porta 22 visível na rede |
-| Resiliência | Funciona em ambientes que bloqueiam todas as portas exceto SSH |
-| Coerência | O organismo usa SSH para propagar *e* para reportar — modelo único, sem protocolo misto |
-| Segurança do canal | SSH já é criptografado e autenticado — resolve back-channel plaintext sem PKI adicional |
-| Alinhamento com Gate N.2 | Pode substituir ou complementar mTLS dependendo da decisão de design |
+| OPSEC | Seed with minimal surface — only port 22 visible on the network |
+| Resilience | Works in environments that block all ports except SSH |
+| Coherence | The organism uses SSH to propagate *and* to report — single protocol, no mixed stack |
+| Channel security | SSH is already encrypted and authenticated — resolves back-channel plaintext without additional PKI |
+| Alignment with Gate N.2 | Can replace or complement mTLS depending on the design decision |
 
-### Gate N.1–N.7
+---
 
-Full implementation sequence for secure organism continuity. Design captured in `General-Docs/GATE_N0_THREAT_MODEL.md`. Implementation starts after Issue #161 is complete.
+## Gate N.1–N.7
 
-### Future — LLM template generation + RAG corpus (post-Gate N)
+Full implementation sequence for secure organism continuity. Design captured in `General-Docs/GATE_N0_THREAT_MODEL.md`. Implementation starts after the channel security stack (v0.5.4) is complete.
+
+---
+
+## Future — LLM template generation + RAG corpus (post-Gate N)
 
 When Exploit-DB identifies a CVE with no matching Nuclei template, the agent is blind — sporangium has nothing to run. The long-term direction is to close this gap generically, without manually curating templates for every future lab.
 
