@@ -125,6 +125,14 @@ pub struct Cli {
     /// at /events. Seed mode only. Lab-use — no authentication on the API.
     #[arg(long, value_name = "PORT", default_missing_value = "8080", num_args = 0..=1, env = "PHYSARUM_SERVER_PORT")]
     pub server: Option<u16>,
+
+    /// Enable HTTPS for the browser dashboard (Issue #190).
+    /// Generates an ephemeral self-signed cert (SAN=localhost+127.0.0.1) and
+    /// binds to 127.0.0.1 only. Default port changes to 8443 when --tls is set.
+    /// Browser will show a self-signed cert warning on first visit — click
+    /// "Advanced → Proceed". CA cert is written to /tmp/physarum/ca.pem.
+    #[arg(long, default_value_t = false, env = "PHYSARUM_TLS")]
+    pub tls: bool,
 }
 
 #[tokio::main]
@@ -144,23 +152,34 @@ async fn main() -> anyhow::Result<()> {
         Mode::KeygenTest => {}
     }
 
-    let sink = if let Some(port) = cli.server {
+    // Default port: 8443 when --tls, 8080 otherwise.
+    let effective_port = cli.server.unwrap_or(if cli.tls { 8443 } else { 8080 });
+
+    let sink = if cli.server.is_some() || cli.tls {
+        let port = effective_port;
         let sink = Arc::new(graph_sink::GraphSink::new());
 
-        // Browser HTTP server — /, /graph, /events (Basic Auth) + legacy /report-colonization.
-        let sink_browser = Arc::clone(&sink);
-        tokio::spawn(async move {
-            if let Err(e) = server::start(port, sink_browser).await {
-                tracing::error!(err = %e, "organism server stopped");
-            }
-        });
-
-        // mTLS back-channel — separate port (port + 1) so the browser is unaffected.
-        // STORE is set here so llm_loop can issue per-agent certs during propagation (Issue #189).
+        // TLS store powers both the browser HTTPS server (Issue #190) and the
+        // mTLS back-channel (Issue #189).  Create it once and share via Arc.
         match tls_store::TlsStore::new() {
             Ok(store) => {
                 let store = Arc::new(store);
                 tls_store::STORE.set(Arc::clone(&store)).ok();
+
+                // Browser server — HTTPS when --tls, plain HTTP otherwise.
+                let sink_browser = Arc::clone(&sink);
+                let store_browser = if cli.tls {
+                    Some(Arc::clone(&store))
+                } else {
+                    None
+                };
+                tokio::spawn(async move {
+                    if let Err(e) = server::start(port, sink_browser, store_browser).await {
+                        tracing::error!(err = %e, "organism server stopped");
+                    }
+                });
+
+                // mTLS back-channel on port + 1 (Issue #189).
                 let sink_mtls = Arc::clone(&sink);
                 let mtls_port = port + 1;
                 tokio::spawn(async move {
@@ -172,7 +191,14 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
             Err(e) => {
-                tracing::warn!(err = %e, "TLS store init failed — mTLS back-channel disabled");
+                tracing::warn!(err = %e, "TLS store init failed — starting plain HTTP only");
+                // Fall back to plain HTTP browser server without mTLS back-channel.
+                let sink_browser = Arc::clone(&sink);
+                tokio::spawn(async move {
+                    if let Err(e) = server::start(port, sink_browser, None).await {
+                        tracing::error!(err = %e, "organism server stopped");
+                    }
+                });
             }
         }
 
