@@ -11,7 +11,9 @@
 //! `STORE` is set once in main.rs when `--server` is active.
 
 use anyhow::{Context, Result};
-use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, SanType};
+use rcgen::{
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, SanType,
+};
 use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
     server::WebPkiClientVerifier,
@@ -50,8 +52,7 @@ impl TlsStore {
 
         // ── Ephemeral CA ─────────────────────────────────────────────────────────
         let ca_key = KeyPair::generate().context("CA KeyPair::generate")?;
-        let mut ca_params =
-            CertificateParams::new(vec![]).context("CA CertificateParams::new")?;
+        let mut ca_params = CertificateParams::new(vec![]).context("CA CertificateParams::new")?;
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         let mut ca_dn = DistinguishedName::new();
         ca_dn.push(DnType::CommonName, "Physarum Attack Path CA");
