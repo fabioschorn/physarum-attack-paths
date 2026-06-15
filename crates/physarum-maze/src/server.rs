@@ -58,9 +58,14 @@ async fn require_basic_auth(req: Request, next: Next) -> Response {
     }
 }
 
-/// Browser-facing HTTP server — /, /graph, /events (Basic Auth) + /report-colonization
-/// (plain HTTP legacy fallback for propagated agents without mTLS certs).
-pub async fn start(port: u16, sink: Arc<GraphSink>) -> anyhow::Result<()> {
+/// Browser-facing server — /, /graph, /events (Basic Auth) + /report-colonization.
+/// When `tls` is Some: HTTPS on 127.0.0.1 (Issue #190 — self-signed ephemeral cert).
+/// When `tls` is None: plain HTTP on 0.0.0.0 (lab default, no browser warning).
+pub async fn start(
+    port: u16,
+    sink: Arc<GraphSink>,
+    tls: Option<Arc<TlsStore>>,
+) -> anyhow::Result<()> {
     let state = AppState { sink };
 
     let protected = Router::new()
@@ -76,14 +81,30 @@ pub async fn start(port: u16, sink: Arc<GraphSink>) -> anyhow::Result<()> {
         .merge(internal)
         .with_state(state);
 
-    let addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
-    tracing::info!("organism server → http://localhost:{port}/");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await?;
+    if let Some(store) = tls {
+        // HTTPS — bind all interfaces so Docker port-forwarding can reach the container.
+        // 127.0.0.1 would work for native deploys but breaks Docker's port mapping.
+        let addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
+        let server_config = store.browser_rustls_config()?;
+        let rustls_config = RustlsConfig::from_config(Arc::new(server_config));
+        tracing::info!(
+            "organism server → https://localhost:{port}/  \
+             (self-signed cert — click Advanced → Proceed on first visit)"
+        );
+        axum_server::bind_rustls(addr, rustls_config)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await?;
+    } else {
+        // Plain HTTP — bind all interfaces so the Docker bridge can reach it.
+        let addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
+        tracing::info!("organism server → http://localhost:{port}/");
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
+    }
     Ok(())
 }
 

@@ -106,10 +106,15 @@ echo ""
 echo -e "${BOLD}── Phase config${NC}"
 if [ "$PHASE2" = "true" ]; then
     export PHYSARUM_EXPLOIT_ENABLED="true"
+    export PHYSARUM_TLS="true"
+    export PHYSARUM_SERVER_PORT="8443"
     echo -e "  [${PASS}] Phase 2 — exploit ENABLED (SSH-first binary propagation)"
+    echo -e "  [${PASS}] HTTPS dashboard on port 8443 (--tls)"
     echo -e "  [${YELLOW}⚠${NC}]  REQUIRES Manager approval of Phase 1 evidence"
 else
     export PHYSARUM_EXPLOIT_ENABLED="false"
+    export PHYSARUM_TLS="false"
+    export PHYSARUM_SERVER_PORT="8080"
     echo -e "  [${INFO}] Phase 1 — sensing + CVE identification (exploit disabled)"
 fi
 
@@ -162,5 +167,11 @@ PYEOF
 }
 
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans --pull=never
-echo -e "  [${PASS}] organism graph → ${BOLD}http://localhost:8080/${NC}"
+if [ "${PHYSARUM_TLS:-false}" = "true" ]; then
+    echo -e "  [${PASS}] organism graph → ${BOLD}https://localhost:${PHYSARUM_SERVER_PORT:-8443}/${NC}"
+    echo -e "  [${INFO}] first visit: click ${BOLD}Advanced → Proceed${NC} (self-signed cert)"
+    echo -e "  [${INFO}] import CA to silence warning: docker exec physarum-pf6-agent cat /tmp/physarum/ca.pem"
+else
+    echo -e "  [${PASS}] organism graph → ${BOLD}http://localhost:${PHYSARUM_SERVER_PORT:-8080}/${NC}"
+fi
 docker compose -f "$COMPOSE_FILE" logs -f host-a
