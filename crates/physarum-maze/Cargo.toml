@@ -47,9 +47,15 @@ physarum-sporangium = { path = "../physarum-sporangium" }
 # Async combinators for concurrent pattern probing
 futures = { workspace = true }
 
-# HTTP server for --server live organism API (axum SSE + embedded frontend)
+# HTTP/HTTPS server for --server live organism API (axum SSE + embedded frontend)
 axum         = { workspace = true }
 tokio-stream = { workspace = true }
+# TLS termination for the organism server (mTLS back-channel, Issue #189)
+axum-server  = { version = "0.8", features = ["tls-rustls"] }
+rustls       = { workspace = true }
+
+# Ephemeral CA + per-agent cert issuance for mTLS (Issue #189)
+rcgen = { workspace = true }
 
 # Shared organism graph types (OrganismGraph, ColonizationEvent)
 physarum-protocol = { path = "../physarum-protocol" }

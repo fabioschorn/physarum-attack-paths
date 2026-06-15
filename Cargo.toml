@@ -24,7 +24,7 @@ members = [
 # Both xtask and the eBPF crates are intentionally outside this workspace.
 
 [workspace.package]
-version       = "0.5.2"
+version       = "0.5.3"
 edition       = "2021"
 rust-version  = "1.86"
 license       = "LicenseRef-PolyForm-Noncommercial-1.0.0"
@@ -52,6 +52,7 @@ ed25519-dalek  = { version = "2.1", features = ["rand_core"] }
 rand           = "0.8"
 sha2           = "0.10"
 aes-gcm        = "0.10"
+rcgen          = "0.13"
 
 # Networking and protocol
 quinn          = "0.11"

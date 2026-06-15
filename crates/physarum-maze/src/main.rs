@@ -15,6 +15,7 @@ mod llm_loop;
 mod propagation;
 mod server;
 mod tcp;
+mod tls_store;
 mod vuln_intel;
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -145,12 +146,34 @@ async fn main() -> anyhow::Result<()> {
 
     let sink = if let Some(port) = cli.server {
         let sink = Arc::new(graph_sink::GraphSink::new());
-        let sink_server = Arc::clone(&sink);
+
+        // Browser HTTP server — /, /graph, /events (Basic Auth) + legacy /report-colonization.
+        let sink_browser = Arc::clone(&sink);
         tokio::spawn(async move {
-            if let Err(e) = server::start(port, sink_server).await {
+            if let Err(e) = server::start(port, sink_browser).await {
                 tracing::error!(err = %e, "organism server stopped");
             }
         });
+
+        // mTLS back-channel — separate port (port + 1) so the browser is unaffected.
+        // STORE is set here so llm_loop can issue per-agent certs during propagation (Issue #189).
+        match tls_store::TlsStore::new() {
+            Ok(store) => {
+                let store = Arc::new(store);
+                tls_store::STORE.set(Arc::clone(&store)).ok();
+                let sink_mtls = Arc::clone(&sink);
+                let mtls_port = port + 1;
+                tokio::spawn(async move {
+                    if let Err(e) = server::start_mtls_backchannel(mtls_port, sink_mtls, store).await {
+                        tracing::error!(err = %e, "mTLS back-channel stopped");
+                    }
+                });
+            }
+            Err(e) => {
+                tracing::warn!(err = %e, "TLS store init failed — mTLS back-channel disabled");
+            }
+        }
+
         Some(sink)
     } else {
         None

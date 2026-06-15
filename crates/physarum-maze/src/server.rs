@@ -1,4 +1,6 @@
 use crate::graph_sink::GraphSink;
+use crate::tls_store::TlsStore;
+use axum_server::tls_rustls::RustlsConfig;
 use axum::{
     extract::{ConnectInfo, Request, State},
     http::{header, HeaderMap, StatusCode},
@@ -56,17 +58,17 @@ async fn require_basic_auth(req: Request, next: Next) -> Response {
     }
 }
 
+/// Browser-facing HTTP server — /, /graph, /events (Basic Auth) + /report-colonization
+/// (plain HTTP legacy fallback for propagated agents without mTLS certs).
 pub async fn start(port: u16, sink: Arc<GraphSink>) -> anyhow::Result<()> {
     let state = AppState { sink };
 
-    // Browser-facing routes — protected by Basic Auth.
     let protected = Router::new()
         .route("/", get(index_handler))
         .route("/graph", get(graph_handler))
         .route("/events", get(events_handler))
         .layer(middleware::from_fn(require_basic_auth));
 
-    // Agent back-channel — no auth, internal Docker network only.
     let internal = Router::new().route("/report-colonization", post(report_colonization_handler));
 
     let app = Router::new()
@@ -74,14 +76,37 @@ pub async fn start(port: u16, sink: Arc<GraphSink>) -> anyhow::Result<()> {
         .merge(internal)
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{port}");
+    let addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
     tracing::info!("organism server → http://localhost:{port}/");
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .await?;
+    Ok(())
+}
+
+/// mTLS back-channel — /report-colonization only; client must present cert signed by seed CA.
+/// Runs on a separate port (server_port + 1) so the browser HTTP server is unaffected.
+pub async fn start_mtls_backchannel(
+    port: u16,
+    sink: Arc<GraphSink>,
+    store: Arc<TlsStore>,
+) -> anyhow::Result<()> {
+    let state = AppState { sink };
+
+    let app = Router::new()
+        .route("/report-colonization", post(report_colonization_handler))
+        .with_state(state);
+
+    let addr: SocketAddr = format!("0.0.0.0:{port}").parse()?;
+    let server_config = store.server_rustls_config()?;
+    let rustls_config = RustlsConfig::from_config(Arc::new(server_config));
+    tracing::info!("mTLS back-channel → https://0.0.0.0:{port}/report-colonization");
+    axum_server::bind_rustls(addr, rustls_config)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .await?;
     Ok(())
 }
 

