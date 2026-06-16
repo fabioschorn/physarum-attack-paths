@@ -36,6 +36,22 @@ The project is inspired by *Physarum polycephalum*, a slime mold that reinforces
 
 ---
 
+## Demo
+
+Watch the organism in action — PF-6 Phase 2 lab run on v0.5.4.
+
+A real LLM scans three containers, identifies vulnerabilities, propagates itself via SCP, and reports each colonization back to the seed through a mutual TLS channel. The live attack-path graph updates in the HTTPS dashboard as each hop is confirmed.
+
+<p align="center">
+  <video autoplay muted loop playsinline width="100%">
+    <source src="https://raw.githubusercontent.com/fabioschorn/physarum-attack-paths/main/assets/movies/physarum-maze_lab1_container_only.mp4" type="video/mp4">
+  </video>
+</p>
+
+> **Lab setup:** 1 seed + 3 target containers — Struts2 RCE (CVE-2020-17530), ProFTPD mod_copy (CVE-2015-3306), Spring4Shell (CVE-2021-31805). All three colonized in a single run.
+
+---
+
 ## Conceptual model
 
 The organism follows two principles.
