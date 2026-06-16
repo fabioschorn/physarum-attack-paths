@@ -20,6 +20,22 @@ The project is inspired by *Physarum polycephalum*, a slime mold that reinforces
 
 ---
 
+## Demo
+
+Watch the organism in action — PF-6 Phase 2 lab run on v0.5.4.
+
+A real LLM scans three containers, identifies vulnerabilities, propagates itself via SCP, and reports each colonization back to the seed through a mutual TLS channel. The live attack-path graph updates in the HTTPS dashboard as each hop is confirmed.
+
+<p align="center">
+  <video autoplay muted loop playsinline width="100%">
+    <source src="https://github.com/user-attachments/assets/6fbf298f-a1dc-4882-a46d-0db13e0140e1" type="video/mp4">
+  </video>
+</p>
+
+> **Lab setup:** 1 seed + 3 target containers — Struts2 RCE (CVE-2020-17530), ProFTPD mod_copy (CVE-2015-3306), Spring4Shell (CVE-2021-31805). All three colonized in a single run.
+
+---
+
 ## Documentation
 
 | Document | Purpose |
@@ -33,22 +49,6 @@ The project is inspired by *Physarum polycephalum*, a slime mold that reinforces
 | [`General-Docs/NUCLEI_REEVALUATION_FOR_PHYSARUM_SPORE.md`](./General-Docs/NUCLEI_REEVALUATION_FOR_PHYSARUM_SPORE.md) | How Nuclei templates were adapted into physarum-sporangium |
 | [`General-Docs/SPORANGIUM_TEMPLATE_CATALOG_AND_LLM_INTEGRATION.md`](./General-Docs/SPORANGIUM_TEMPLATE_CATALOG_AND_LLM_INTEGRATION.md) | Sporangium catalog structure and LLM integration design |
 | [`crates/physarum-llm/DESIGN.md`](./crates/physarum-llm/DESIGN.md) | physarum-llm — two-turn LLM flow, PolicyGate, secret handling, evidence integration |
-
----
-
-## Demo
-
-Watch the organism in action — PF-6 Phase 2 lab run on v0.5.4.
-
-A real LLM scans three containers, identifies vulnerabilities, propagates itself via SCP, and reports each colonization back to the seed through a mutual TLS channel. The live attack-path graph updates in the HTTPS dashboard as each hop is confirmed.
-
-<p align="center">
-  <video autoplay muted loop playsinline width="100%">
-    <source src="https://raw.githubusercontent.com/fabioschorn/physarum-attack-paths/main/assets/movies/physarum-maze_lab1_container_only.mp4" type="video/mp4">
-  </video>
-</p>
-
-> **Lab setup:** 1 seed + 3 target containers — Struts2 RCE (CVE-2020-17530), ProFTPD mod_copy (CVE-2015-3306), Spring4Shell (CVE-2021-31805). All three colonized in a single run.
 
 ---
 
