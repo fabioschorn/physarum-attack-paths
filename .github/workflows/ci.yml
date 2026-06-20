@@ -67,6 +67,9 @@ jobs:
           file: docker/physarum-maze-lab.Dockerfile
           load: true
           tags: physarum-maze:ci
+          build-args: |
+            PHYSARUM_GIT_SHA=${{ github.sha }}
+            PHYSARUM_BUILD_ID=github-${{ github.run_id }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -78,3 +81,9 @@ jobs:
       - name: Verify ENTRYPOINT + agent starts
         run: |
           docker run --rm physarum-maze:ci --help 2>&1 | grep -qi "physarum"
+
+      - name: Verify rich build identity
+        run: |
+          docker run --rm physarum-maze:ci --version | tee /tmp/version.txt
+          grep -q "commit:   ${GITHUB_SHA::7}" /tmp/version.txt
+          grep -q "build-id: github-${GITHUB_RUN_ID}" /tmp/version.txt

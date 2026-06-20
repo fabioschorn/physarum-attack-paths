@@ -27,8 +27,7 @@
 #   ./docker/pf6-lab.sh --phase2     # Phase 2 — exploit enabled (Manager approval required)
 #
 # Build images (ALWAYS use desktop-linux builder — never the default cloud builder):
-#   docker buildx build --builder desktop-linux \
-#     --platform linux/amd64 -f docker/physarum-maze-lab.Dockerfile -t physarum-maze:lab --load .
+#   PHYSARUM_DOCKER_BUILDER=desktop-linux ./docker/build-physarum-maze-lab.sh
 #   docker buildx build --builder desktop-linux \
 #     --platform linux/amd64 -f docker/physarum-target-pf6.Dockerfile -t physarum-target-pf6:lab --load .
 #   docker buildx build --builder desktop-linux \

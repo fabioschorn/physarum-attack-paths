@@ -1,8 +1,9 @@
-use clap::{Parser, ValueEnum};
+use clap::{ArgAction, Parser, ValueEnum};
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 mod agent;
+mod build_info;
 mod discovery;
 #[cfg(target_os = "linux")]
 mod ebpf;
@@ -40,6 +41,10 @@ pub enum Mode {
                   JSON with D_ij path scores."
 )]
 pub struct Cli {
+    /// Print rich build identity and exit
+    #[arg(short = 'V', long = "version", action = ArgAction::SetTrue)]
+    pub version: bool,
+
     /// Operating mode
     #[arg(long, default_value = "seed")]
     pub mode: Mode,
@@ -137,13 +142,18 @@ pub struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
+    if cli.version {
+        println!("{}", build_info::rich_version());
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
-
-    let cli = Cli::parse();
 
     // Initialise lineage crypto key before any lineage serialisation occurs.
     match &cli.mode {
@@ -208,4 +218,23 @@ async fn main() -> anyhow::Result<()> {
     };
 
     agent::run(cli, sink).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_flags_parse_without_starting_the_agent() {
+        assert!(
+            Cli::try_parse_from(["physarum-maze", "--version"])
+                .unwrap()
+                .version
+        );
+        assert!(
+            Cli::try_parse_from(["physarum-maze", "-V"])
+                .unwrap()
+                .version
+        );
+    }
 }
