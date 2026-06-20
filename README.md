@@ -38,6 +38,7 @@ A real LLM scans three containers, identifies vulnerabilities, propagates itself
 
 | Document | Purpose |
 |---|---|
+| [`RELEASE.md`](./RELEASE.md) | Official and modified build policy, build identity, SHA-256 verification, and current signing limitation |
 | [`General-Docs/ROADMAP.md`](./General-Docs/ROADMAP.md) | Current status, evidence pipeline, labs, roadmap, planned evolution, safety and scope |
 | [`General-Docs/CHANNEL_SECURITY_DESIGN.md`](./General-Docs/CHANNEL_SECURITY_DESIGN.md) | Channel security stack (v0.5.4): AES-256-GCM lineage, SCP delivery, mTLS back-channel, HTTPS dashboard |
 | [`General-Docs/GATE_N0_THREAT_MODEL.md`](./General-Docs/GATE_N0_THREAT_MODEL.md) | Gate N.0 — secure organism continuity: threat model, 4-pillar security design, invariants |
