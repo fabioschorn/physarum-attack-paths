@@ -14,10 +14,7 @@
 # This Dockerfile is for lab runs only where a Linux cross-compiler is unavailable.
 #
 # Build (cloud builder — law):
-#   docker buildx build --builder cloud-expertsonline-physarum-attack-paths \
-#     --platform linux/amd64 --output type=oci,dest=/tmp/physarum-maze-lab.tar \
-#     -f docker/physarum-maze-lab.Dockerfile .
-#   docker load -i /tmp/physarum-maze-lab.tar
+#   ./docker/build-physarum-maze-lab.sh
 
 FROM rust:1.86-slim-bookworm AS builder
 
@@ -48,6 +45,11 @@ COPY crates/physarum-server/      crates/physarum-server/
 COPY crates/physarum-agent/       crates/physarum-agent/
 COPY crates/physarum-ebpf-observer/ crates/physarum-ebpf-observer/
 COPY crates/physarum-packet-observer/ crates/physarum-packet-observer/
+
+ARG PHYSARUM_GIT_SHA=unknown
+ARG PHYSARUM_BUILD_ID=dev
+ENV PHYSARUM_GIT_SHA=${PHYSARUM_GIT_SHA}
+ENV PHYSARUM_BUILD_ID=${PHYSARUM_BUILD_ID}
 
 # Static musl binary — no glibc dependency at runtime.
 # Propagated agents can run on any Linux regardless of glibc version (fixes Issue #158 Bug 2).
