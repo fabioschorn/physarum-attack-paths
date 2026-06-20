@@ -1,4 +1,5 @@
 use clap::{ArgAction, Parser, ValueEnum};
+use std::fmt;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
@@ -30,6 +31,21 @@ pub enum Mode {
     KeygenTest,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum PolicyProfile {
+    /// Controlled lab policy; the only supported profile in v0.5.5.
+    #[default]
+    LabOnly,
+}
+
+impl fmt::Display for PolicyProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LabOnly => f.write_str("lab-only"),
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "physarum-maze",
@@ -44,6 +60,15 @@ pub struct Cli {
     /// Print rich build identity and exit
     #[arg(short = 'V', long = "version", action = ArgAction::SetTrue)]
     pub version: bool,
+
+    /// Active policy profile. v0.5.5 supports only "lab-only".
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = PolicyProfile::LabOnly,
+        env = "PHYSARUM_POLICY_PROFILE"
+    )]
+    pub policy_profile: PolicyProfile,
 
     /// Operating mode
     #[arg(long, default_value = "seed")]
@@ -236,5 +261,24 @@ mod tests {
                 .unwrap()
                 .version
         );
+    }
+
+    #[test]
+    fn policy_profile_defaults_to_lab_only() {
+        let cli = Cli::try_parse_from(["physarum-maze"]).unwrap();
+
+        assert_eq!(cli.policy_profile, PolicyProfile::LabOnly);
+    }
+
+    #[test]
+    fn policy_profile_accepts_lab_only_explicitly() {
+        let cli = Cli::try_parse_from(["physarum-maze", "--policy-profile", "lab-only"]).unwrap();
+
+        assert_eq!(cli.policy_profile, PolicyProfile::LabOnly);
+    }
+
+    #[test]
+    fn policy_profile_rejects_unknown_values() {
+        assert!(Cli::try_parse_from(["physarum-maze", "--policy-profile", "production"]).is_err());
     }
 }

@@ -50,7 +50,9 @@ impl LlmConfig {
 
         let allowed_cidrs = parse_cidr(cli.llm_allowed_cidr.as_deref()).unwrap_or_default();
 
-        let mut gate = PolicyGate::lab_default();
+        let mut gate = match cli.policy_profile {
+            crate::PolicyProfile::LabOnly => PolicyGate::lab_default(),
+        };
         gate.allowed_cidrs = allowed_cidrs;
         gate.exploit_enabled = cli.exploit_enabled;
 
@@ -129,6 +131,8 @@ pub async fn run(mut cli: Cli, sink: Option<std::sync::Arc<GraphSink>>) -> Resul
     if matches!(cli.mode, Mode::KeygenTest) {
         return run_keygen_test().await;
     }
+
+    tracing::info!("[physarum-maze] policy-profile: {}", cli.policy_profile);
 
     // Resolve interface name before anything uses it.
     // "auto" → find the interface whose IP is in --llm-allowed-cidr with the
