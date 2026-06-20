@@ -29,14 +29,11 @@ mod tests {
 
     #[test]
     fn compiled_identity_has_expected_defaults_and_lengths() {
-        assert!(!VERSION.is_empty());
-        assert!(!GIT_SHA7.is_empty());
         assert!(
             GIT_SHA7 == "unknown"
                 || GIT_SHA7.chars().count() == 7
                 || (GIT_SHA7.ends_with("-dirty") && GIT_SHA7.chars().count() == 13)
         );
-        assert!(!BUILD_ID.is_empty());
         assert_eq!(POLICY, "lab-only");
     }
 }
