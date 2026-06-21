@@ -20,7 +20,9 @@ Gate M/M.4     physarum-node runtime and probe/discovery consolidation completed
 PF-1/PF-2      autonomous maze propagation and adaptive re-routing validated
 ```
 
-This document should be read as design history and architectural intent. The current canonical architecture is maintained in `General-Docs/ARCHITECTURE.md`.
+This document should be read as design history and architectural intent. The
+current project overview is maintained in the root `README.md`, while current
+milestone state is maintained in `General-Docs/ROADMAP.md`.
 
 ---
 
@@ -251,10 +253,10 @@ LLM-assisted propagation before Issue #106 design/safety review
 ## 9. Relationship to current documents
 
 ```text
-ARCHITECTURE.md                    current canonical system architecture
-QUALITY_GATE.md                    current gate status and acceptance criteria
-EBPF_FLOW_OBSERVATION_DESIGN.md    original eBPF Stage 0 design
-INSIGHTS_AND_BRAINSTORM.md         exploratory ideas, not authoritative
+../README.md                       current project overview and architecture summary
+ROADMAP.md                         current gate, release and lab state
+EBPF_FLOW_OBSERVATION_DESIGN.md    original eBPF Stage 0 design + outcome notes
+GATE_N0_THREAT_MODEL.md            security-design baseline and current gaps
 GitHub Issues/PRs                  detailed historical record and evidence
 ```
 

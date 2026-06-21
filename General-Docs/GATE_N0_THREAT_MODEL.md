@@ -1,8 +1,12 @@
 # Gate N.0 — Secure Organism Continuity: Threat Model
 
-**Status:** Design — intentionally non-detailed. Details are documented when they become programmable and testable (Gate N.1 onwards).
+**Status:** Historical Gate N.0 design baseline, with current-state notes through v0.5.5.
 **Closes:** Issue #89
 **Sequence:** Gate N.0 design → Gate N.1 implementation → … → Gate N.7 AWS lab
+
+> **Reading note:** this document was written against the v0.5.0 organism.
+> Statements using “today” or “current” inside the original design sections refer
+> to that design point. The table below records what changed afterward.
 
 ---
 
@@ -10,7 +14,25 @@
 
 The physarum organism propagates, senses, reasons, and records lineage across multiple hosts. This document defines the security model that governs that organism: who it trusts, how it identifies itself, how it protects its memory, and what it is allowed to do.
 
-Gate N.0 is not a spec. It captures principles, identifies threats, and establishes invariants that all future implementation gates must satisfy.
+Gate N.0 is not a protocol specification. It captures principles, identifies
+threats, and establishes target invariants for the implementation gates.
+
+## Implementation status after the design
+
+| Area | State through v0.5.5 |
+|---|---|
+| Propagation-state confidentiality | AES-256-GCM implemented in Issue #187; plaintext legacy input and a plain JSON local save remain |
+| Primary binary delivery | SCP-first delivery implemented in Issue #188; bounded HTTP fallback remains for OgnlExec recovery |
+| Hop → seed reporting | mTLS implemented in Issue #189 with an ephemeral CA and issued client certificates |
+| Operator dashboard | HTTPS available via `--tls` / `PHYSARUM_TLS=true` |
+| Hop → hop propagation | Still SSH/SCP; full mutually authenticated organism channel is not complete |
+| Agent DNA | Not implemented |
+| Signed Lineage Ledger | Not implemented |
+| Signed policy roots | Not implemented |
+| Secure-mode Docker/AWS gates | Not completed |
+
+Issue #189 therefore implements the hop-to-seed portion of Gate N.2, not the
+entire N.2 node-to-node trust design.
 
 ---
 
@@ -25,7 +47,7 @@ Those belong in Gate N.1 through N.7, written when code exists and tests can val
 
 ---
 
-## Organism state at this design point
+## Organism state at the v0.5.0 design point
 
 The organism as of v0.5.0 is a self-propagating binary that:
 
@@ -35,7 +57,9 @@ The organism as of v0.5.0 is a self-propagating binary that:
 - Embeds its own Exploit-DB catalog and Nuclei templates
 - Produces structured evidence (SensingResult, PatternFinding)
 
-The lineage chain exists. It is not yet signed. The organism has no identity beyond the process that runs it.
+The lineage chain existed but was not signed. The organism had no identity beyond
+the process that ran it. Encryption added later protects confidentiality but does
+not provide the per-entry authenticity required by the proposed Lineage Ledger.
 
 Gate N.0 defines what comes next.
 
@@ -87,7 +111,7 @@ The operator sees the organism from outside via `--server`. The organism's inter
 
 ---
 
-## Pilar 1 — Identidade
+## Pillar 1 — Identity
 
 The organism needs to know whether a node belongs to it.
 
@@ -106,9 +130,11 @@ The organism needs to know whether a node belongs to it.
 
 ---
 
-## Pilar 2 — Comunicação
+## Pillar 2 — Communication
 
-Hops talk to each other and to the seed. Today this happens over plain SSH. That is acceptable for a lab prototype; it is not acceptable for a security-hardened organism.
+At the v0.5.0 design point, hops talked to each other and to the seed through the
+then-current SSH/HTTP mechanisms. In v0.5.5, propagation remains SSH/SCP while
+hop-to-seed reporting prefers mTLS.
 
 **Core principle:** node-to-node communication must be mutually authenticated. Neither side should be able to impersonate the other. The channel must be encrypted.
 
@@ -124,14 +150,14 @@ Hops talk to each other and to the seed. Today this happens over plain SSH. That
 | Channel | Protocol | Direction |
 |---|---|---|
 | Operator browser → seed API | TLS (one-way) | read-only, lab network |
-| Hop → seed (back-channel) | SSH callback today → mTLS (Gate N.2) | evidence + lineage relay |
-| Hop → hop (propagation) | SSH today → mTLS (Gate N.2) | SCP delivery + lineage inheritance |
+| Hop → seed (back-channel) | mTLS implemented as the preferred channel | evidence + lineage relay |
+| Hop → hop (propagation) | SSH/SCP remains current | binary delivery + lineage inheritance |
 
 **Implementation:** Gate N.2
 
 ---
 
-## Pilar 3 — Lineage
+## Pillar 3 — Lineage
 
 The lineage chain is the organism's memory. Today it is a base64-encoded struct that travels in a CLI argument. It records what happened, but nothing prevents tampering.
 
@@ -151,7 +177,7 @@ The lineage chain is the organism's memory. Today it is a base64-encoded struct 
 
 ---
 
-## Pilar 4 — Política e Cortex
+## Pillar 4 — Policy and Cortex
 
 The organism can reason via LLM and act on that reasoning. This is the highest-risk surface in the entire stack. A misconfigured policy, a prompt injection on a target host, or a compromised LLM endpoint can all lead to out-of-scope action.
 
@@ -177,27 +203,35 @@ The organism can reason via LLM and act on that reasoning. This is the highest-r
 
 ## Security invariants
 
-These rules must not be violated by any implementation in Gate N.1 through N.7.
+These are target invariants for the completed Gate N design. They are not all
+guarantees of the v0.5.5 `lab-only` runtime. Known gaps are called out below.
 
 1. **No identity, no colonization** — a node that cannot prove inherited identity from a valid parent must not colonize a new host.
 2. **No unsigned lineage append** — a node may not append to the Lineage Ledger without signing its entry.
 3. **No external policy expansion** — no response from an LLM, a remote host, or a relay may expand the action policy beyond what was inherited from the parent.
-4. **Lab mode is explicit** — relaxed security (plain SSH, unsigned lineage, no mTLS) is only active when a build flag or runtime flag explicitly enables lab mode. It must not be the default.
-5. **Lineage never carries secrets** — credentials, private keys, and internal topology details must not appear in lineage entries, even in encrypted form.
+4. **Secure mode must be explicit and testable** — v0.5.5 exposes only the `lab-only` policy profile. A future secure profile must fail closed when its identity, lineage-signing, or channel requirements are unavailable.
+5. **Future Lineage Ledger entries must minimize secrets** — v0.5.5 carries issued mTLS client material inside AES-GCM-encrypted propagation state. Gate N.3 must separate transport bootstrap material from the long-lived, auditable ledger.
 6. **Offline does not mean unrestricted** — loss of LLM access narrows the action envelope; it does not widen it.
 
 ---
 
 ## Back-channel and Gate N.2
 
-The SSH callback back-channel (hop → seed, evidence relay, D_ij reinforcement) is part of this security model. It uses port 22, which is already open. The current implementation carries `callback_privkey + seed_ip` inside `PropagationLineage`.
+Issue #189 added an mTLS-authenticated hop-to-seed channel whenever the organism
+server is active and ephemeral PKI initialization succeeds. The seed creates an
+ephemeral CA and issues client material that is transported inside encrypted
+propagation state. The legacy plain-HTTP reporting path remains available when
+propagation state does not contain the mTLS material, and the browser server
+still exposes the compatibility report route without client-certificate
+authentication.
 
-Gate N.2 must:
-- Replace the plain SSH callback with an mTLS-authenticated channel
-- Bound what evidence a hop may relay (no raw credentials, no full filesystem paths)
-- Define how D_ij reinforcement signals are validated before updating the graph
+Work still required for full Gate N.2:
 
-The current SSH callback is acceptable as a lab prototype. It is not acceptable as a production mechanism.
+- mutually authenticated hop-to-hop communication rather than SSH/SCP alone;
+- identity binding stronger than possession of an issued client certificate;
+- replay and lifecycle rules for issued credentials;
+- validation boundaries for evidence and `D_ij` reinforcement;
+- fail-closed behavior for a future secure policy profile.
 
 ---
 
@@ -207,7 +241,7 @@ The current SSH callback is acceptable as a lab prototype. It is not acceptable 
 |---|---|---|
 | N.0 | This document — threat model and invariants | — |
 | N.1 | Agent DNA: identity capsule design and bootstrap | N.0 |
-| N.2 | mTLS: node-to-node and hop-to-seed authenticated channel | N.1 |
+| N.2 | mTLS: node-to-node and hop-to-seed authenticated channel | N.1 — hop-to-seed subset implemented by Issue #189 |
 | N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | N.1 |
 | N.4 | Policy roots: signed capability manifest, inheritance model | N.1, N.3 |
 | N.5 | Online/Offline Cortex secure mode behavior | N.4 |
@@ -220,6 +254,8 @@ Each gate opens with an implementation issue. Each gate closes with tests that v
 
 ## What comes after N.0
 
-This document is complete when the PR is merged. The next step is Issue N.1: Agent DNA design and bootstrap implementation.
+The original Gate N.0 design step is complete. The next unfinished architectural
+dependency remains Gate N.1: Agent DNA design and bootstrap implementation.
 
-Issue #161 (WASM visualization) may proceed in parallel — it does not depend on Gate N security model.
+Issue #161 was subsequently completed as an embedded Canvas HTML visualization;
+it did not depend on the Gate N identity model.

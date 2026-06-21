@@ -30,7 +30,7 @@ When Issue #131 was scoped, the Manager requested a 13-point comparison of Nucle
 | 10 | **Service-keyed template selection (Wappalyzer)** | ✅ automatic tech fingerprint → template routing | ✅ advisory-cache keyed by service name; banner extractor feeds the key | **Architecture difference** (see §3) |
 | 11 | **Multi-protocol (TCP/DNS/SSL/WebSocket)** | ✅ | ✅ (added in PR #133) | **Ported** |
 | 12 | **Workflows / multi-step** | ✅ | ✅ workflow.rs engine | **Ported** |
-| 13 | **External YAML template loading from disk** | ✅ | ✅ catalog.rs + YAML loader (allowlisted directory) | **Ported** |
+| 13 | **External YAML template loading from disk** | ✅ | ✅ catalog.rs + YAML loader (configured directory; execution remains allowlisted) | **Ported** |
 
 **Nuclei features deliberately out of scope for physarum-sporangium:**
 
@@ -39,7 +39,7 @@ When Issue #131 was scoped, the Manager requested a 13-point comparison of Nucle
 | JavaScript / headless browser | Requires V8 runtime; not usable in a statically linked no_std-like maze agent |
 | Interactsh (OOB callbacks) | External SaaS dependency; incompatible with offline-lab operation |
 | Fuzzing engine | Broader attack surface, outside detection scope |
-| Template signing/verification | Not needed for internal closed-loop lab templates |
+| Nuclei template signing/verification | Upstream signing is not used for the imported internal snapshot; GitHub displays release-asset digests, while artifact/template signing remains future supply-chain work |
 | Nuclei Cloud / Team features | SaaS; irrelevant for self-contained organism |
 | Burp / OpenAPI / Swagger input formats | Not needed; maze targets are discovered dynamically |
 | Reporting exporters (Jira, ES, SARIF, PDF) | Lineage JSON covers our audit trail |
@@ -87,7 +87,9 @@ Nuclei does not expose a stable C ABI. `cgo` + `unsafe` FFI from Rust is high-ma
 
 - Full type safety, async-native, no runtime overhead
 - Single `cargo build` with workspace-level audit
-- Template execution is bounded by `RunPolicy::allowed_check_ids` and the PolicyGate — no arbitrary template loading
+- Template execution is bounded by `RunPolicy::allowed_check_ids` and the
+  PolicyGate. An operator may configure an external template directory, but
+  loading a template does not by itself authorize its execution.
 - Advisory enrichment runs inside the same async task as pattern matching — no IPC
 - `VulnerabilityCandidate` flows directly into `DiscoveryQuery` for LLM reasoning
 
@@ -137,7 +139,12 @@ Matching logic:
 
 3. **`OnlineRequired` mode** is appropriate for integration tests and Docker Lab validation. It guarantees fresh OSV data and prevents stale cache from masking online failures.
 
-4. **physarum-sporangium PR #133** (merged 2026-06-02) completes the full Nuclei feature parity (all protocols, matchers, extractors, generators, auth providers, workflows). The `nuclei/` folder was a gitignored local analysis clone and was never tracked in the repository; it has been removed from the development machine. The full template library is now available via `crates/physarum-sporangium/templates/nuclei-legacy/`.
+4. **physarum-sporangium PR #133** (merged 2026-06-02) completed the
+project-scoped native feature port. This means parity for the protocols and
+features intentionally supported by the organism, not behavioral equivalence
+with every Nuclei runtime feature. The full imported template snapshot is stored
+under `crates/physarum-sporangium/templates/nuclei-legacy/` and compressed into
+`nuclei-templates.tar.zst`, which is embedded in the binary.
 
 ---
 
