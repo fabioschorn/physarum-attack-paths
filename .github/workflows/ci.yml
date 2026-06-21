@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Required to enumerate commits for pull_request scans.
       pull-requests: read
 
     steps:
