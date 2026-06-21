@@ -1,7 +1,7 @@
 # physarum-sporangium — Template Catalog and LLM Integration Model
 
 **Issue:** #136  
-**Status:** Reference document  
+**Status:** Current implementation reference through v0.5.5
 **Author:** Dev Lead (AI-assisted)  
 **Date:** 2026-06-05  
 **Related PRs:** #133 (Nuclei port), #132 (VulnIntel pipeline)
@@ -27,10 +27,14 @@ This document covers:
 
 ```text
 catalog.rs              → builtin hand-crafted templates (compiled into the binary)
-nuclei-legacy/*.yaml    → full Nuclei template library (13,264 files, baked into image)
+nuclei-templates.tar.zst → full Nuclei template library embedded in the binary
 ```
 
-Both sources produce the same struct: `PatternTemplate`. The merge happens in `catalog::all_templates_with_yaml()`:
+The embedded archive is extracted on demand into
+`/tmp/physarum/templates/nuclei-legacy/` and reused when its sentinel is present,
+unless `PHYSARUM_TEMPLATE_DIR` supplies an explicit external directory. Both
+sources produce `PatternTemplate` values. The merge happens in
+`catalog::all_templates_with_yaml()`:
 
 ```rust
 pub fn all_templates_with_yaml() -> Vec<PatternTemplate> {
@@ -57,15 +61,15 @@ The YAML loader (`yaml_loader.rs`) converts Nuclei YAML format into `PatternTemp
 
 ### 3.1 Template Directory Resolution
 
-```rust
-pub fn template_dir() -> PathBuf {
-    std::env::var("PHYSARUM_TEMPLATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("templates/nuclei-legacy"))
-}
-```
+Resolution order:
 
-In the Docker Lab image, `PHYSARUM_TEMPLATE_DIR=/templates/nuclei-legacy` is set at build time.
+1. `PHYSARUM_TEMPLATE_DIR`, when explicitly configured for a lab, test or CI job.
+2. The embedded `nuclei-templates.tar.zst` archive, extracted to
+   `/tmp/physarum/templates/nuclei-legacy/`.
+
+The binary is therefore self-contained for normal propagation. A Docker image
+does not need to carry a separate template tree unless it intentionally overrides
+the embedded catalog.
 
 ### 3.2 Filter Model (env vars)
 
@@ -98,14 +102,20 @@ pub struct PatternTemplate {
     pub id: String,              // from template YAML id: field
     pub info: TemplateInfo,      // name, severity, tags, cve_id, cvss_score, references
     pub protocol: PatternProtocol,
-    pub checks: Vec<HttpCheck>,  // for Http protocol
+    pub http_check: Option<HttpCheck>,
+    pub tcp_request: Option<TcpRequest>,
+    pub dns_request: Option<DnsRequest>,
+    pub ssl_request: Option<SslRequest>,
+    pub websocket_request: Option<WebSocketRequest>,
     pub matchers: Vec<PatternMatcher>,
+    pub matchers_condition: MatchCondition,
     pub extractors: Vec<PatternExtractor>,
-    pub run_policy: RunPolicy,
+    pub stop_at_first_match: bool,
 }
 
 pub struct TemplateInfo {
     pub name: String,
+    pub authors: Vec<String>,
     pub severity: SeverityHint,       // Critical, High, Medium, Low, Info
     pub tags: Vec<String>,
     pub cve_id: Option<String>,       // feeds VulnerabilityCandidate
@@ -115,6 +125,10 @@ pub struct TemplateInfo {
     pub cwe_ids: Vec<String>,
 }
 ```
+
+`RunPolicy` is supplied by the caller when templates execute; it is not stored
+inside each `PatternTemplate`. Its `allowed_check_ids` allowlist is evaluated
+before network I/O.
 
 ### 4.1 How Template Findings Feed the LLM
 
@@ -158,7 +172,9 @@ physarum-maze (organism runtime)
   └── sends DiscoveryQuery to physarum-llm
 ```
 
-The current `physarum-maze` main loop calls `all_templates()` (builtins only). The YAML loader is implemented and tested but not yet wired into the maze agent's template runner — this is the **first code change for PF-6 Phase 1**.
+`physarum-maze` currently calls `all_templates_with_yaml()` in both template
+selection/execution paths. PF-6 completed the wiring that was still pending when
+the original version of this document was written.
 
 ---
 
@@ -187,7 +203,8 @@ nuclei-legacy/
 └── dast/               ~249 templates — dynamic app security testing
 ```
 
-**Total:** 13,264 templates baked into the Docker image.
+**Total at the imported snapshot:** 13,264 templates, stored in the repository
+and packaged into the binary as a compressed tar.zst archive.
 
 ### 6.2 Template Statistics (snapshot at import)
 
@@ -298,4 +315,5 @@ Do not create a separate template per CVE. One `server-version-exposed` template
 
 ---
 
-*End of document. See [PF6_TWO_CONTAINER_END_TO_END_DOCKER_LAB.md](PF6_TWO_CONTAINER_END_TO_END_DOCKER_LAB.md) for the next implementation step.*
+*End of document. See [ROADMAP.md](./ROADMAP.md) and `docker/pf6-lab.sh` for the
+implemented PF-6 validation path.*

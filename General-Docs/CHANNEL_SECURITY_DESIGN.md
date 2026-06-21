@@ -1,12 +1,14 @@
 # Channel Security Design — physarum-maze v0.5.4
 
-Design reference for the four channel security modules shipped in v0.5.4 (Issues #187–#190). These modules address the main OPSEC exposure vectors present before Gate N without requiring the full Gate N.1–N.7 PKI stack.
+Implemented design reference for the four channel-security changes shipped in
+v0.5.4 (Issues #187–#190). They provide a hardened lab baseline before completion
+of the full Gate N.1–N.7 trust model.
 
 ---
 
 ## Motivation
 
-Before v0.5.4, the organism had three open exposure vectors:
+Before v0.5.4, the organism had four open exposure vectors:
 
 | Vector | Risk |
 |---|---|
@@ -15,7 +17,9 @@ Before v0.5.4, the organism had three open exposure vectors:
 | Back-channel `POST /report-colonization` over plain HTTP | Reports sent in clear text; no proof of agent identity |
 | Browser dashboard served over plain HTTP | Credentials (`admin:Physarum-M@z&`) travel in base64 over cleartext |
 
-The four issues close these vectors independently and cumulatively. Each can be deployed standalone; together they form a complete channel security layer.
+The four issues reduce these vectors independently and cumulatively. Together they
+form the v0.5.4 channel-security baseline; they do not provide Agent DNA, signed
+lineage, signed policy roots, or mutually authenticated hop-to-hop propagation.
 
 ---
 
@@ -59,13 +63,20 @@ scp physarum-maze root@target:/tmp/physarum/physarum-maze
 ssh root@target "PHYSARUM_LINEAGE_KEY=<hex_key> /tmp/physarum/physarum-maze --lineage-b64 <encrypted_b64> ..."
 ```
 
-The key is visible in the SSH session's environment on the target, but not in `ps aux` output for other processes.
+The key is not part of the propagated agent's argument list. It is, however,
+present in the remote SSH command/environment during bootstrap and must not be
+treated as protected from a privileged observer on the target.
 
 ### Security properties
 
 - Full lineage content is opaque to local process listing
 - Key derivation is per-seed-run — compromise of one lineage does not expose others
 - Nonce is random per encryption — same lineage JSON produces different ciphertext on every propagation
+
+Compatibility limitation: `Lineage::from_b64()` still accepts legacy plaintext
+base64 when AES-GCM decryption fails. Newly generated propagation state is
+encrypted when the key is active, but the reader is not yet fail-closed against
+unencrypted legacy input. The saved lineage file is also plain JSON at rest.
 
 ---
 
@@ -91,7 +102,7 @@ After pubkey injection via CVE exploit:
 
   HTTP fallback (OgnlExec targets only):
     → if SCP fails AND plan contains an OgnlExec step:
-        → start ephemeral HTTP server on :8001 (127.0.0.1 only, not 0.0.0.0)
+        → start ephemeral HTTP server on the seed's selected lab-network IP at :8001
         → OgnlExec step fetches and executes bootstrap.sh
         → HTTP server stopped immediately after
 ```
@@ -162,10 +173,18 @@ Example with `--server 8443 --tls`:
 
 ### Security properties
 
-- Only agents that received a client cert from the seed can report
-- Client cert is unique per agent IP — compromised cert cannot be reused by another agent
+- Only agents that received a client cert from the seed can report on the dedicated mTLS port
+- A fresh client certificate is issued for each propagation attempt
+- Possession of a valid issued certificate authenticates the client to the seed;
+  v0.5.4 does not independently bind the network peer address to the requested agent IP
 - CA is ephemeral — a new run generates a new CA and invalidates all previous client certs
 - `WebPkiClientVerifier` enforces cert validation at the TLS layer before the HTTP handler is reached
+
+These properties apply to the dedicated mTLS port. The browser server retains
+the legacy `/report-colonization` route for compatibility, without client
+certificate authentication. Current propagated agents prefer mTLS whenever
+their lineage contains the issued PKI material, but removal or authentication of
+the legacy route remains future hardening work.
 
 ---
 
@@ -236,7 +255,7 @@ Phase 1 is unchanged (`PHYSARUM_TLS=false`, `http://localhost:8080/`).
 
 - HTTP Basic Auth credentials are now encrypted in transit
 - Self-signed cert provides transport encryption without requiring a CA infrastructure
-- Ephemeral cert — rotated every seed run, cannot be extracted and reused after the lab stops
+- Ephemeral cert — rotated every seed run; material from a previous run is not trusted by the next seed CA
 - Browser cert and mTLS cert share the same CA — one CA to trust for full lab access
 
 ---

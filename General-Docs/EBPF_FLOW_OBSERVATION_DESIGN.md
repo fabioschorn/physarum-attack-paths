@@ -5,6 +5,10 @@
 **Author:** Dev Lead  
 **Date:** 2026-05-10
 
+> **Reading note:** the main body preserves the Stage 0 design language. The
+> implementation outcome below records which “future” stages were subsequently
+> completed.
+
 ---
 
 ## Summary
@@ -18,7 +22,23 @@ eBPF         = passive observed-flow evidence
 D_ij / q_ema = adaptive graph memory that combines both
 ```
 
-This document defines the architecture, security boundaries, data model, and test strategy for the first eBPF prototype. No eBPF code is implemented here — Stage 0 is the design agreement only.
+This document originally defined the architecture, security boundaries, data
+model, and test strategy for the first eBPF prototype. Stage 0 itself contained
+no eBPF implementation; later gates implemented and validated the design.
+
+## Implementation outcome
+
+| Design stage | Outcome |
+|---|---|
+| FlowObservation API | Implemented in Gate I |
+| Aya sidecar observer | Implemented in Gate J |
+| AWS EC2 validation | Completed in Gate J |
+| Adaptive `q_ema` / `D_ij` scoring | Implemented in Gate K/K.1; direct use of eBPF flow frequency remains separate |
+| Native discovery and controlled expansion | Implemented through Gate L/M and PF-1/PF-2 |
+| Payload-free security boundary | Remains the required observer contract |
+
+The historical “Stage 4 / future gate” and “future direction” sections below
+describe the sequence as it was planned, not unfinished work in v0.5.5.
 
 ---
 
@@ -159,7 +179,11 @@ Evidence files: public IPs must be redacted before commit (`<redacted>`). Privat
 The signal quality and reliability of passive eBPF flows is unvalidated. We need to observe the data in production conditions (AWS EC2) before assuming it is a reliable input to scoring. Premature integration risks instability in the scoring model.
 
 **Stage 1:** `POST /flow-observations` ingests events. `GET /flow-observations` exposes them. Scoring unchanged.  
-**Stage 4 / future gate:** After passive evidence is validated and reliable (Stages 2–3), define a reinforcement formula that combines active probe quality and observed flow frequency into `D_ij` / `q_ema`.
+**Stage 4 / later gate:** Gate K/K.1 implemented adaptive `q_ema` / `D_ij`
+scoring, with its formula and calibration in `physarum-server`. That does not by
+itself prove the specific Stage 0 proposal of directly combining eBPF flow
+frequency with active probes; such coupling must be documented and validated
+separately if introduced.
 
 ---
 
@@ -291,11 +315,13 @@ IPv6 flows                      — v1 is IPv4 only
 
 ---
 
-## Future direction — controlled Physarum-inspired expansion
+## Original future direction — controlled Physarum-inspired expansion
 
 The long-term direction is to model agents as computational analogues of Physarum polycephalum. In controlled environments, agents may use eBPF flow evidence and native `physarum-scanner` discovery to identify candidate next steps, expand through the environment, reinforce productive paths, and decay weaker or unproductive paths.
 
-This future work remains intentionally separate from the Stage 0 eBPF design. PR #62 defines the passive flow observation foundation. Native discovery, agent replication, and controlled expansion are defined by later gates.
+This work was intentionally separate from the Stage 0 eBPF design. PR #62
+defined the passive flow observation foundation; later gates implemented native
+discovery, agent replication, and controlled expansion.
 
 The intended sequence:
 
@@ -315,4 +341,4 @@ The intended sequence:
 | 1 | FlowObservation model + POST/GET /flow-observations + unit tests | Gate I — COMPLETED (PR #68) |
 | 2 | physarum-ebpf-observer crate; TCP state tracepoint; posts to server | Gate J — COMPLETED (PR #71) |
 | 3 | AWS EC2 validation — observer sees agent flows; evidence file | Gate J exit — COMPLETED (Issue #69) |
-| 4 | Scoring integration proposal (combine probes + flows) | Gate K |
+| 4 | Adaptive scoring implemented; direct eBPF-frequency coupling remains separate | Gate K/K.1 |

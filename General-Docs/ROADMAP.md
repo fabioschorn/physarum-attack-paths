@@ -2,6 +2,8 @@
 
 Live reference for project status, lab inventory, evidence pipeline design, and planned evolution. The main `README.md` covers architecture, quick-start, and mathematical core.
 
+**Current release:** v0.5.5
+
 ---
 
 ## Safety and scope
@@ -25,13 +27,13 @@ Not allowed:
 
 LLM-assisted behavior is **lab-only**, policy-gated, and disabled unless explicitly configured. CVE-aware reasoning is treated as evidence and proposal generation, not automatic exploitation. `PolicyGate` remains the local decision boundary.
 
-Secure identity, mTLS, signed lineage, and stronger trust controls are defined in Gate N.0 (`General-Docs/GATE_N0_THREAT_MODEL.md`). No production security guarantees are claimed before Gate N.1–N.7 are implemented.
+Secure identity, authenticated channels, signed lineage, and stronger trust controls are defined in Gate N.0 (`General-Docs/GATE_N0_THREAT_MODEL.md`). The v0.5.4 channel hardening is a substantial lab baseline, not completion of the full Gate N trust model. No production security guarantees are claimed before Gate N.1–N.7 are completed.
 
 ---
 
 ## Current status
 
-The current project focus is the `physarum-maze` organism path: LLM-driven template selection, dynamic vulnerability intelligence, multi-target evidence-driven propagation, lineage-recorded policy decisions, and a full channel security stack (encrypted lineage, authenticated delivery, mTLS back-channel, HTTPS browser dashboard).
+The current project focus is the `physarum-maze` organism path: LLM-driven template selection, dynamic vulnerability intelligence, multi-target evidence-driven propagation, lineage-recorded policy decisions, and the v0.5.4 channel hardening stack (encrypted lineage, SCP-first delivery, mTLS back-channel, HTTPS browser dashboard).
 
 | Area | State |
 |---|---|
@@ -52,7 +54,7 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | PF-6 Phase 2 — ephemeral-key SCP propagation, chain lineage | ✔ complete — PR #159 |
 | Issue #144 — Exploit-DB enrichment + `OgnlExec` delivery, host-d validation | ✔ complete — PR #157 |
 | Issue #158 — Propagation bug fixes: lineage-b64, musl binary, SSH-hang | ✔ complete — PR #159 |
-| `physarum-maze` musl static binary (`x86_64-unknown-linux-musl`) | ✔ v0.4.0 |
+| `physarum-maze` musl static binary (`x86_64-unknown-linux-musl`) | ✔ current release build — v0.5.5 |
 | Gate N.0 — secure organism continuity threat model | ✔ design complete — PR #164 |
 | `physarum-maze --server`: live organism graph API + Canvas HTML frontend (Issue #161) | ✔ complete — PR #170 / v0.5.0 |
 | HTTP back-channel `POST /report-colonization` + Phase 1 D_ij emission (Issue #179) | ✔ complete — PR #181 |
@@ -60,9 +62,10 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | CI Docker smoke test — `physarum-maze-lab.Dockerfile` + runtime deps (Issue #183) | ✔ complete — PR #184 |
 | D_ij edge animation — lerp conductivity, fungal palette, dead-end edges (Issue #174) | ✔ complete — PR #185 |
 | Issue #187 — lineage-b64 AES-256-GCM encryption | ✔ complete — PR #192 / v0.5.4 |
-| Issue #188 — bootstrap delivery via SCP (replaces wget + HTTP :8001) | ✔ complete — PR #193 / v0.5.4 |
-| Issue #189 / Gate N.2 — mTLS back-channel, ephemeral CA, per-agent client certs | ✔ complete — PR #194 / v0.5.4 |
+| Issue #188 — SCP-first bootstrap delivery with bounded HTTP fallback for OgnlExec recovery | ✔ complete — PR #193 / v0.5.4 |
+| Issue #189 / Gate N.2 subset — mTLS back-channel, ephemeral CA, per-agent client certs | ✔ complete — PR #194 / v0.5.4 |
 | Issue #190 — HTTPS browser dashboard, ephemeral self-signed cert | ✔ complete — PR #195 / v0.5.4 |
+| Issue #197 — release hygiene, rich build identity, structured help, policy-profile validation and release assets | ✔ complete — PRs #202–#207 / v0.5.5 |
 | Back-channel via SSH — eliminate HTTP exposure on seed (Issue #186, documented) | roadmap — no date |
 | Gate N.1 — Agent DNA: identity capsule design and bootstrap | planned — after Issue #187 |
 | Gate N.3 — Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 |
@@ -141,8 +144,8 @@ Four independent hardening items shipped as a single release milestone. See [`Ge
 
 | Issue | What changed |
 |---|---|
-| #187 / PR #192 | `--lineage-b64` payload encrypted with AES-256-GCM before base64; symmetric key generated once per seed run and delivered to propagated agents via the already-established SSH session — not on the command line |
-| #188 / PR #193 | Propagated agents delivered via SCP only (pubkey injected by CVE exploit); falls back to HTTP pull when OgnlExec is available and SCP auth fails; temporary `:8001` HTTP server eliminated |
+| #187 / PR #192 | Newly generated `--lineage-b64` payload encrypted with AES-256-GCM before base64; the per-run key is injected through the remote SSH bootstrap command/environment rather than the propagated agent's argument list |
+| #188 / PR #193 | Propagated agents use SCP as the primary path; when SCP authentication fails and OgnlExec is available, a temporary HTTP server on the seed's lab-network IP serves the recovery bootstrap and is stopped after the attempt |
 | #189 / PR #194 | Seed generates an ephemeral CA on startup; each propagated agent receives a unique client cert (AES-GCM lineage); back-channel port (`server+1`) requires a valid client cert; validated 3/3 in Docker lab |
 | #190 / PR #195 | `--tls` / `PHYSARUM_TLS=true` enables HTTPS dashboard on port 8443; browser cert and mTLS cert both carry `DistinguishedName` CN/O = "Physarum Attack Path"; CA PEM exported to `/tmp/physarum/ca.pem` |
 
@@ -193,9 +196,10 @@ Four independent hardening items shipped as a single release milestone. See [`Ge
 | Issue #179 | HTTP back-channel `POST /report-colonization` + Phase 1 D_ij emission | ✔ done — PR #181 |
 | Issue #174 | D_ij edge animation — lerp conductivity, fungal palette, dead-end edges | ✔ done — PR #185 |
 | Issue #187 | lineage-b64 → AES-256-GCM — encrypt payload, close ps-aux OPSEC leak | ✔ done — PR #192 / v0.5.4 |
-| Issue #188 | Bootstrap via SCP — replace wget + HTTP :8001 with direct SCP delivery | ✔ done — PR #193 / v0.5.4 |
-| Issue #189 / Gate N.2 | mTLS: authenticated and encrypted channel between organism nodes | ✔ done — PR #194 / v0.5.4 |
+| Issue #188 | SCP-first bootstrap delivery with bounded HTTP fallback for OgnlExec recovery | ✔ done — PR #193 / v0.5.4 |
+| Issue #189 / Gate N.2 subset | mTLS authenticated hop-to-seed reporting channel | ✔ done — PR #194 / v0.5.4 |
 | Issue #190 | HTTPS browser dashboard — ephemeral self-signed cert, `Physarum Attack Path` DN | ✔ done — PR #195 / v0.5.4 |
+| Issue #197 | Release hygiene: rich `--version`, structured `--help`, policy validation and release workflow/assets | ✔ done — PRs #202–#207 / v0.5.5 |
 | Back-channel via SSH (#186) | Replace HTTP `/report-colonization` with SSH exec — seed exposes port 22 only | no date — see section below |
 | Gate N.1 | Agent DNA: identity capsule design and bootstrap | planned — after Issue #187 |
 | Gate N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 |
@@ -240,30 +244,62 @@ Wired into the PF-6 four-container lab (`./docker/pf6-lab.sh --phase2`). Zero ex
 Four independent hardening items that close the main OPSEC exposure vectors before Gate N implementation begins. See [`General-Docs/CHANNEL_SECURITY_DESIGN.md`](./CHANNEL_SECURITY_DESIGN.md) for full design.
 
 **Issue #187 / PR #192 — AES-256-GCM lineage encryption:**
-`--lineage-b64` payload is encrypted with AES-256-GCM. Key generated once per seed run, delivered to propagated agents via the already-established SSH session (not on the command line). Closes the `ps aux` leak of the full attack path on compromised hosts.
+Newly generated `--lineage-b64` payloads are encrypted with AES-256-GCM. The
+key is generated once per seed run and injected through the remote SSH bootstrap
+command/environment rather than the propagated agent's argument list. This
+hides the full lineage content from the propagated process argv, but a privileged
+observer may still see bootstrap material while SSH is running. Legacy plaintext
+base64 input and the plain JSON lineage save remain compatibility limitations.
 
-**Issue #188 / PR #193 — SCP bootstrap delivery:**
-Propagated agents delivered exclusively via SCP after pubkey injection by the CVE exploit. Falls back to HTTP pull when OgnlExec is available and SCP auth fails. Eliminates the temporary HTTP server on port `:8001`; all delivery stays inside the encrypted SSH channel.
+**Issue #188 / PR #193 — SCP-first bootstrap delivery:**
+Propagated agents use SCP after pubkey injection by the CVE exploit. When SCP authentication fails and an OgnlExec step is available, the seed starts a temporary HTTP server on its lab-network IP at port `:8001`, serves the recovery bootstrap, retries SCP, and then stops the server. The normal path stays inside SSH; the fallback remains a deliberately bounded lab mechanism.
 
 **Issue #189 / PR #194 — mTLS back-channel:**
 Seed generates an ephemeral CA on startup. Each propagated agent receives a unique TLS client cert (embedded in the AES-GCM encrypted lineage) before deployment. The back-channel port (`server_port + 1`) uses `WebPkiClientVerifier` — no cert, no report. Validated 3/3 back-channel reports in the Docker lab (`.4` depth=1, `.3` depth=2, `.5` depth=3).
+
+The browser server still carries the legacy report route without client
+certificate authentication. Current propagated agents prefer the dedicated
+mTLS port when issued PKI material is present; removing or authenticating the
+compatibility route is still pending.
 
 **Issue #190 / PR #195 — HTTPS browser dashboard:**
 `--tls` / `PHYSARUM_TLS=true` switches the dashboard to HTTPS (default port 8443). Seed issues a browser cert (SAN=`localhost` + `127.0.0.1`) signed by the same ephemeral CA. All three certs (CA, browser, mTLS back-channel) carry `DistinguishedName` CN/O = **Physarum Attack Path**. CA PEM exported to `/tmp/physarum/ca.pem` for optional trust import. Server binds `0.0.0.0` so Docker port-forwarding works. `pf6-lab.sh --phase2` now opens `https://localhost:8443/` automatically.
 
 ---
 
+### v0.5.5 — release identity and operator-facing contract (Issue #197, complete)
+
+The v0.5.5 release turns build provenance, CLI guidance, policy constraints, and
+release artifacts into an explicit operator-facing contract:
+
+- rich `physarum-maze --version` output with commit/build identity and policy profile;
+- structured `--help` grouped by operational concern;
+- validated `lab-only` policy profile and configurable `--llm-allowed-cidr`;
+- release notes and GitHub-displayed SHA-256 digests for published assets;
+- release supersession policy and clearer documentation of historical releases.
+
+Artifact signing remains a future supply-chain improvement; the release workflow
+does not publish a signed checksum manifest. GitHub displays a SHA-256 digest for
+each uploaded asset, but independent cryptographic signatures are not yet
+available.
+
+---
+
 ## Back-channel via SSH — Issue #186 (no implementation date)
 
-> **Motivation:** the current back-channel (`POST /report-colonization`) requires the seed to expose an HTTP port. If the seed runs in an environment where only SSH is available — restricted AWS Security Group, hardened host, corporate firewall — propagated agents receive `connection refused` on `:8080` and no `ColonizationReport` reaches the seed. The graph freezes; the seed becomes blind to downstream colonizations.
+> **Motivation:** the current back-channel (`POST /report-colonization`) requires
+> a dedicated HTTP/mTLS listener in addition to SSH. If the seed runs in an
+> environment where only SSH is allowed — restricted AWS Security Group,
+> hardened host, corporate firewall — no `ColonizationReport` reaches the seed.
+> The graph then becomes blind to downstream colonizations.
 
 ### Current state
 
 ```
-propagated (.4/.3/.5)  ──POST http://seed:8080/report-colonization──▶  seed
-browser               ──GET  http://seed:8080/events──────────────▶  seed
+propagated (.4/.3/.5)  ──mTLS POST https://seed:8444/report-colonization──▶ seed
+browser               ──HTTPS GET https://seed:8443/events──────────────▶ seed
 
-Ports exposed on seed: 22 (SSH) + 8080/8443 (HTTP/HTTPS)
+Typical Phase 2 ports on seed: 22 (SSH) + 8443 (HTTPS dashboard) + 8444 (mTLS reports)
 ```
 
 ### Proposed architecture
