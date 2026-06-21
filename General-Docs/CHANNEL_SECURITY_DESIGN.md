@@ -6,6 +6,66 @@ of the full Gate N.1–N.7 trust model.
 
 ---
 
+## Behavior
+
+The seed prepares everything required to start a propagated agent. No external
+certificate authority or manual certificate provisioning is required for an
+owned lab.
+
+```text
+seed starts
+  -> creates the initial lineage
+  -> generates an ephemeral CA
+  -> generates browser HTTPS and mTLS server certificates
+
+before each propagation
+  -> issues a new client certificate and key for the target agent
+  -> copies the lineage in memory and attaches the CA and client PKI material
+  -> serializes the copy as JSON
+  -> encrypts it with the per-run AES-256-GCM key
+  -> base64-encodes the encrypted payload as --lineage-b64
+  -> copies the physarum-maze binary to the target through SCP
+  -> starts it through SSH with PHYSARUM_LINEAGE_KEY in the bootstrap environment
+
+propagated agent starts
+  -> reads and removes PHYSARUM_LINEAGE_KEY from its environment
+  -> decrypts --lineage-b64
+  -> restores the lineage and continues the organism
+  -> reports downstream colonization to the seed through the mTLS back-channel
+```
+
+The lineage passed to a target is an enriched copy. The seed retains its own
+in-memory lineage and issues different client key material for each propagation
+attempt. Sections [#187](#issue-187--aes-256-gcm-lineage-encryption) through
+[#190](#issue-190--https-browser-dashboard) describe each part in detail.
+
+### Two-instance AWS lab
+
+For a seed instance and one vulnerable target instance, start the seed with both
+the dashboard port and TLS explicitly configured:
+
+```bash
+physarum-maze --server 8443 --tls ...
+```
+
+The seed then listens on `8443` for the HTTPS dashboard and `8444` for mTLS
+colonization reports. Passing `--server 8443` explicitly is currently important:
+the listeners can derive these ports from `--tls` alone, but callback-port
+metadata is written to the lineage from the explicit `--server` value.
+
+The AWS security groups and host firewalls must still permit the intended lab
+traffic: SSH/SCP between the instances, the vulnerable service required by the
+selected lab scenario, and target-to-seed access to the mTLS port. The dashboard
+should preferably be reached through an SSH tunnel rather than exposed broadly.
+
+A two-instance lab validates discovery, exploit-assisted enrollment, SCP
+delivery, encrypted lineage transfer, and startup of the propagated agent. The
+seed records that first hop directly. To exercise a real downstream
+`ColonizationReport` over mTLS, add a third host for the propagated agent to
+colonize, or run a dedicated authenticated back-channel test.
+
+---
+
 ## Motivation
 
 Before v0.5.4, the organism had four open exposure vectors:
