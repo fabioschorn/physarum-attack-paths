@@ -37,32 +37,32 @@ jobs:
           cat > /tmp/release-notes.md << EOF
           ## physarum-attack-paths ${GITHUB_REF_NAME}
 
-          Research milestone release for the current Physarum organism stack.
+          Release hygiene milestone for the controlled Physarum organism stack.
 
           ### Highlights
 
-          - \`physarum-maze\` is the canonical organism binary.
-          - \`physarum-scan\` is the native scanner binary from \`physarum-scanner\`.
-          - \`physarum-spore\` is the native HTTP pattern-evidence binary from \`physarum-sporangium\`.
-          - \`physarum-llm\` contracts, mock/client path, policy gate, and maze hook are present.
-          - Two-container Docker Lab validates the controlled LLM reasoning path.
-          - \`physarum-scanner\` exposes organism-native \`SensingProfile\` / \`SensingResult\` evidence.
-          - \`physarum-sporangium\` introduces native Rust pattern evidence inspired by Nuclei conventions.
-          - Rust 1.86.0 is the pinned project toolchain.
+          - Structured \`physarum-maze --help\` reference with types, defaults, accepted values, and lab examples.
+          - Rich \`physarum-maze --version\` identity with source commit, CI build ID, and \`lab-only\` policy.
+          - Explicit \`--policy-profile lab-only\` selection, enforced before LLM-assisted execution and shown at startup.
+          - \`RELEASE.md\` documents official and modified builds, SHA-256 verification, and the current signing limitation.
+          - Workspace and dashboard version updated to v0.5.5 from \`CARGO_PKG_VERSION\`.
+          - PF-6 Phase 2 validated with a real LLM: 3/3 targets colonized through SCP propagation and the mTLS back-channel.
 
           ### Download
 
-          | Platform     | Artifact |
-          |--------------|----------|
-          | Linux x86_64 | \`physarum-maze-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
-          | Linux x86_64 | \`physarum-scan-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
-          | Linux x86_64 | \`physarum-spore-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
+          | Platform | Artifact |
+          |----------|----------|
+          | Linux x86_64, static musl | \`physarum-maze-${GITHUB_REF_NAME}-x86_64-unknown-linux-musl.tar.gz\` |
+          | Linux x86_64, glibc | \`physarum-maze-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
+          | Linux x86_64, glibc | \`physarum-scan-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
+          | Linux x86_64, glibc | \`physarum-spore-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\` |
 
           ### Installation
 
           \`\`\`bash
-          tar -xzf physarum-maze-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf physarum-maze-${GITHUB_REF_NAME}-x86_64-unknown-linux-musl.tar.gz
           ./physarum-maze --help
+          ./physarum-maze --version
 
           tar -xzf physarum-scan-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz
           ./physarum-scan --help
@@ -76,6 +76,7 @@ jobs:
           This is a controlled research prototype release.
           Use only in owned local, Docker, or AWS lab environments.
           LLM-assisted behavior remains lab-only, bounded, policy-gated, and disabled unless explicitly configured.
+          GitHub displays a SHA-256 digest for each asset. Independent cryptographic artifact signing is not yet implemented; see \`RELEASE.md\`.
           EOF
 
           gh release create "$GITHUB_REF_NAME" \
