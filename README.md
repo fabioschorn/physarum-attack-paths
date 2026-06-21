@@ -127,7 +127,10 @@ The LLM proposes. `PolicyGate` decides. Lineage remembers.
 
 ## LLM and PolicyGate
 
-`physarum-llm` supports mock and OpenAI-compatible client paths.
+`physarum-llm` supports mock and OpenAI-compatible client paths. The LLM
+selects evidence and proposes a propagation strategy, but it does not execute
+actions directly. `PolicyGate` validates the target CIDR, confidence, method,
+artifact type, attempt limit, and explicit exploit opt-in before execution.
 
 ```env
 PHYSARUM_LLM_ENDPOINT=https://api.openai.com
@@ -135,6 +138,55 @@ PHYSARUM_LLM_MODEL=gpt-4o-mini
 LLM_API_KEY=...
 PHYSARUM_LLM_LOG_PROMPTS=false
 ```
+
+### Real LLM lab run with exploit delivery
+
+The following minimal command enables the real LLM path, explicitly allows
+exploit-class propagation, and starts the HTTPS dashboard. Replace the example
+CIDR with the smallest private CIDR containing only your authorized lab
+targets.
+
+```bash
+export LLM_API_KEY="YOUR_API_KEY"
+
+sudo --preserve-env=LLM_API_KEY \
+  /usr/local/bin/physarum-maze \
+  --llm-endpoint https://api.openai.com \
+  --llm-model gpt-4o-mini \
+  --llm-allowed-cidr 10.0.1.0/24 \
+  --exploit-enabled \
+  --server 8443 \
+  --tls
+```
+
+> **Lab-only:** `--exploit-enabled` is an explicit opt-in. Use it only against
+> isolated systems you own or are authorized to test. Targets outside
+> `--llm-allowed-cidr` are rejected by `PolicyGate`.
+
+For a local seed, open:
+
+```text
+https://localhost:8443/
+```
+
+Dashboard credentials:
+
+```text
+username: admin
+password: Physarum-M@z&
+```
+
+For a remote seed such as an EC2 instance, keep port `8443` private and use an
+SSH tunnel from your workstation:
+
+```bash
+ssh -i /path/to/lab-key.pem \
+  -L 8443:127.0.0.1:8443 \
+  ec2-user@SEED_PUBLIC_IP
+```
+
+Then open `https://localhost:8443/`. The dashboard uses an ephemeral
+self-signed certificate, so the browser displays a warning on first access.
 
 Policy rule:
 
