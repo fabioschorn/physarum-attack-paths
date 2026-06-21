@@ -91,23 +91,54 @@ The organism is a research prototype. The threat model is bounded to lab and con
 
 ## Trust topology
 
-```
-             ┌──────────────────────────────────────────┐
-             │  Organism boundary                        │
-             │                                           │
-  operator   │   seed (hop 0)                           │
-  ──────────►│   └─ hop 1                               │
-   port 8080 │      └─ hop 2                            │
-  (--server) │         └─ hop 3                         │
-             │                                           │
-             │   identity:  Agent DNA (inherited)        │
-             │   channel:   SSH / mTLS (Gate N.2)        │
-             │   memory:    Lineage Ledger (signed)       │
-             │   policy:    PolicyGate (local, inherited) │
-             └──────────────────────────────────────────┘
+The current runtime and the Gate N target must be read separately. The first
+diagram describes v0.5.5 behavior; the second describes the intended secure
+architecture.
+
+### v0.5.5 current runtime
+
+```text
+operator/browser -- HTTPS dashboard (typically 8443) --> seed
+
+seed -- SSH/SCP: binary + encrypted propagation state --> hop 1 --> hop 2 ...
+
+propagated hops -- preferred mTLS reports (typically 8444) --> seed
+propagated hops -- legacy HTTP report when mTLS material is absent --> seed
+
+local controls
+  +-- PolicyGate evaluates LLM proposals before execution
+  +-- AES-256-GCM protects newly generated propagation-state payloads
 ```
 
-The operator sees the organism from outside via `--server`. The organism's internal communication (hop to hop, hop to seed) is a separate trust zone.
+This runtime does not yet provide Agent DNA, signed lineage, signed policy
+roots, or mutually authenticated hop-to-hop communication. Browser routes are
+read-oriented, but the organism server also hosts report ingestion.
+
+### Gate N target architecture
+
+```text
+operator
+  |
+  +-- authenticated operator API --> seed trust root
+
+seed trust root
+  +-- issues inherited Agent DNA
+  +-- anchors signed policy roots
+  +-- verifies the append-only Lineage Ledger
+  |
+  +-- mutually authenticated channel --> hop 1 --> hop 2 ...
+                                      |
+                                      +-- signed evidence and lineage entries
+
+validation
+  +-- secure-mode Docker gate
+  +-- secure-mode AWS gate
+```
+
+The operator interface and internal organism channels are separate trust zones.
+The target architecture requires each node to prove inherited membership,
+authenticate its peers, verify policy ancestry, and validate lineage before
+extending it.
 
 ---
 
@@ -149,7 +180,7 @@ hop-to-seed reporting prefers mTLS.
 
 | Channel | Protocol | Direction |
 |---|---|---|
-| Operator browser → seed API | TLS (one-way) | read-only, lab network |
+| Operator browser → seed API | TLS (one-way) | read-oriented dashboard routes, lab network |
 | Hop → seed (back-channel) | mTLS implemented as the preferred channel | evidence + lineage relay |
 | Hop → hop (propagation) | SSH/SCP remains current | binary delivery + lineage inheritance |
 
@@ -242,20 +273,41 @@ Work still required for full Gate N.2:
 | N.0 | This document — threat model and invariants | — |
 | N.1 | Agent DNA: identity capsule design and bootstrap | N.0 |
 | N.2 | mTLS: node-to-node and hop-to-seed authenticated channel | N.1 — hop-to-seed subset implemented by Issue #189 |
-| N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | N.1 |
+| N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | N.1 + deterministic scoring tracked by Issue #201 |
 | N.4 | Policy roots: signed capability manifest, inheritance model | N.1, N.3 |
 | N.5 | Online/Offline Cortex secure mode behavior | N.4 |
 | N.6 | Secure-mode Docker validation lab | N.2, N.3, N.4, N.5 |
 | N.7 | Secure-mode AWS validation lab | N.6 |
 
-Each gate opens with an implementation issue. Each gate closes with tests that validate its invariants. Details are written when code exists, not before.
+Each unfinished gate should open with an implementation issue and close with
+tests that validate its invariants. Details are written when code exists, not
+before.
 
 ---
 
 ## What comes after N.0
 
-The original Gate N.0 design step is complete. The next unfinished architectural
-dependency remains Gate N.1: Agent DNA design and bootstrap implementation.
+Gate N.0 is complete as a threat-model and design baseline. No dedicated
+implementation issue is currently open for Gate N.1.
 
-Issue #161 was subsequently completed as an embedded Canvas HTML visualization;
-it did not depend on the Gate N identity model.
+The remaining sequence is:
+
+1. **Gate N.1 — Agent DNA:** define and implement seed-rooted membership and
+   inherited node identity. This remains the first unfinished identity
+   dependency.
+2. **Gate N.2 — authenticated channels:** Issue #189 implemented the
+   hop-to-seed mTLS subset. Mutually authenticated hop-to-hop communication,
+   credential lifecycle, and fail-closed secure-mode behavior remain pending.
+3. **Deterministic scoring prerequisite:** Issue #201 tracks Phase 2
+   `Q_ij -> q_ema -> D_ij` scoring, lineage-score formalization, and the
+   `physarum-maze` `/paths` endpoint. Deterministic scores are required before
+   those values can become signed lineage facts.
+4. **Gate N.3 — Lineage Ledger:** add per-entry signatures and hash-chain
+   verification after identity and deterministic scoring foundations exist.
+5. **Gates N.4 and N.5:** introduce signed policy roots and secure Online/Offline
+   Cortex behavior.
+6. **Gates N.6 and N.7:** validate the completed secure mode in Docker and owned
+   AWS lab environments.
+
+Completed visualization work such as Issue #161 is part of project history, not
+the remaining Gate N sequence.

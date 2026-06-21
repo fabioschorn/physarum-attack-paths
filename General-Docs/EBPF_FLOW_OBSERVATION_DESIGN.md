@@ -42,6 +42,67 @@ describe the sequence as it was planned, not unfinished work in v0.5.5.
 
 ---
 
+## Behavior
+
+The repository currently uses the same eBPF TCP event source in two distinct
+ways. They share bytecode and event structure, but they serve different
+consumers.
+
+### Sidecar flow telemetry
+
+`physarum-ebpf-observer` is a separate userspace process:
+
+```text
+Linux host
+  -> observer loads the separately compiled eBPF ELF
+  -> attaches physarum_observer to sock/inet_sock_set_state
+  -> kernel program writes TCP state-change metadata to the EVENTS ring buffer
+  -> userspace converts each entry into FlowObservation
+  -> optional --filter-port keeps one destination port
+  -> --dry-run logs the observation without sending it
+  -> otherwise POST /flow-observations to the configured coordinator
+  -> coordinator stores recent observations in a bounded in-memory buffer
+```
+
+The observer requires Linux and bytecode built for `bpfel-unknown-none`. Its
+`agent_id` is supplied by configuration; it is a telemetry label, not
+kernel-derived or cryptographically verified identity. The configured
+coordinator URL determines the transport scheme. The default is ordinary HTTP,
+and this channel does not currently implement mTLS.
+
+Flow observations remain passive telemetry. They do not directly update
+`q_ema`, `D_ij`, or authorization decisions.
+
+### Embedded maze stimulus
+
+`physarum-maze` also has an optional Linux-only consumer enabled with
+`--bpf-bytecode <ELF>`:
+
+```text
+physarum-maze
+  -> loads and attaches the eBPF tracepoint program
+  -> consumes inbound accept events only
+  -> keeps source addresses in the hard-coded 10.60.0.0/16 maze subnet
+  -> forwards the source IP through an internal channel
+  -> treats the event as an "ebpf" discovery stimulus
+  -> runs RuntimeTcpEbpfFast to confirm reachability
+  -> continues through the normal evidence and policy pipeline
+```
+
+This embedded path does not POST `FlowObservation` records to the coordinator.
+It converts a narrow subset of events into discovery stimuli. The hard-coded
+`10.60.0.0/16` filter also means it cannot be reused unchanged in an arbitrary
+AWS VPC CIDR.
+
+### Data boundary
+
+Both paths observe IPv4 TCP connection metadata: addresses, ports, state-change
+event, PID, and the process `comm` field. They do not collect payloads, process
+arguments, environment variables, credentials, certificate contents, or TLS
+handshake data.
+
+---
+
 ## Design decisions
 
 ### 1. Collection approach — Option B: sidecar observer
@@ -207,7 +268,10 @@ Docker Layer 3 in the test strategy is listed as _optional_ — skip to AWS EC2 
 
 ---
 
-### 9. Files, crates, and endpoints to add
+### 9. Original implementation plan
+
+The following list records the staged plan used by Issues #61, #68, and #69.
+The listed crates and endpoints now exist.
 
 **Stage 0 — this document (Issue #61):**
 
@@ -261,9 +325,9 @@ AWS lab: add observer bootstrap to `agent.sh` when `enable_ebpf_observer=true` (
 | `bpf-linker` / BPF toolchain build complexity in CI | Medium | CI needs privileged Linux runner; keep eBPF crate gated behind feature or separate job |
 | macOS dev cannot run eBPF integration tests | Certain | Unit tests only on Mac; integration tests require Linux runner or EC2 SSH |
 | Observer drops events under high throughput | Low for lab scale | Use a BPF ring buffer (`BPF_MAP_TYPE_RINGBUF`) as the preferred prototype transport; expose dropped-event counters in observer logs so losses are visible |
-| Port → agent-id mapping requires configuration | Medium | Observer is configured with `--listen-ports` at startup; coordinator must expose port registry in future |
+| `agent_id` is configuration, not verified identity | Medium | Treat it as a telemetry label; Gate N identity work must not infer membership from this value |
 | Accidental payload capture in a future eBPF program | Low but high impact | Mandatory review rule: no reads from `skb` data pointers; BPF verifier rejects most payload reads anyway |
-| Signal latency — eBPF events arrive after scoring | Medium | Stage 1 collects separately; scoring integration is Stage 2 after signal reliability is confirmed |
+| Signal latency — eBPF events arrive after active probes | Medium | Keep observations as separate telemetry unless a future design explicitly defines and validates direct scoring input |
 | Docker eBPF unreliability | High | Not blocking — skip Docker Layer 3; go to EC2 |
 
 ---
@@ -306,7 +370,7 @@ Payload capture                 — never in this project
 XDP / TC packet hooks           — not in v1
 Production daemon hardening     — deferred
 mTLS between observer and server — deferred
-Scoring changes (D_ij / q_ema) — Stage 2 only
+Direct flow-frequency input to D_ij / q_ema — not implemented
 Large topology (>5 agents)      — deferred
 Cloud-wide flow log ingestion   — out of scope
 Kernel bypass optimization      — out of scope
