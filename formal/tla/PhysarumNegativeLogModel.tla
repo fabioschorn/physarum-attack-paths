@@ -2,6 +2,10 @@
 (*
   Formal model of the negative-log path scoring introduced in Gate K.1.
 
+  Implementation status: this model describes the Phase 2 design target.
+  The current physarum-maze runtime does not expose the complete /paths
+  implementation. Full runtime integration is tracked in Issue #201.
+
   The runtime scoring formula for a path with k directed edges
   (q_ema values q1, q2, ..., qk):
 

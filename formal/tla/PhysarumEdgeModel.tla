@@ -2,6 +2,11 @@
 (*
   Formal model of a single directed adaptive edge in physarum-attack-paths.
 
+  Implementation status: this model describes the Phase 2 design target.
+  The current physarum-maze runtime uses a Phase 1 approximation
+  (LLM confidence as D_ij proxy). Full runtime integration is tracked
+  in Issue #201.
+
   This module captures the core signal pipeline:
 
     ProbeReport -> Q_ij -> q_ema -> D_ij
