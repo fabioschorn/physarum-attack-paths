@@ -54,7 +54,8 @@ The organism as of v0.5.0 is a self-propagating binary that:
 - Scans, discovers, and colonizes lab hosts via SCP + SSH
 - Reasons via LLM (policy-gated, lab-only)
 - Records a cryptographically-naive lineage chain (`--lineage-b64`)
-- Embeds its own Exploit-DB catalog and Nuclei templates
+- Embeds a filtered Exploit-DB metadata catalog and Nuclei detection templates;
+  Exploit-DB scripts are not embedded or executed
 - Produces structured evidence (SensingResult, PatternFinding)
 
 The lineage chain existed but was not signed. The organism had no identity beyond
