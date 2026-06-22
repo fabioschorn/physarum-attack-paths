@@ -38,7 +38,7 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Area | State |
 |---|---|
 | Rust workspace / protocol foundations | ✔ implemented |
-| Adaptive graph scoring (`Q_ij`, `q_ema`, `D_ij`, `/paths`) | ✔ implemented and validated |
+| Adaptive graph scoring | Legacy `physarum-server` formulas and tests exist; `physarum-maze` still emits Phase 1 LLM-confidence conductivity and lacks the full `/paths` endpoint — Issue #201 |
 | Packet and flow observation (`physarum-ebpf`, packet observers) | ✔ implemented for lab research |
 | Native scanner (`physarum-scan` / `physarum-scanner`) | ✔ implemented |
 | Structured sensing (`SensingProfile`, `SensingResult`, `PortScan`) | ✔ implemented |
@@ -66,9 +66,10 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Issue #189 / Gate N.2 subset — mTLS back-channel, ephemeral CA, per-agent client certs | ✔ complete — PR #194 / v0.5.4 |
 | Issue #190 — HTTPS browser dashboard, ephemeral self-signed cert | ✔ complete — PR #195 / v0.5.4 |
 | Issue #197 — release hygiene, rich build identity, structured help, policy-profile validation and release assets | ✔ complete — PRs #202–#207 / v0.5.5 |
+| Issue #201 — deterministic `Q_ij → q_ema → D_ij`, lineage-score model and `/paths` in `physarum-maze` | planned — prerequisite for Gate N.3 |
 | Back-channel via SSH — eliminate HTTP exposure on seed (Issue #186, documented) | roadmap — no date |
 | Gate N.1 — Agent DNA: identity capsule design and bootstrap | planned — after Issue #187 |
-| Gate N.3 — Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 |
+| Gate N.3 — Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 and Issue #201 |
 | Gate N.4–N.7 — Policy roots, Online/Offline Cortex, secure-mode validation labs | planned |
 | AWS Lab with real LLM | planned — after Gate N |
 | Bounded execution primitive expansion | future — post-Gate N |
@@ -223,9 +224,10 @@ Four independent hardening items shipped as a single release milestone. See [`Ge
 | Issue #189 / Gate N.2 subset | mTLS authenticated hop-to-seed reporting channel | ✔ done — PR #194 / v0.5.4 |
 | Issue #190 | HTTPS browser dashboard — ephemeral self-signed cert, `Physarum Attack Path` DN | ✔ done — PR #195 / v0.5.4 |
 | Issue #197 | Release hygiene: rich `--version`, structured `--help`, policy validation and release workflow/assets | ✔ done — PRs #202–#207 / v0.5.5 |
+| Issue #201 | Deterministic graph scoring, formal lineage-score bounds and `/paths` in `physarum-maze` | planned — prerequisite for Gate N.3 |
 | Back-channel via SSH (#186) | Replace HTTP `/report-colonization` with SSH exec — seed exposes port 22 only | no date — see section below |
 | Gate N.1 | Agent DNA: identity capsule design and bootstrap | planned — after Issue #187 |
-| Gate N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 |
+| Gate N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 and Issue #201 |
 | Gate N.4–N.5 | Policy roots, Online/Offline Cortex secure mode | planned |
 | Gate N.6–N.7 | Secure-mode Docker + AWS validation labs | planned |
 | AWS LLM Lab | Real LLM in owned AWS VPC after Gate N | planned |
@@ -377,6 +379,19 @@ Port exposed on seed: port 22 only
 ## Gate N.1–N.7
 
 Full implementation sequence for secure organism continuity. Design captured in `General-Docs/GATE_N0_THREAT_MODEL.md`. Implementation starts after the channel security stack (v0.5.4) is complete.
+
+Issue #201 is the scoring prerequisite for Gate N.3. The LLM continues to
+select CVEs and propose policy-gated strategies; deterministic D_ij scoring
+provides long-term structural memory about path reliability. Lineage entries
+must carry pipeline-computed, formally bounded scores before those entries are
+signed.
+
+```text
+Issue #201 deterministic scoring and /paths
+  → Gate N.3 signed Lineage Ledger
+  → experimental execution recipes and RAG
+  → independent CVE Random Maze benchmarks
+```
 
 ---
 
