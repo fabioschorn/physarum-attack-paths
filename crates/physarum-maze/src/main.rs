@@ -17,6 +17,7 @@ mod lineage;
 mod lineage_crypto;
 mod llm_loop;
 mod propagation;
+pub mod scoring;
 mod server;
 mod tcp;
 mod tls_store;

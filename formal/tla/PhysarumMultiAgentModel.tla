@@ -2,6 +2,11 @@
 (*
   Formal model of the B/C/D multi-agent topology in physarum-attack-paths.
 
+  Implementation status: this model describes the Phase 2 design target.
+  The current physarum-maze runtime uses a Phase 1 approximation
+  (LLM confidence as D_ij proxy). Full runtime integration is tracked
+  in Issue #201.
+
   This module extends the single-edge model (PhysarumEdgeModel.tla) to three
   directed edges relevant to path selection from agent-b to agent-d:
 
