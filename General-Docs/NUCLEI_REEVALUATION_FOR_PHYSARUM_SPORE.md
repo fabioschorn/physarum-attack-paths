@@ -58,7 +58,9 @@ When Issue #131 was scoped, the Manager requested a 13-point comparison of Nucle
 - A single "nginx version detect" template feeds all nginx CVEs simultaneously without requiring N separate template files.
 - The advisory cache can be updated without touching template logic.
 - The LLM reasoning loop receives rich, structured CVE data rather than opaque template IDs.
-- New CVEs are covered by adding an advisory cache entry, not by deploying a new template.
+- New CVEs can be identified and enriched by adding an advisory cache entry,
+  without deploying a CVE-specific template. This does not by itself add an
+  execution path for that CVE.
 
 ### 3.2 Service-Keyed Template Selection
 
@@ -92,6 +94,11 @@ Nuclei does not expose a stable C ABI. `cgo` + `unsafe` FFI from Rust is high-ma
   loading a template does not by itself authorize its execution.
 - Advisory enrichment runs inside the same async task as pattern matching — no IPC
 - `VulnerabilityCandidate` flows directly into `DiscoveryQuery` for LLM reasoning
+
+Detection and execution remain separate trust boundaries. A template match or
+advisory candidate is evidence for reasoning; it does not authorize
+propagation and does not imply that `physarum-maze` has a compatible execution
+recipe. `PolicyGate` and the bounded executor remain responsible for any action.
 
 ---
 

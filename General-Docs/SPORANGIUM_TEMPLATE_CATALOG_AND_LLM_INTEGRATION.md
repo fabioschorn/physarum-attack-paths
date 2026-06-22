@@ -17,7 +17,8 @@ This document covers:
 - The anatomy of a `PatternTemplate` and how its metadata feeds the LLM
 - The `physarum-maze` ↔ `physarum-sporangium` relationship
 - The `nuclei-legacy/` template library inherited from upstream
-- Future template development guidelines
+- Manual template maintenance guidelines
+- The boundary between detection evidence and execution recipes
 
 ---
 
@@ -155,6 +156,32 @@ PatternFinding.extracted_facts["server"] = "nginx/1.18.0"
 
 Nothing in this chain is hardcoded. The CVE emerges from evidence.
 
+### 4.2 Detection is not execution
+
+`physarum-sporangium` produces evidence. It does not provide a generic exploit
+runtime, and a successful matcher does not prove code execution or
+colonization.
+
+```text
+PatternFinding / VulnerabilityCandidate
+  → evidence for LLM reasoning
+  → optional Exploit-DB metadata enrichment
+  → execution recipe selection or generation
+  → PolicyGate
+  → bounded physarum-maze primitive
+  → colonization evidence
+```
+
+The current filtered Exploit-DB catalog contains metadata and paths from the
+upstream index. The referenced exploit scripts are not embedded, downloaded,
+or executed. `OgnlExec` and `FtpModCopy` are concrete execution adapters in
+`physarum-maze`; they are not Sporangium template capabilities.
+
+Future execution coverage is tracked in [`ROADMAP.md`](./ROADMAP.md) through
+typed Rust primitives, declarative `ExploitExecutionRecipe` definitions, and
+RAG-assisted experimental recipe generation. Automatic generation of
+detection templates is not part of that roadmap.
+
 ---
 
 ## 5. physarum-maze ↔ physarum-sporangium Relationship
@@ -273,7 +300,7 @@ This bypasses tag/severity filters and loads only the named template.
 
 ---
 
-## 8. Future Template Development
+## 8. Manual Template Maintenance
 
 ### 8.1 Writing physarum-Native Templates
 
@@ -284,9 +311,9 @@ New templates written specifically for physarum-maze should be placed in `catalo
 
 Templates that map cleanly to Nuclei YAML (HTTP matchers, banner extractors, SSL checks) can be added directly to `nuclei-legacy/` or a `nuclei-physarum/` subdirectory.
 
-### 8.2 physarum-native Subdirectory (Future)
+### 8.2 physarum-native Subdirectory
 
-After PF-6, consider creating:
+When project-specific detection gaps are demonstrated, maintainers may create:
 
 ```text
 crates/physarum-sporangium/templates/nuclei-physarum/
@@ -298,6 +325,10 @@ crates/physarum-sporangium/templates/nuclei-physarum/
 ```
 
 These would be physarum-authored templates, distinct from the upstream `nuclei-legacy/` library, and loaded alongside it via `PHYSARUM_TEMPLATE_DIR`.
+
+This is a manual catalog-maintenance option, not an automatic LLM generation
+pipeline. The primary future research track generates bounded execution
+recipes after CVE identification; it does not synthesize detection templates.
 
 ### 8.3 Advisory Cache as the CVE Layer
 
@@ -312,6 +343,10 @@ CVE-enriched DiscoveryQuery for LLM
 ```
 
 Do not create a separate template per CVE. One `server-version-exposed` template + one advisory cache entry covers the full version range of a CVE automatically.
+
+Here, “covers” means producing a CVE candidate for reasoning. It does not mean
+that the organism can execute or colonize through that CVE. Execution support
+is a separate capability recorded by the recipe and primitive layers.
 
 ---
 

@@ -52,7 +52,7 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Dynamic vulnerability intelligence (`VulnerabilityIntelService`: LocalAdvisoryCache + OsvFeed) | ✔ PF-5.2 — real LLM Docker Lab evidence committed |
 | PF-6 Phase 1 — LLM two-turn selection, multi-target Docker Lab | ✔ complete — PR #140 |
 | PF-6 Phase 2 — ephemeral-key SCP propagation, chain lineage | ✔ complete — PR #159 |
-| Issue #144 — Exploit-DB enrichment + `OgnlExec` delivery, host-d validation | ✔ complete — PR #157 |
+| Issue #144 — Exploit-DB enrichment + `OgnlExec` proof, host-d validation | ✔ complete — PR #157; generic execution remains future work |
 | Issue #158 — Propagation bug fixes: lineage-b64, musl binary, SSH-hang | ✔ complete — PR #159 |
 | `physarum-maze` musl static binary (`x86_64-unknown-linux-musl`) | ✔ current release build — v0.5.5 |
 | Gate N.0 — secure organism continuity threat model | ✔ design complete — PR #164 |
@@ -71,6 +71,10 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Gate N.3 — Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 |
 | Gate N.4–N.7 — Policy roots, Online/Offline Cortex, secure-mode validation labs | planned |
 | AWS Lab with real LLM | planned — after Gate N |
+| Bounded execution primitive expansion | future — post-Gate N |
+| `ExploitExecutionRecipe` runtime registry | contracts exist; loader/resolver/executor integration is future work |
+| RAG-assisted execution-recipe generation | future — after declarative recipe validation |
+| Independent random-CVE benchmark | future — companion `cve-random-maze` research track |
 
 ### Active binaries
 
@@ -136,7 +140,26 @@ Validated chain: `172.21.0.2 → .4 (hops=0) → .3 (hops=1) → .5 (hops=2)`. S
 
 ### Issue #144 — Exploit-DB enrichment and OgnlExec (complete — PR #157)
 
-Exploit-DB CSV (~2 MB, zstd-compressed, embedded via `include_bytes!`) is parsed in memory at startup. The LLM autonomously queries it at enrichment time and generates an `OgnlExec.commands` array targeting host-d (CVE-2021-31805 / Struts 2.5.29) — no hardcoded payloads. `PolicyGate` validates each command element for shell metacharacter injection before execution.
+The current filtered Exploit-DB CSV is zstd-compressed, embedded via
+`include_bytes!`, and parsed into an in-memory CVE index on first use. The
+catalog currently contains eight references covering six unique CVEs. The LLM
+autonomously queries it at enrichment time and generates an
+`OgnlExec.commands` array targeting host-d (CVE-2021-31805 / Struts 2.5.29) —
+no hardcoded command plan. `PolicyGate` validates each command element for
+shell metacharacter injection before execution.
+
+Issue #144 proved one enrichment-to-execution path; it did not make every
+embedded Exploit-DB entry executable. Colonization has been demonstrated for
+three CVEs through two concrete adapters:
+
+```text
+OgnlExec:   CVE-2020-17530, CVE-2021-31805
+FtpModCopy: CVE-2015-3306
+```
+
+The remaining embedded CVEs may be identified and enriched, but do not yet
+have a validated end-to-end execution path. Exploit-DB metadata is evidence
+for reasoning, not executable exploit code.
 
 ### Channel security stack (complete — v0.5.4, Issues #187–#190)
 
@@ -189,7 +212,7 @@ Four independent hardening items shipped as a single release milestone. See [`Ge
 | Issue #131 | Dynamic vulnerability intelligence pipeline | ✔ done — PR #132, #133 |
 | PF-6 Phase 1 | LLM two-turn selection, multi-target dynamic pipeline | ✔ done — PR #140 |
 | PF-6 Phase 2 | Ephemeral-key SCP propagation, chain lineage, musl binary | ✔ done — PR #159 |
-| Issue #144 | Exploit-DB enrichment + autonomous `OgnlExec` delivery | ✔ done — PR #157 |
+| Issue #144 | Exploit-DB enrichment + autonomous `OgnlExec` proof | ✔ done — PR #157 |
 | Issue #158 | Propagation bug fixes: lineage-b64, musl binary, SSH-hang | ✔ done — PR #159 |
 | Issue #89 / Gate N.0 | Secure organism continuity threat model — design only | ✔ done — PR #164 |
 | Issue #161 | `physarum-maze --server`: axum SSE API + Canvas HTML graph, embedded in binary | ✔ done — PR #170 / v0.5.0 |
@@ -206,7 +229,10 @@ Four independent hardening items shipped as a single release milestone. See [`Ge
 | Gate N.4–N.5 | Policy roots, Online/Offline Cortex secure mode | planned |
 | Gate N.6–N.7 | Secure-mode Docker + AWS validation labs | planned |
 | AWS LLM Lab | Real LLM in owned AWS VPC after Gate N | planned |
-| LLM template generation + RAG corpus | LLM auto-generates Nuclei templates for CVEs with no existing template; colonization outcome as ground truth; validated templates seed a RAG corpus for few-shot generation | future — after Gate N |
+| Execution primitive expansion | Add bounded HTTP query/header/body/multipart/path injection and protocol exchange primitives under PolicyGate | future — after Gate N |
+| Declarative execution recipes | Load and resolve `ExploitExecutionRecipe` definitions without recompiling the Rust executor | future — after primitive expansion |
+| LLM execution-recipe generation + RAG corpus | Generate experimental declarative execution recipes; use real outcomes as ground truth and validated triplets as retrieval examples | future — after declarative recipes |
+| Independent random-CVE benchmark | Evaluate fixed agent/model/RAG conditions against reproducible labs selected independently from current agent capabilities | future — companion `cve-random-maze` research track |
 
 ---
 
@@ -216,7 +242,11 @@ Four independent hardening items shipped as a single release milestone. See [`Ge
 
 **PF-6 Phase 2 (PR #159)** — chain propagation through the four-container lab with ephemeral-key SCP, musl static binary, and subshell-nohup SSH fix. `colonized` recorded only after real, evidenced success.
 
-**Issue #144 (PR #157)** — Exploit-DB CSV and Nuclei templates both self-contained in the binary via `include_bytes!`. LLM autonomously generates `OgnlExec.commands` targeting host-d. `PolicyGate` validates each command before execution.
+**Issue #144 (PR #157)** — filtered Exploit-DB CSV and Nuclei templates are
+self-contained in the binary via `include_bytes!`. The LLM autonomously
+generates `OgnlExec.commands` targeting host-d. `PolicyGate` validates each
+command before execution. This is a validated family-specific proof, not a
+generic executor for all Exploit-DB entries.
 
 **Issue #158 (PR #159)** — three propagation bugs fixed: `--lineage-b64` injection into `SshCommand`, musl static binary in Docker builder stage, SSH-hang root cause.
 
@@ -350,29 +380,194 @@ Full implementation sequence for secure organism continuity. Design captured in 
 
 ---
 
-## Future — LLM template generation + RAG corpus (post-Gate N)
+## Future — adaptive execution vocabulary and RAG research (post-Gate N)
 
-When Exploit-DB identifies a CVE with no matching Nuclei template, the agent is blind — sporangium has nothing to run. The long-term direction is to close this gap generically, without manually curating templates for every future lab.
+### Current boundary
 
-**Proposed loop:**
+The current organism is dynamic in discovery, evidence selection, CVE
+enrichment, strategy proposal, policy evaluation, and path ordering. Execution
+remains bounded by the concrete actions implemented in Rust. An Exploit-DB
+reference can tell the LLM what technique may apply, but the referenced
+Python, Ruby, or other exploit file is not embedded, downloaded, or executed.
 
 ```text
-Exploit-DB entry found → no template in catalog for this CVE
-  → LLM receives: Nuclei YAML schema + Exploit-DB entry + N similar validated templates (RAG)
-  → LLM generates a candidate Nuclei YAML template
-  → physarum-sporangium executes the generated template against the target
-  → If Phase 2 colonization succeeds (ground truth = real access):
-      → Template persisted in catalog with confidence score
-      → Triplet (Exploit-DB entry, generated template, outcome) appended to RAG corpus
-  → Next host with similar CVE:
-      → RAG retrieves N most similar validated templates
-      → LLM uses them as few-shot examples → progressively more accurate generation
+embedded CVE reference
+  → LLM can reason about it
+  → PolicyGate can evaluate a proposed strategy
+  → execution succeeds only when the strategy maps to supported primitives
 ```
 
-**Key design constraints:**
-- Sporangium runs existing templates first — LLM generation only triggers for confirmed CVEs with no matching template
-- Ground truth is Phase 2 success, not sporangium matcher alone (false positive in detection ≠ real access)
-- RAG corpus grows from validated triplets only — no untested templates enter the few-shot pool
-- YAML schema must be in the LLM context — Nuclei YAML structure is rigid (matchers, extractors, path templates)
+The next evolution must expand this vocabulary without turning the LLM into an
+unrestricted code executor.
 
-**Relation to existing work:** Issue #144 validated that the LLM can autonomously generate `OgnlExec.commands` from Exploit-DB metadata. This extends the same pattern from command generation to full template generation. Gate N mTLS provides the trust foundation before extending the agent's generative surface.
+### Stage 1 — bounded execution primitives
+
+Add small protocol-aware primitives implemented and constrained in Rust:
+
+```text
+HTTP query injection
+HTTP header injection
+HTTP body injection
+HTTP multipart injection
+HTTP path injection
+bounded TCP request/response exchange
+protocol-specific adapters such as FtpModCopy
+artifact delivery through SCP/SSH
+```
+
+Each primitive must define typed inputs, timeouts, size limits, permitted
+placeholders, response handling, audit evidence, and explicit PolicyGate rules.
+Shell or interpreter access must not become a generic primitive.
+
+### Stage 2 — declarative execution recipes
+
+Connect the existing `ExploitExecutionRecipe`, `RecipeTransport`, and
+`ExploitReference.recipe_id` contracts to the `physarum-maze` runtime.
+
+```text
+CVE evidence
+  → ExploitReference
+  → recipe_id
+  → versioned YAML recipe
+  → bounded Rust primitive
+  → PolicyGate
+  → execution evidence
+```
+
+A recipe describes how to configure approved primitives for a CVE family. It
+does not contain an arbitrary program. Initial work should migrate the three
+demonstrated CVEs to recipes before adding new families.
+
+Acceptance requirements:
+
+- recipe schema validation and deterministic loading;
+- CVE, product, version, architecture, and precondition matching;
+- strict placeholder allowlist;
+- transport-specific PolicyGate validation;
+- maximum command/request counts and payload sizes;
+- recipe version and hash recorded in lineage;
+- positive vulnerable-target and negative patched-target tests;
+- no fallback from an unknown recipe to arbitrary LLM-generated shell.
+
+### Stage 3 — experimental execution-recipe generation
+
+When the existing evidence pipeline identifies a CVE without a compatible
+execution recipe, the LLM may generate a candidate declarative recipe from the
+Exploit-DB entry and similar validated examples retrieved from a RAG corpus.
+
+```text
+identified CVE without a supported execution path
+  → retrieve similar validated triplets
+  → LLM generates candidate declarative recipe
+  → schema and policy validation
+  → isolated experimental execution
+  → outcome recorded
+```
+
+Generated recipes remain experimental. They are not silently promoted into
+the trusted catalog. Existing detection remains the responsibility of the
+current scanner, sporangium catalog, banner/version evidence, and
+`VulnerabilityIntelService`. Automatic generation of detection templates is
+not part of this roadmap. If detection coverage later becomes a measured
+limitation, it should be evaluated as a separate research track.
+
+### Ground truth and RAG corpus
+
+Identification, execution, and colonization are separate outcomes:
+
+```text
+CVE identification   = evidence that a vulnerable condition may exist
+primitive execution  = evidence that a bounded request was delivered
+colonization         = ground truth that the organism obtained real access
+```
+
+The corpus should store both successes and failures:
+
+```text
+Exploit-DB/CVE evidence
++ generated or selected recipe
++ policy decision
++ execution result
++ colonization outcome
+= versioned research triplet
+```
+
+Only positively validated artifacts may be retrieved as trusted few-shot
+examples. Failures remain available for rejection feedback, analysis, and
+negative retrieval, but must not be presented as successful recipes.
+
+### Expected behavior with CVE Random Maze
+
+Challenge generation must remain independent from the agent being evaluated.
+The companion `cve-random-maze` project may select reproducible vulnerable
+fixtures without checking whether the current Physarum build has a matching
+recipe or prior success.
+
+An unsolved but independently validated lab is a valid research result. Before
+each benchmark run, freeze:
+
+- maze seed, topology, CVEs, fixture hashes, and Exploit-DB snapshot;
+- Physarum build identity and policy profile;
+- LLM provider/model and prompt version;
+- RAG corpus version, or an explicit RAG-disabled condition;
+- attempt, token, time, and cost budgets.
+
+For each reachable challenge node, `physarum-maze` should:
+
+```text
+1. collect scanner, banner, service, version, and sporangium evidence;
+2. derive or enrich CVE candidates through VulnerabilityIntelService and Exploit-DB;
+3. use a trusted recipe when one matches the evidence and preconditions;
+4. otherwise retrieve similar validated execution triplets from RAG;
+5. request one bounded experimental recipe from the LLM;
+6. reject recipes that fail schema, capability, scope, or PolicyGate checks;
+7. execute accepted recipes through typed Rust primitives only;
+8. record identification, retrieval, generation, policy, execution, and
+   colonization outcomes in lineage;
+9. continue through another reachable path when policy and attempt budgets allow;
+10. terminate cleanly with `NoPath` when no safe execution path remains.
+```
+
+The agent must not:
+
+- receive the hidden maze solution or CVE assignment from the generator;
+- claim colonization from a detector match or successful HTTP response alone;
+- execute the Exploit-DB script path directly;
+- fall back to arbitrary shell, Python, Ruby, or generated native code;
+- promote an experimental recipe because it merely reached the target;
+- classify an unknown or rejected recipe as a lab-generation failure.
+
+The first successful colonization validates the specific tuple of CVE,
+evidence, recipe version, primitive version, target fixture, architecture, and
+policy context. It does not prove that the recipe works for every deployment of
+that CVE.
+
+Compare at least:
+
+1. base LLM without RAG;
+2. base LLM with Exploit-DB enrichment;
+3. base LLM with Exploit-DB and RAG;
+4. future fine-tuned models under the same frozen benchmark.
+
+Primary measures are correct identification, accepted strategy rate,
+successful execution, colonization depth, false positives, policy rejections,
+attempt count, time, token use, and cost. Additional measures should include:
+
+- known-recipe versus generated-recipe success;
+- retrieval quality and similarity provenance;
+- recipe schema and PolicyGate rejection rates;
+- safe `NoPath` rate;
+- progress through low-, medium-, and high-obviousness mazes;
+- transfer performance on CVE families absent from the trusted RAG corpus.
+
+### Safety sequencing
+
+This work remains post-Gate N because generated execution recipes expand the
+organism's action surface. Signed lineage, stronger identity, authenticated
+policy roots, and secure-mode validation must precede automatic experimental
+execution.
+
+**Relation to existing work:** Issue #144 proved that the LLM can request
+Exploit-DB enrichment and produce a bounded `OgnlExec` plan. The future work
+generalizes that proof through typed primitives and declarative execution
+recipes before adding RAG-assisted recipe generation.
