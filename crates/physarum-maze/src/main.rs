@@ -5,6 +5,8 @@ use std::fmt;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
+use crate::scoring::ScoringMode;
+
 mod agent;
 mod build_info;
 mod discovery;
@@ -95,6 +97,20 @@ pub struct Cli {
         help_heading = "LLM and policy"
     )]
     pub policy_profile: PolicyProfile,
+
+    /// Adaptive edge-scoring policy.
+    ///
+    /// "auto" preserves the Phase 1 value for the first observation of an
+    /// edge and exposes accumulated D_ij on subsequent observations.
+    #[arg(
+        long,
+        value_enum,
+        value_name = "MODE",
+        default_value_t = ScoringMode::Auto,
+        env = "PHYSARUM_SCORING_MODE",
+        help_heading = "Network and lifecycle"
+    )]
+    pub scoring_mode: ScoringMode,
 
     /// Operating mode.
     #[arg(
@@ -404,6 +420,23 @@ mod tests {
     }
 
     #[test]
+    fn scoring_mode_defaults_to_auto_and_accepts_explicit_modes() {
+        let default_cli = Cli::try_parse_from(["physarum-maze"]).unwrap();
+        assert_eq!(default_cli.scoring_mode, ScoringMode::Auto);
+
+        for (value, expected) in [
+            ("auto", ScoringMode::Auto),
+            ("llm", ScoringMode::Llm),
+            ("dij", ScoringMode::Dij),
+        ] {
+            let cli = Cli::try_parse_from(["physarum-maze", "--scoring-mode", value]).unwrap();
+            assert_eq!(cli.scoring_mode, expected);
+        }
+
+        assert!(Cli::try_parse_from(["physarum-maze", "--scoring-mode", "unknown"]).is_err());
+    }
+
+    #[test]
     fn long_help_is_structured_and_lists_every_public_flag() {
         let help = long_help();
 
@@ -419,6 +452,7 @@ mod tests {
         for flag in [
             "--version",
             "--policy-profile",
+            "--scoring-mode",
             "--mode",
             "--interface",
             "--lineage-b64",

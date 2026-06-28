@@ -34,8 +34,11 @@ impl OrganismGraph {
             } => {
                 if let Some(n) = self.nodes.iter_mut().find(|n| &n.id == ip) {
                     n.colonized = true;
-                    n.confidence = *confidence;
-                    n.cve = cve.clone();
+                    n.depth = n.depth.min(*depth);
+                    n.confidence = n.confidence.max(*confidence);
+                    if cve.is_some() {
+                        n.cve = cve.clone();
+                    }
                 } else {
                     self.nodes.push(OrganismNode {
                         id: ip.clone(),
@@ -47,7 +50,7 @@ impl OrganismGraph {
                 }
             }
             EventKind::EdgeAdded { from, to } => {
-                if !self.edges.iter().any(|e| &e.from == from && &e.to == to) {
+                if from != to && !self.edges.iter().any(|e| &e.from == from && &e.to == to) {
                     self.edges.push(OrganismEdge {
                         from: from.clone(),
                         to: to.clone(),
@@ -149,6 +152,18 @@ pub struct ColonizationReport {
     pub confidence: f64,
     /// CVE identifiers referenced in the successful strategy.
     pub cve_ids: Vec<String>,
+    /// Runtime-selected conductivity. Absent in reports from older agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conductivity: Option<f64>,
+    /// Phase 2 EMA state associated with this edge, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub q_ema: Option<f64>,
+    /// Number of observations accumulated for this edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scoring_observations: Option<u64>,
+    /// Effective runtime mode used to select `conductivity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scoring_mode: Option<String>,
 }
 
 #[cfg(test)]
@@ -195,6 +210,39 @@ mod tests {
     }
 
     #[test]
+    fn node_colonization_updates_are_monotonic() {
+        let mut g = OrganismGraph::default();
+        g.apply(&ColonizationEvent::new(EventKind::NodeColonized {
+            ip: "10.0.0.2".into(),
+            depth: 1,
+            confidence: 0.95,
+            cve: Some("CVE-2020-17530".into()),
+        }));
+        g.apply(&ColonizationEvent::new(EventKind::NodeColonized {
+            ip: "10.0.0.2".into(),
+            depth: 2,
+            confidence: 0.9,
+            cve: None,
+        }));
+
+        let node = &g.nodes[0];
+        assert_eq!(node.depth, 1);
+        assert_eq!(node.confidence, 0.95);
+        assert_eq!(node.cve.as_deref(), Some("CVE-2020-17530"));
+    }
+
+    #[test]
+    fn apply_edge_added_rejects_self_edges() {
+        let mut g = OrganismGraph::default();
+        g.apply(&ColonizationEvent::new(EventKind::EdgeAdded {
+            from: "10.0.0.2".into(),
+            to: "10.0.0.2".into(),
+        }));
+
+        assert!(g.edges.is_empty());
+    }
+
+    #[test]
     fn event_round_trips_json() {
         let ev = ColonizationEvent::new(EventKind::NodeColonized {
             ip: "10.0.0.3".into(),
@@ -210,5 +258,24 @@ mod tests {
         } else {
             panic!("wrong kind");
         }
+    }
+
+    #[test]
+    fn legacy_colonization_report_deserializes_without_scoring_fields() {
+        let report: ColonizationReport = serde_json::from_str(
+            r#"{
+                "hop_ip":"10.0.0.2",
+                "depth":1,
+                "confidence":0.9,
+                "cve_ids":["CVE-2020-17530"]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(report.hop_ip, "10.0.0.2");
+        assert_eq!(report.conductivity, None);
+        assert_eq!(report.q_ema, None);
+        assert_eq!(report.scoring_observations, None);
+        assert_eq!(report.scoring_mode, None);
     }
 }

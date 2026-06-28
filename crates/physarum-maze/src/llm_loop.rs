@@ -40,9 +40,14 @@ pub enum LlmOutcome {
         confidence: f64,
         /// First CVE candidate referenced in the successful attempt, if any.
         cve: Option<String>,
+        /// Mean network-sensing duration per result, used as the RTT proxy.
+        avg_rtt_ms: f64,
     },
     /// All attempts exhausted or LLM returned NoPath — mark target as dead end.
-    DeadEnd,
+    DeadEnd {
+        /// Mean network-sensing duration per result, used as the RTT proxy.
+        avg_rtt_ms: f64,
+    },
 }
 
 /// Run the 6-attempt LLM reasoning loop for `target`.
@@ -65,11 +70,14 @@ pub async fn run(
 
     let evidence_source = stimulus_to_evidence_source(stimulus);
     let profile = stimulus_to_profile(stimulus);
+    let sensing_started = std::time::Instant::now();
     let sensing_results = fingerprint(target, evidence_source, profile).await;
     // Upgrade port-convention results with lightweight banner grabs.
     // Raises confidence 0.5 → 0.65–0.85, sets scheme_hint from banner evidence,
     // and clears recommended_next_probe when the protocol is resolved.
     let sensing_results = banner_grab_all(target, sensing_results).await;
+    let avg_rtt_ms =
+        sensing_started.elapsed().as_secs_f64() * 1_000.0 / sensing_results.len().max(1) as f64;
     let port_scans: Vec<PortScan> = sensing_results
         .iter()
         .map(sensing_result_to_port_scan)
@@ -355,7 +363,7 @@ pub async fn run(
                 enrichment_requested,
                 exploit_reference_id: exploit_reference_id.clone(),
             });
-            return Ok(LlmOutcome::DeadEnd);
+            return Ok(LlmOutcome::DeadEnd { avg_rtt_ms });
         }
 
         // ── Policy gate ───────────────────────────────────────────────────────
@@ -472,6 +480,7 @@ pub async fn run(
             return Ok(LlmOutcome::Propagated {
                 confidence: strategy.confidence as f64,
                 cve: cve_ids.first().cloned(),
+                avg_rtt_ms,
             });
         }
 
@@ -488,7 +497,7 @@ pub async fn run(
         tracing::debug!(%target, "ephemeral SSH keypair removed");
     }
 
-    Ok(LlmOutcome::DeadEnd)
+    Ok(LlmOutcome::DeadEnd { avg_rtt_ms })
 }
 
 // ── Scanner fingerprint ───────────────────────────────────────────────────────

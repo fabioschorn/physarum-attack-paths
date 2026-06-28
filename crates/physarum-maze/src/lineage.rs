@@ -5,6 +5,8 @@ use physarum_llm::LlmAttemptEvidence;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use crate::scoring::{EdgeScoringRecord, RuntimeScoringUpdate, ScoringMode};
+
 pub const LINEAGE_PATH: &str = "/tmp/physarum-lineage.json";
 
 /// Lineage carried by every propagated instance.
@@ -28,6 +30,12 @@ pub struct Lineage {
     pub secondary_conduits: Vec<[String; 2]>,
     /// D_ij edge weights keyed as "src_ip->dst_ip"
     pub scores: HashMap<String, f64>,
+    /// Runtime selection policy inherited by propagated agents.
+    #[serde(default)]
+    pub scoring_mode: ScoringMode,
+    /// Bounded Phase 2 scoring state keyed as "src_ip->dst_ip".
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub edge_scoring: HashMap<String, EdgeScoringRecord>,
     /// UTC timestamp of each successful hop, keyed as "src_ip->dst_ip"
     pub transitions: HashMap<String, String>,
     /// Total hops from origin
@@ -77,6 +85,8 @@ impl Lineage {
             colonized: HashSet::new(),
             secondary_conduits: Vec::new(),
             scores: HashMap::new(),
+            scoring_mode: ScoringMode::Auto,
+            edge_scoring: HashMap::new(),
             transitions: HashMap::new(),
             hops: 0,
             started_at: now.clone(),
@@ -156,6 +166,34 @@ impl Lineage {
         self.updated_at = Utc::now().to_rfc3339();
     }
 
+    /// Record one observation for a directed edge and return the conductivity
+    /// selected by the inherited runtime scoring policy.
+    pub fn observe_edge(
+        &mut self,
+        from_ip: &str,
+        to_ip: &str,
+        success_rate: f64,
+        avg_rtt_ms: f64,
+        phase1_conductivity: f64,
+    ) -> RuntimeScoringUpdate {
+        let edge = format!("{from_ip}->{to_ip}");
+        let update = self.edge_scoring.entry(edge).or_default().observe(
+            self.scoring_mode,
+            success_rate,
+            avg_rtt_ms,
+            phase1_conductivity,
+        );
+        self.updated_at = Utc::now().to_rfc3339();
+        update
+    }
+
+    #[cfg(test)]
+    fn scoring_for_edge(&self, from_ip: &str, to_ip: &str) -> Option<EdgeScoringRecord> {
+        self.edge_scoring
+            .get(&format!("{from_ip}->{to_ip}"))
+            .copied()
+    }
+
     pub fn is_visited(&self, ip: &str) -> bool {
         self.visited.contains(ip)
     }
@@ -201,5 +239,57 @@ impl Lineage {
 
     fn edge_key(&self, dst_ip: &str) -> String {
         format!("{}->{}", self.path.last().unwrap_or(&self.origin), dst_ip)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_lineage_without_phase2_fields_uses_safe_defaults() {
+        let lineage = Lineage::seed("10.0.0.1");
+        let mut value = serde_json::to_value(lineage).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("scoring_mode");
+        object.remove("edge_scoring");
+
+        let decoded: Lineage = serde_json::from_value(value).unwrap();
+
+        assert_eq!(decoded.scoring_mode, ScoringMode::Auto);
+        assert!(decoded.edge_scoring.is_empty());
+    }
+
+    #[test]
+    fn observations_are_isolated_per_directed_edge() {
+        let mut lineage = Lineage::seed("10.0.0.1");
+        lineage.scoring_mode = ScoringMode::Dij;
+
+        lineage.observe_edge("10.0.0.1", "10.0.0.2", 1.0, 20.0, 0.9);
+        lineage.observe_edge("10.0.0.1", "10.0.0.2", 1.0, 20.0, 0.9);
+        lineage.observe_edge("10.0.0.1", "10.0.0.3", 0.0, 20.0, 0.05);
+
+        let live = lineage.scoring_for_edge("10.0.0.1", "10.0.0.2").unwrap();
+        let dead = lineage.scoring_for_edge("10.0.0.1", "10.0.0.3").unwrap();
+
+        assert_eq!(live.observations, 2);
+        assert_eq!(dead.observations, 1);
+        assert!(live.state.d_ij > dead.state.d_ij);
+    }
+
+    #[test]
+    fn scoring_state_survives_json_round_trip() {
+        let mut lineage = Lineage::seed("10.0.0.1");
+        lineage.scoring_mode = ScoringMode::Dij;
+        lineage.observe_edge("10.0.0.1", "10.0.0.2", 1.0, 30.0, 0.8);
+
+        let json = serde_json::to_string(&lineage).unwrap();
+        let decoded: Lineage = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded.scoring_mode, ScoringMode::Dij);
+        assert_eq!(
+            decoded.scoring_for_edge("10.0.0.1", "10.0.0.2"),
+            lineage.scoring_for_edge("10.0.0.1", "10.0.0.2")
+        );
     }
 }

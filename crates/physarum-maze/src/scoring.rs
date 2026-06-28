@@ -4,6 +4,10 @@
 //! Callers own edge identity and persistence; this module only evolves the
 //! bounded mathematical state for one directed edge.
 
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+
 /// Weight assigned to probe success in `Q_ij`.
 pub const SUCCESS_WEIGHT: f64 = 0.7;
 /// Weight assigned to normalized latency in `Q_ij`.
@@ -13,13 +17,45 @@ pub const EMA_ALPHA: f64 = 0.3;
 /// Conductivity decay applied on every update.
 pub const DECAY_RATE: f64 = 0.1;
 
+/// Runtime policy for choosing which conductivity is exposed to the graph.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum ScoringMode {
+    /// Preserve the Phase 1 value for a new edge, then use D_ij once history exists.
+    #[default]
+    Auto,
+    /// Always expose the Phase 1 LLM/fallback conductivity.
+    Llm,
+    /// Always expose the full Phase 2 D_ij pipeline.
+    Dij,
+}
+
+impl fmt::Display for ScoringMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Auto => f.write_str("auto"),
+            Self::Llm => f.write_str("llm"),
+            Self::Dij => f.write_str("dij"),
+        }
+    }
+}
+
 /// Bounded adaptive state for one directed edge.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct EdgeScoringState {
     /// Exponential moving average of `Q_ij`, in `[0.0, 1.0]`.
     pub q_ema: f64,
     /// Physarum conductivity `D_ij`, in `[0.0, 1.0]`.
     pub d_ij: f64,
+}
+
+/// Persisted scoring history for one directed edge.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct EdgeScoringRecord {
+    #[serde(default)]
+    pub state: EdgeScoringState,
+    #[serde(default)]
+    pub observations: u64,
 }
 
 /// Values produced by one complete scoring update.
@@ -31,6 +67,16 @@ pub struct ScoringUpdate {
     pub q_ema: f64,
     /// Updated conductivity.
     pub d_ij: f64,
+}
+
+/// Runtime result after the configured selection policy is applied.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RuntimeScoringUpdate {
+    pub requested_mode: ScoringMode,
+    pub effective_mode: ScoringMode,
+    pub conductivity: f64,
+    pub pipeline: ScoringUpdate,
+    pub observations: u64,
 }
 
 impl EdgeScoringState {
@@ -49,6 +95,43 @@ impl From<ScoringUpdate> for EdgeScoringState {
         Self {
             q_ema: update.q_ema,
             d_ij: update.d_ij,
+        }
+    }
+}
+
+impl EdgeScoringRecord {
+    /// Evolve the Phase 2 state and select the conductivity exposed at runtime.
+    ///
+    /// The pipeline always evolves, including in `llm` mode, so an operator can
+    /// later switch to `auto` or `dij` without discarding collected evidence.
+    pub fn observe(
+        &mut self,
+        mode: ScoringMode,
+        success_rate: f64,
+        avg_rtt_ms: f64,
+        phase1_conductivity: f64,
+    ) -> RuntimeScoringUpdate {
+        let had_history = self.observations > 0;
+        let pipeline = self.state.update(success_rate, avg_rtt_ms);
+        self.state = pipeline.into();
+        self.observations = self.observations.saturating_add(1);
+
+        let effective_mode = match mode {
+            ScoringMode::Auto if had_history => ScoringMode::Dij,
+            ScoringMode::Auto | ScoringMode::Llm => ScoringMode::Llm,
+            ScoringMode::Dij => ScoringMode::Dij,
+        };
+        let conductivity = match effective_mode {
+            ScoringMode::Llm => unit_value(phase1_conductivity),
+            ScoringMode::Dij => pipeline.d_ij,
+            ScoringMode::Auto => unreachable!("auto is resolved before conductivity selection"),
+        };
+        RuntimeScoringUpdate {
+            requested_mode: mode,
+            effective_mode,
+            conductivity,
+            pipeline,
+            observations: self.observations,
         }
     }
 }
@@ -241,5 +324,52 @@ mod tests {
             assert!((0.0..=1.0).contains(&update.d_ij));
             state = update.into();
         }
+    }
+
+    #[test]
+    fn auto_preserves_phase1_on_first_observation() {
+        let mut record = EdgeScoringRecord::default();
+        let update = record.observe(ScoringMode::Auto, 1.0, 100.0, 0.9);
+
+        assert_eq!(update.effective_mode, ScoringMode::Llm);
+        assert_close(update.conductivity, 0.9);
+        assert_eq!(update.observations, 1);
+        assert!(record.state.d_ij > 0.0);
+    }
+
+    #[test]
+    fn auto_uses_dij_when_edge_history_exists() {
+        let mut record = EdgeScoringRecord::default();
+        record.observe(ScoringMode::Auto, 1.0, 100.0, 0.9);
+        let update = record.observe(ScoringMode::Auto, 1.0, 100.0, 0.9);
+
+        assert_eq!(update.effective_mode, ScoringMode::Dij);
+        assert_close(update.conductivity, update.pipeline.d_ij);
+        assert_eq!(update.observations, 2);
+    }
+
+    #[test]
+    fn explicit_modes_are_deterministic() {
+        let mut llm_record = EdgeScoringRecord::default();
+        let llm = llm_record.observe(ScoringMode::Llm, 1.0, 100.0, 0.8);
+        assert_eq!(llm.effective_mode, ScoringMode::Llm);
+        assert_close(llm.conductivity, 0.8);
+
+        let mut dij_record = EdgeScoringRecord::default();
+        let dij = dij_record.observe(ScoringMode::Dij, 1.0, 100.0, 0.8);
+        assert_eq!(dij.effective_mode, ScoringMode::Dij);
+        assert_close(dij.conductivity, dij.pipeline.d_ij);
+    }
+
+    #[test]
+    fn llm_mode_still_accumulates_pipeline_history() {
+        let mut record = EdgeScoringRecord::default();
+        for _ in 0..3 {
+            record.observe(ScoringMode::Llm, 1.0, 50.0, 0.75);
+        }
+
+        assert_eq!(record.observations, 3);
+        assert!(record.state.q_ema > 0.0);
+        assert!(record.state.d_ij > 0.0);
     }
 }

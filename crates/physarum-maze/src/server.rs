@@ -153,44 +153,87 @@ async fn report_colonization_handler(
         hop = %report.hop_ip,
         depth = report.depth,
         confidence = report.confidence,
+        scoring_mode = ?report.scoring_mode,
+        q_ema = ?report.q_ema,
+        scoring_observations = ?report.scoring_observations,
         cve_ids = ?report.cve_ids,
         "back-channel: colonization report received"
     );
 
-    let sink = &state.sink;
-
-    // Ensure the colonized hop exists as a node.
-    sink.emit(EventKind::NodeDiscovered {
-        ip: report.hop_ip.clone(),
-        depth: report.depth,
-    })
-    .await;
-
-    // Edge from the reporting hop to the newly colonized host.
-    sink.emit(EventKind::EdgeAdded {
-        from: from_ip.clone(),
-        to: report.hop_ip.clone(),
-    })
-    .await;
-
-    // Mark the hop as colonized with LLM evidence.
-    sink.emit(EventKind::NodeColonized {
-        ip: report.hop_ip.clone(),
-        depth: report.depth,
-        confidence: report.confidence,
-        cve: report.cve_ids.first().cloned(),
-    })
-    .await;
-
-    // D_ij update: use LLM confidence as conductivity (Phase 1 approximation).
-    sink.emit(EventKind::DijUpdated {
-        from: from_ip,
-        to: report.hop_ip.clone(),
-        conductivity: report.confidence.clamp(0.1, 0.95),
-    })
-    .await;
+    let events = {
+        let graph = state.sink.graph.read().await;
+        colonization_report_events(&graph, &from_ip, &report)
+    };
+    for event in events {
+        state.sink.emit(event).await;
+    }
 
     StatusCode::OK
+}
+
+fn colonization_report_events(
+    graph: &OrganismGraph,
+    from_ip: &str,
+    report: &ColonizationReport,
+) -> Vec<EventKind> {
+    let mut events = Vec::new();
+    let existing_node = graph.nodes.iter().find(|node| node.id == report.hop_ip);
+    let report_cve = report.cve_ids.first().cloned();
+
+    if existing_node.is_none() {
+        events.push(EventKind::NodeDiscovered {
+            ip: report.hop_ip.clone(),
+            depth: report.depth,
+        });
+    }
+
+    let improves_node = existing_node.is_none_or(|node| {
+        !node.colonized
+            || report.confidence > node.confidence
+            || (node.cve.is_none() && report_cve.is_some())
+    });
+    if improves_node {
+        events.push(EventKind::NodeColonized {
+            ip: report.hop_ip.clone(),
+            depth: report.depth,
+            confidence: report.confidence,
+            cve: report_cve,
+        });
+    }
+
+    // A propagated agent reports itself on startup. That confirms the node but
+    // does not describe a network edge, so never create hop_ip -> hop_ip.
+    if from_ip == report.hop_ip {
+        return events;
+    }
+
+    let edge_exists = graph
+        .edges
+        .iter()
+        .any(|edge| edge.from == from_ip && edge.to == report.hop_ip);
+    if !edge_exists {
+        events.push(EventKind::EdgeAdded {
+            from: from_ip.to_string(),
+            to: report.hop_ip.clone(),
+        });
+    }
+
+    // New agents send the runtime-selected conductivity. Older agents omit it;
+    // use the Phase 1 fallback only when creating a previously unknown edge.
+    let conductivity = report
+        .conductivity
+        .filter(|value| value.is_finite())
+        .map(|value| value.clamp(0.0, 1.0))
+        .or_else(|| (!edge_exists).then_some(report.confidence.clamp(0.1, 0.95)));
+    if let Some(conductivity) = conductivity {
+        events.push(EventKind::DijUpdated {
+            from: from_ip.to_string(),
+            to: report.hop_ip.clone(),
+            conductivity,
+        });
+    }
+
+    events
 }
 
 async fn graph_handler(State(state): State<AppState>) -> Json<OrganismGraph> {
@@ -243,4 +286,83 @@ async fn events_handler(
     });
 
     Sse::new(replay_stream.chain(live_stream)).keep_alive(KeepAlive::default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use physarum_protocol::{OrganismEdge, OrganismNode};
+
+    fn report(hop_ip: &str, confidence: f64, cve_ids: Vec<&str>) -> ColonizationReport {
+        ColonizationReport {
+            hop_ip: hop_ip.into(),
+            depth: 1,
+            confidence,
+            cve_ids: cve_ids.into_iter().map(str::to_string).collect(),
+            conductivity: None,
+            q_ema: None,
+            scoring_observations: None,
+            scoring_mode: None,
+        }
+    }
+
+    #[test]
+    fn startup_report_for_known_node_is_a_noop() {
+        let graph = OrganismGraph {
+            nodes: vec![OrganismNode {
+                id: "10.0.0.2".into(),
+                depth: 1,
+                colonized: true,
+                confidence: 0.95,
+                cve: Some("CVE-2020-17530".into()),
+            }],
+            edges: vec![],
+        };
+
+        let events =
+            colonization_report_events(&graph, "10.0.0.2", &report("10.0.0.2", 0.9, vec![]));
+
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn legacy_report_does_not_overwrite_existing_edge_conductivity() {
+        let graph = OrganismGraph {
+            nodes: vec![],
+            edges: vec![OrganismEdge {
+                from: "10.0.0.1".into(),
+                to: "10.0.0.2".into(),
+                conductivity: 0.064,
+                timestamp: Utc::now(),
+            }],
+        };
+
+        let events =
+            colonization_report_events(&graph, "10.0.0.1", &report("10.0.0.2", 0.9, vec![]));
+
+        assert!(events
+            .iter()
+            .all(|event| !matches!(event, EventKind::DijUpdated { .. })));
+    }
+
+    #[test]
+    fn downstream_report_creates_edge_and_uses_supplied_dij() {
+        let graph = OrganismGraph::default();
+        let mut report = report("10.0.0.3", 0.95, vec!["CVE-2021-31805"]);
+        report.conductivity = Some(0.061);
+
+        let events = colonization_report_events(&graph, "10.0.0.2", &report);
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EventKind::EdgeAdded { from, to }
+                if from == "10.0.0.2" && to == "10.0.0.3"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EventKind::DijUpdated { conductivity, .. }
+                if (*conductivity - 0.061).abs() < 1e-12
+        )));
+    }
 }
