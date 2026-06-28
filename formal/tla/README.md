@@ -1,12 +1,13 @@
 # TLA+ Formal Models — Adaptive Edge Dynamics
 
-This directory contains three formal specifications for `physarum-attack-paths`:
+This directory contains four formal specifications for `physarum-attack-paths`:
 
 | Module | Scope | SCALE (cfg) | Gate |
 |---|---|---|---|
-| `PhysarumEdgeModel.tla` | Single directed edge — EMA + sigmoid conductivity | 1000 | Phase 1 |
+| `PhysarumEdgeModel.tla` | Single directed edge — EMA + sigmoid conductivity | 1000 | Phase 2 |
 | `PhysarumMultiAgentModel.tla` | Three directed edges: B→C, C→D, B→D — product scoring | 10 | Gate F |
 | `PhysarumNegativeLogModel.tla` | Three directed edges — negative-log scoring (Gate K.1) | 10 | Gate K.1 |
+| `PhysarumLineageScoreModel.tla` | Bounded contract for legacy lineage score multipliers | 100 | Issue #201 |
 
 ---
 
@@ -212,7 +213,7 @@ through Gate K.1.  Elements of the runtime that are **not yet formally modelled*
 | Multiple agents, concurrent message-passing delays | Not modelled |
 | Coordinator graph state and probe scheduling | Not modelled |
 | 20-sample VecDeque observation window per peer | Not modelled |
-| physarum-maze multiplier scoring (×1.5/×0.05/×0.8/×1.2, PF-1/PF-2) | Not modelled |
+| physarum-maze multiplier scoring (×1.5/×0.05/×0.8/×1.2, PF-1/PF-2) | Modelled as bounded contract in `PhysarumLineageScoreModel.tla` |
 | Secondary conduit detection and lineage recording | Not modelled |
 | physarum-scanner /24 discovery loop and stimulus prioritisation | Not modelled |
 | Causal Continuity Paradox resolution via physarum-llm (Issue #106) | Future formal work |
@@ -451,3 +452,142 @@ TLC version:       TLC2 2026.05.04.141011
   the 3-hop invariant is equivalent by induction on hop count but not verified here)
 - physarum-maze multiplier scoring (×1.5/×0.05/×0.8/×1.2) — different model family
 - Concurrent agent scheduling or observation windows
+
+---
+
+## 10. Lineage multiplier score model — `PhysarumLineageScoreModel.tla`
+
+### 10.1 Motivation
+
+`physarum-maze` still carries a legacy `lineage.scores` map alongside the new
+Phase 2 `edge_scoring` state. The legacy map uses simple multiplicative
+updates:
+
+| Runtime event | Multiplier |
+|---|---:|
+| SSH/SCP success | ×1.5 |
+| SSH launch failed | ×0.5 |
+| Dead end | ×0.05 |
+| Already colonized | ×0.8 |
+| Secondary conduit | ×1.2 |
+
+Those multipliers are useful as lightweight lineage memory, but by themselves
+they are not bounded. In a persistent AWS lab, repeated success can grow:
+
+```text
+1.0 -> 1.5 -> 2.25 -> 3.375 -> ...
+```
+
+That scale does not compose cleanly with D_ij, which is explicitly bounded in
+`[0, 1]`. `PhysarumLineageScoreModel.tla` therefore models the safe contract
+that Issue #201 needs before signed lineage entries in Gate N.3:
+
+```text
+preserve the current multiplier vocabulary
+apply every update through ClampScore
+guarantee MIN_SCORE <= score <= SCORE_CEILING
+```
+
+This is intentionally a formal design target. It does not claim the current
+Rust `lineage.scores` implementation already enforces `SCORE_CEILING`.
+
+### 10.2 Scaled integer representation
+
+With `SCALE = 100`, all runtime multipliers are exact integers:
+
+| Runtime multiplier | TLA+ factor |
+|---|---:|
+| 1.5 | 150 |
+| 0.5 | 50 |
+| 0.05 | 5 |
+| 0.8 | 80 |
+| 1.2 | 120 |
+
+The default model configuration uses:
+
+| Constant | Value | Meaning |
+|---|---:|---|
+| `MIN_SCORE` | 1 | positive floor; avoids integer truncation to zero |
+| `NEUTRAL_SCORE` | 100 | runtime score `1.0` |
+| `SCORE_CEILING` | 1000 | conservative 10× cap over neutral |
+
+Each transition chooses one update from:
+
+```text
+Success, SshFailed, DeadEnd, AlreadyColonized, SecondaryConduit
+```
+
+and applies:
+
+```text
+ScoreAfter(update, score) =
+  ClampScore(score × FactorFor(update) ÷ SCALE)
+```
+
+### 10.3 Invariants
+
+| Invariant | Property |
+|---|---|
+| `TypeOK` | `score ∈ MIN_SCORE..SCORE_CEILING` and update labels are valid |
+| `Safety` | `ScorePositive ∧ ScoreBounded` |
+| `DeadEndPenaltyDominatesReinforcement` | For every reachable score state, one dead-end penalty cannot be erased by one immediate success or secondary-conduit reinforcement |
+| `MixedFailureCyclesContract` | For every reachable score state, success/failure cycles contract instead of drifting upward |
+
+The key dominance property is:
+
+```text
+score × 0.05 × 1.5 = score × 0.075 <= score
+score × 0.05 × 1.2 = score × 0.060 <= score
+```
+
+The mixed-cycle property covers noisy runtime behaviour:
+
+```text
+score × 1.5 × 0.5        = score × 0.75 <= score
+score × 1.5 × 1.2 × 0.05 = score × 0.09 <= score
+```
+
+### 10.4 How to run
+
+```bash
+cd formal/tla
+tlc PhysarumLineageScoreModel.tla -config PhysarumLineageScoreModel.cfg
+```
+
+Or using the JAR:
+
+```bash
+java -jar /path/to/tla2tools.jar \
+  PhysarumLineageScoreModel.tla \
+  -config PhysarumLineageScoreModel.cfg
+```
+
+Expected result:
+
+```text
+Model checking completed. No error has been found.
+```
+
+### 10.5 Actual TLC verification result
+
+```text
+TLC result for PhysarumLineageScoreModel
+Command:           java -XX:+UseParallelGC -jar tla2tools.jar PhysarumLineageScoreModel.tla -config PhysarumLineageScoreModel.cfg
+Result:            Model checking completed. No error has been found.
+Invariants:        TypeOK, Safety, DeadEndPenaltyDominatesReinforcement, MixedFailureCyclesContract
+SCALE:             100  (MIN_SCORE=1, NEUTRAL_SCORE=100, SCORE_CEILING=1000)
+States generated:  14,001
+Distinct states:   2,800
+Search depth:      20
+Finished in:       01s
+TLC version:       TLC2 2026.05.04.141011
+```
+
+### 10.6 What this model does NOT cover
+
+- The Phase 2 `Q_ij -> q_ema -> D_ij` pipeline — covered by
+  `PhysarumEdgeModel.tla`
+- Multi-edge path selection — covered by `PhysarumMultiAgentModel.tla` and
+  `PhysarumNegativeLogModel.tla`
+- Any Rust implementation change to clamp `lineage.scores`
+- Distributed timing, LLM reasoning, PolicyGate decisions, or propagation
