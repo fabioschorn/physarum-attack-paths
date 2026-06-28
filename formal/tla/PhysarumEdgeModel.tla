@@ -4,7 +4,7 @@
 
   Implementation status: this model describes the Phase 2 scoring reference.
   physarum-maze integrates this pipeline through --scoring-mode auto|llm|dij;
-  remaining Issue #201 work covers formal lineage-score bounds and /paths.
+  remaining Issue #201 work covers endpoint/lab validation around path scoring.
 
   This module captures the core signal pipeline:
 
