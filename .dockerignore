@@ -10,6 +10,11 @@ xtask/Cargo.lock
 # External clones — never committed, not needed for Docker build
 RustScan/
 
+# Lab workspaces and runtime volumes — not needed to compile Rust binaries
+examples/
+docker/*-volume/
+docker/lineage/
+
 # VCS
 .git/
 
