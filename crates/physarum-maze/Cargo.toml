@@ -75,6 +75,9 @@ regex-lite = "0.1"
 [build-dependencies]
 zstd = "0.13"
 
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # eBPF ring buffer reader — same version as physarum-ebpf-observer
 aya     = { version = "0.13", features = ["async_tokio"] }
