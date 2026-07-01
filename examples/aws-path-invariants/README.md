@@ -54,7 +54,7 @@ Security-group intent:
 ```text
 laptop → seed-b:     SSH 22, HTTPS dashboard 8443
 laptop → targets:    SSH 22, for Ansible bootstrap/inspection
-targets → seed-b:    internal mTLS/report/bootstrap ports only
+targets → seed-b:    internal mTLS/report/bootstrap ports + ICMP stimulus
 seed-b → target-c:   internal lab traffic
 seed-b → target-e:   internal lab traffic
 target-c → target-d: internal lab traffic
@@ -109,6 +109,7 @@ This first run should prove only that infrastructure is correct:
 - each instance has a public IP;
 - the seed downloaded `/usr/local/bin/physarum-maze` from S3;
 - the seed allows `8443` only from the operator CIDR;
+- the seed allows ICMP only from the lab target security groups;
 - all instances have outbound Internet connectivity;
 - SSH from the operator works for Ansible.
 
@@ -144,6 +145,21 @@ the seed with:
 
 `PolicyGate` will reject LLM-assisted propagation attempts outside this VPC CIDR.
 
+For manual AWS sessions, prefer the longer dormancy window used by the lab
+outputs:
+
+```bash
+sudo --preserve-env=LLM_API_KEY \
+  /usr/local/bin/physarum-maze \
+  --llm-endpoint https://api.openai.com \
+  --llm-model gpt-4o-mini \
+  --llm-allowed-cidr 10.50.0.0/16 \
+  --exploit-enabled \
+  --server 8443 \
+  --tls \
+  --stimulus-timeout-secs 3600
+```
+
 ## Observed discovery and stimulus behavior
 
 The `--llm-allowed-cidr` value is a policy boundary, not a full proactive
@@ -165,13 +181,17 @@ The packet and eBPF paths are also stimulus-driven:
   `--bpf-bytecode` artifact.
 - Passive observation alone does not create traffic. To exercise the current
   stimulus path, a target should send traffic toward the seed, for example
-  `ping -c 1 10.50.20.10` or a TCP connection attempt to `10.50.20.10:22`.
+  `ping -c 1 10.50.20.10`.
 
-The seed security group must also allow the chosen stimulus. If ICMP ingress
-from the target security groups is not present, a target-to-seed ping fails at
-the AWS security-group layer and `physarum-maze` never receives an ICMP event.
-The same principle applies to TCP-SYN stimuli: the seed must allow the tested
+Terraform now allows ICMP ingress from the target security groups to the seed,
+so a target-to-seed ping can reach the ICMP listener and become a real
+`physarum-maze` stimulus. TCP-SYN stimuli follow the same rule: if a later test
+uses a TCP connection attempt, the seed security group must allow the tested
 destination port from the target security group.
+
+After `terraform apply`, use the `manual_stimulus_checks` output as the
+operator-facing checklist. Each command SSHes into one target and sends one ICMP
+echo request to the seed private IP.
 
 The binary also has an inactivity dormancy timer. By default,
 `--stimulus-timeout-secs` is `360`, and the process exits after that many

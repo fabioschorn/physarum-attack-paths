@@ -41,10 +41,19 @@ output "targets" {
 
 output "future_seed_command_shape" {
   description = "Reference command shape for the later Ansible layer. User data installs the binary when enable_seed_artifact_download=true."
-  value       = "sudo --preserve-env=LLM_API_KEY /usr/local/bin/physarum-maze --llm-endpoint https://api.openai.com --llm-model gpt-4o-mini --llm-allowed-cidr ${var.vpc_cidr} --exploit-enabled --server 8443 --tls"
+  value       = "sudo --preserve-env=LLM_API_KEY /usr/local/bin/physarum-maze --llm-endpoint https://api.openai.com --llm-model gpt-4o-mini --llm-allowed-cidr ${var.vpc_cidr} --exploit-enabled --server 8443 --tls --stimulus-timeout-secs 3600"
 }
 
 output "seed_artifact" {
   description = "S3 object used by seed user_data when artifact download is enabled."
   value       = "s3://${var.artifact_bucket}/${var.artifact_prefix}/physarum-maze"
+}
+
+output "manual_stimulus_checks" {
+  description = "Manual target-to-seed ICMP stimulus commands for the next AWS validation pass."
+  value = {
+    target_c_icmp = "ssh ec2-user@${aws_instance.target_c.public_ip} 'ping -c 1 ${aws_instance.seed.private_ip}'"
+    target_d_icmp = "ssh ec2-user@${aws_instance.target_d.public_ip} 'ping -c 1 ${aws_instance.seed.private_ip}'"
+    target_e_icmp = "ssh ec2-user@${aws_instance.target_e.public_ip} 'ping -c 1 ${aws_instance.seed.private_ip}'"
+  }
 }
