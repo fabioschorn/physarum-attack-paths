@@ -47,7 +47,7 @@ cat > /etc/physarum-path-invariants.json <<EOF
   "role": "seed",
   "vpc_cidr": "$VPC_CIDR",
   "physarum_maze": "/usr/local/bin/physarum-maze",
-  "suggested_launch": "sudo --preserve-env=LLM_API_KEY /usr/local/bin/physarum-maze --llm-endpoint https://api.openai.com --llm-model gpt-4o-mini --llm-allowed-cidr $VPC_CIDR --exploit-enabled --server 8443 --tls"
+  "suggested_launch": "sudo --preserve-env=LLM_API_KEY /usr/local/bin/physarum-maze --llm-endpoint https://api.openai.com --llm-model gpt-4o-mini --llm-allowed-cidr $VPC_CIDR --exploit-enabled --server 8443 --tls --stimulus-timeout-secs 3600"
 }
 EOF
 

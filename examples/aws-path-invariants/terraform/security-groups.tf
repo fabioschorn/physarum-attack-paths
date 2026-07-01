@@ -156,6 +156,22 @@ resource "aws_security_group_rule" "seed_bootstrap_from_targets" {
   security_group_id        = aws_security_group.seed.id
 }
 
+resource "aws_security_group_rule" "seed_icmp_from_targets" {
+  for_each = {
+    target_c = aws_security_group.target_c.id
+    target_d = aws_security_group.target_d.id
+    target_e = aws_security_group.target_e.id
+  }
+
+  type                     = "ingress"
+  description              = "ICMP stimulus from lab targets to physarum-maze seed"
+  from_port                = -1
+  to_port                  = -1
+  protocol                 = "icmp"
+  source_security_group_id = each.value
+  security_group_id        = aws_security_group.seed.id
+}
+
 # ── Gate K.1-inspired internal path shape ───────────────────────────────────
 
 resource "aws_security_group_rule" "target_c_from_seed" {
