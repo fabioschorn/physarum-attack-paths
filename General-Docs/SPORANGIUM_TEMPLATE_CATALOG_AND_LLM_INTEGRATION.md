@@ -1,7 +1,7 @@
 # physarum-sporangium — Template Catalog and LLM Integration Model
 
 **Issue:** #136  
-**Status:** Current implementation reference through v0.5.5
+**Status:** Current implementation reference through v0.5.6
 **Author:** Dev Lead (AI-assisted)  
 **Date:** 2026-06-05  
 **Related PRs:** #133 (Nuclei port), #132 (VulnIntel pipeline)
@@ -181,6 +181,13 @@ Future execution coverage is tracked in [`ROADMAP.md`](./ROADMAP.md) through
 typed Rust primitives, declarative `ExploitExecutionRecipe` definitions, and
 RAG-assisted experimental recipe generation. Automatic generation of
 detection templates is not part of that roadmap.
+
+The v0.5.6 release does not expand the execution vocabulary itself. Its role is
+to make the resulting organism graph measurable: successful template-informed
+LLM decisions now feed deterministic `Q_ij -> q_ema -> D_ij` scoring and the
+`physarum-maze` `/paths` endpoint. That gives future execution-recipe work a
+stable way to compare valid paths without turning template generation into a
+goal of the project.
 
 ---
 

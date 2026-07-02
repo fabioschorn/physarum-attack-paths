@@ -1,6 +1,6 @@
 # Gate N.0 — Secure Organism Continuity: Threat Model
 
-**Status:** Historical Gate N.0 design baseline, with current-state notes through v0.5.5.
+**Status:** Historical Gate N.0 design baseline, with current-state notes through v0.5.6.
 **Closes:** Issue #89
 **Sequence:** Gate N.0 design → Gate N.1 implementation → … → Gate N.7 AWS lab
 
@@ -19,12 +19,13 @@ threats, and establishes target invariants for the implementation gates.
 
 ## Implementation status after the design
 
-| Area | State through v0.5.5 |
+| Area | State through v0.5.6 |
 |---|---|
 | Propagation-state confidentiality | AES-256-GCM implemented in Issue #187; plaintext legacy input and a plain JSON local save remain |
 | Primary binary delivery | SCP-first delivery implemented in Issue #188; bounded HTTP fallback remains for OgnlExec recovery |
 | Hop → seed reporting | mTLS implemented in Issue #189 with an ephemeral CA and issued client certificates |
 | Operator dashboard | HTTPS available via `--tls` / `PHYSARUM_TLS=true` |
+| Deterministic graph scoring | Issue #201 implemented `Q_ij -> q_ema -> D_ij`, bounded lineage-score modelling, and `GET /paths` in `physarum-maze` |
 | Hop → hop propagation | Still SSH/SCP; full mutually authenticated organism channel is not complete |
 | Agent DNA | Not implemented |
 | Signed Lineage Ledger | Not implemented |
@@ -93,10 +94,10 @@ The organism is a research prototype. The threat model is bounded to lab and con
 ## Trust topology
 
 The current runtime and the Gate N target must be read separately. The first
-diagram describes v0.5.5 behavior; the second describes the intended secure
+diagram describes v0.5.6 behavior; the second describes the intended secure
 architecture.
 
-### v0.5.5 current runtime
+### v0.5.6 current runtime
 
 ```text
 operator/browser -- HTTPS dashboard (typically 8443) --> seed
@@ -109,6 +110,7 @@ propagated hops -- legacy HTTP report when mTLS material is absent --> seed
 local controls
   +-- PolicyGate evaluates LLM proposals before execution
   +-- AES-256-GCM protects newly generated propagation-state payloads
+  +-- deterministic graph scoring and /paths expose bounded path selection
 ```
 
 This runtime does not yet provide Agent DNA, signed lineage, signed policy
@@ -165,7 +167,7 @@ The organism needs to know whether a node belongs to it.
 ## Pillar 2 — Communication
 
 At the v0.5.0 design point, hops talked to each other and to the seed through the
-then-current SSH/HTTP mechanisms. In v0.5.5, propagation remains SSH/SCP while
+then-current SSH/HTTP mechanisms. In v0.5.6, propagation remains SSH/SCP while
 hop-to-seed reporting prefers mTLS.
 
 **Core principle:** node-to-node communication must be mutually authenticated. Neither side should be able to impersonate the other. The channel must be encrypted.
@@ -236,13 +238,13 @@ The organism can reason via LLM and act on that reasoning. This is the highest-r
 ## Security invariants
 
 These are target invariants for the completed Gate N design. They are not all
-guarantees of the v0.5.5 `lab-only` runtime. Known gaps are called out below.
+guarantees of the v0.5.6 `lab-only` runtime. Known gaps are called out below.
 
 1. **No identity, no colonization** — a node that cannot prove inherited identity from a valid parent must not colonize a new host.
 2. **No unsigned lineage append** — a node may not append to the Lineage Ledger without signing its entry.
 3. **No external policy expansion** — no response from an LLM, a remote host, or a relay may expand the action policy beyond what was inherited from the parent.
-4. **Secure mode must be explicit and testable** — v0.5.5 exposes only the `lab-only` policy profile. A future secure profile must fail closed when its identity, lineage-signing, or channel requirements are unavailable.
-5. **Future Lineage Ledger entries must minimize secrets** — v0.5.5 carries issued mTLS client material inside AES-GCM-encrypted propagation state. Gate N.3 must separate transport bootstrap material from the long-lived, auditable ledger.
+4. **Secure mode must be explicit and testable** — v0.5.6 exposes only the `lab-only` policy profile. A future secure profile must fail closed when its identity, lineage-signing, or channel requirements are unavailable.
+5. **Future Lineage Ledger entries must minimize secrets** — v0.5.6 carries issued mTLS client material inside AES-GCM-encrypted propagation state. Gate N.3 must separate transport bootstrap material from the long-lived, auditable ledger.
 6. **Offline does not mean unrestricted** — loss of LLM access narrows the action envelope; it does not widen it.
 
 ---
@@ -274,7 +276,7 @@ Work still required for full Gate N.2:
 | N.0 | This document — threat model and invariants | — |
 | N.1 | Agent DNA: identity capsule design and bootstrap | N.0 |
 | N.2 | mTLS: node-to-node and hop-to-seed authenticated channel | N.1 — hop-to-seed subset implemented by Issue #189 |
-| N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | N.1 + deterministic scoring tracked by Issue #201 |
+| N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | N.1 + deterministic scoring completed by Issue #201 |
 | N.4 | Policy roots: signed capability manifest, inheritance model | N.1, N.3 |
 | N.5 | Online/Offline Cortex secure mode behavior | N.4 |
 | N.6 | Secure-mode Docker validation lab | N.2, N.3, N.4, N.5 |
@@ -299,10 +301,11 @@ The remaining sequence is:
 2. **Gate N.2 — authenticated channels:** Issue #189 implemented the
    hop-to-seed mTLS subset. Mutually authenticated hop-to-hop communication,
    credential lifecycle, and fail-closed secure-mode behavior remain pending.
-3. **Deterministic scoring prerequisite:** Issue #201 tracks Phase 2
+3. **Deterministic scoring prerequisite:** Issue #201 completed Phase 2
    `Q_ij -> q_ema -> D_ij` scoring, lineage-score formalization, and the
-   `physarum-maze` `/paths` endpoint. Deterministic scores are required before
-   those values can become signed lineage facts.
+   `physarum-maze` `/paths` endpoint. The v0.5.6 release gate validated those
+   values in the PF-6 Phase 2 real-LLM lab. Deterministic scores are now ready
+   to become inputs to signed lineage facts.
 4. **Gate N.3 — Lineage Ledger:** add per-entry signatures and hash-chain
    verification after identity and deterministic scoring foundations exist.
 5. **Gates N.4 and N.5:** introduce signed policy roots and secure Online/Offline
