@@ -2,9 +2,11 @@
 useDefault = true
 
 [[allowlists]]
-description = "Exclude vendored and legacy security-scanner sources"
+description = "Exclude vendored corpora and legacy security-scanner sources"
 paths = [
   '''(^|/)crates/physarum-scanner/''',
+  '''(^|/)crates/physarum-maze/data/files_exploits_rce\.csv$''',
+  '''(^|/)crates/physarum-maze/data/files_exploits_rce\.csv\.zst$''',
   '''(^|/)crates/physarum-sporangium/templates/nuclei-legacy/''',
   '''(^|/)docker/lineage/physarum/templates/nuclei-legacy/''',
 ]
