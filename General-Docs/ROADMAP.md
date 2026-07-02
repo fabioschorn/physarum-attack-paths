@@ -6,6 +6,27 @@ Live reference for project status, lab inventory, evidence pipeline design, and 
 
 ---
 
+## Research thesis
+
+The project direction is to measure, in a reproducible, auditable, and
+randomized way, whether RAG, structured evidence, and declarative execution
+recipes improve an autonomous agent's ability to solve real CVE-based
+attack-path labs.
+
+`physarum-maze` owns the agent side of that thesis: sensing, evidence
+normalization, CVE ranking, bounded execution primitives, recipe resolution,
+PolicyGate decisions, lineage, scoring, and outcome telemetry. The companion
+`cve-random-maze` project owns the benchmark side: deterministic maze
+generation, validated random RCE fixtures, Terraform/Ansible lab construction,
+solution hiding, and post-run comparison between generated topology and
+observed lineage.
+
+This roadmap therefore prioritizes dynamic CVE selection, execution vocabulary,
+recipes, and RAG experiments before broader paper-oriented claims. A lab that is
+valid but unsolved remains a useful research outcome.
+
+---
+
 ## Safety and scope
 
 This repository is a **controlled research prototype**. It is intended for owned, isolated, authorized labs only.
@@ -53,6 +74,7 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | PF-6 Phase 1 — LLM two-turn selection, multi-target Docker Lab | ✔ complete — PR #140 |
 | PF-6 Phase 2 — ephemeral-key SCP propagation, chain lineage | ✔ complete — PR #159 |
 | Issue #144 — Exploit-DB enrichment + `OgnlExec` proof, host-d validation | ✔ complete — PR #157; generic execution remains future work |
+| Issue #223 — raw full Exploit-DB corpus embedded in memory | ✔ initial step complete — PR #224; scan-aware ranking remains next |
 | Issue #158 — Propagation bug fixes: lineage-b64, musl binary, SSH-hang | ✔ complete — PR #159 |
 | `physarum-maze` musl static binary (`x86_64-unknown-linux-musl`) | ✔ current release build — v0.5.6 |
 | Gate N.0 — secure organism continuity threat model | ✔ design complete — PR #164 |
@@ -141,12 +163,10 @@ Validated chain: `172.21.0.2 → .4 (hops=0) → .3 (hops=1) → .5 (hops=2)`. S
 
 ### Issue #144 — Exploit-DB enrichment and OgnlExec (complete — PR #157)
 
-The current filtered Exploit-DB CSV is zstd-compressed, embedded via
-`include_bytes!`, and parsed into an in-memory CVE index on first use. The
-catalog currently contains eight references covering six unique CVEs. The LLM
-autonomously queries it at enrichment time and generates an
+Issue #144 introduced the enrichment-to-execution proof: the LLM autonomously
+queried embedded Exploit-DB metadata at enrichment time and generated an
 `OgnlExec.commands` array targeting host-d (CVE-2021-31805 / Struts 2.5.29) —
-no hardcoded command plan. `PolicyGate` validates each command element for
+no hardcoded command plan. `PolicyGate` validated each command element for
 shell metacharacter injection before execution.
 
 Issue #144 proved one enrichment-to-execution path; it did not make every
@@ -161,6 +181,17 @@ FtpModCopy: CVE-2015-3306
 The remaining embedded CVEs may be identified and enriched, but do not yet
 have a validated end-to-end execution path. Exploit-DB metadata is evidence
 for reasoning, not executable exploit code.
+
+### Issue #223 — full Exploit-DB corpus and dynamic CVE selection (in progress)
+
+PR #224 replaced the tiny embedded Exploit-DB fixture with the full upstream
+`files_exploits.csv` corpus and a raw metadata model. At runtime the binary now
+loads the raw corpus into memory and derives the CVE index from it without file
+I/O. The PF-6 Phase 2 real-LLM regression confirmed that the full corpus loads
+and remains operational, but also exposed the next required step: scan-aware and
+primitive-aware CVE ranking. A richer catalog increases recall, but it also
+introduces noise unless service/version evidence, template findings, recipes,
+and execution primitives are ranked together.
 
 ### Channel security stack (complete — v0.5.4, Issues #187–#190)
 
@@ -244,11 +275,12 @@ Four independent hardening items shipped as a single release milestone. See [`Ge
 
 **PF-6 Phase 2 (PR #159)** — chain propagation through the four-container lab with ephemeral-key SCP, musl static binary, and subshell-nohup SSH fix. `colonized` recorded only after real, evidenced success.
 
-**Issue #144 (PR #157)** — filtered Exploit-DB CSV and Nuclei templates are
+**Issue #144 (PR #157)** — Exploit-DB metadata and Nuclei templates are
 self-contained in the binary via `include_bytes!`. The LLM autonomously
 generates `OgnlExec.commands` targeting host-d. `PolicyGate` validates each
 command before execution. This is a validated family-specific proof, not a
-generic executor for all Exploit-DB entries.
+generic executor for all Exploit-DB entries. PR #224 later expanded the
+Exploit-DB metadata from a tiny fixture to the full upstream corpus.
 
 **Issue #158 (PR #159)** — three propagation bugs fixed: `--lineage-b64` injection into `SshCommand`, musl static binary in Docker builder stage, SSH-hang root cause.
 
