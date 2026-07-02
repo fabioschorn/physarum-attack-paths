@@ -19,11 +19,11 @@ mod tests {
 
     #[test]
     fn rich_version_has_stable_operator_facing_shape() {
-        let output = format_build_identity("0.5.5", "abc1234", "ci-42", "lab-only");
+        let output = format_build_identity("0.5.6", "abc1234", "ci-42", "lab-only");
 
         assert_eq!(
             output,
-            "physarum-maze v0.5.5\n  commit:   abc1234\n  build-id: ci-42\n  policy:   lab-only"
+            "physarum-maze v0.5.6\n  commit:   abc1234\n  build-id: ci-42\n  policy:   lab-only"
         );
     }
 

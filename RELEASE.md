@@ -12,7 +12,7 @@ the software suitable for production or unauthorized targets.
 
 An official build is an artifact that:
 
-- is associated with a version tag such as `v0.5.5`;
+- is associated with a version tag such as `v0.5.6`;
 - was built and published by the repository's GitHub Actions release workflow;
 - is available from the official
   [GitHub Releases page](https://github.com/fabioschorn/physarum-attack-paths/releases);
@@ -51,7 +51,7 @@ physarum-maze --version
 Example:
 
 ```text
-physarum-maze v0.5.5
+physarum-maze v0.5.6
   commit:   abc1234
   build-id: github-123456789
   policy:   lab-only
@@ -77,13 +77,13 @@ GitHub displays a SHA-256 digest for each uploaded release asset. After
 downloading an archive, calculate its digest locally:
 
 ```bash
-sha256sum physarum-maze-v0.5.5-x86_64-unknown-linux-musl.tar.gz
+sha256sum physarum-maze-v0.5.6-x86_64-unknown-linux-musl.tar.gz
 ```
 
 On macOS:
 
 ```bash
-shasum -a 256 physarum-maze-v0.5.5-x86_64-unknown-linux-musl.tar.gz
+shasum -a 256 physarum-maze-v0.5.6-x86_64-unknown-linux-musl.tar.gz
 ```
 
 Compare the complete result with the `sha256:` value shown for that asset on

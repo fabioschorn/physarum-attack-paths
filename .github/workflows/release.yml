@@ -37,16 +37,16 @@ jobs:
           cat > /tmp/release-notes.md << EOF
           ## physarum-attack-paths ${GITHUB_REF_NAME}
 
-          Release hygiene milestone for the controlled Physarum organism stack.
+          Deterministic graph scoring and lab-validation milestone for the controlled Physarum organism stack.
 
           ### Highlights
 
-          - Structured \`physarum-maze --help\` reference with types, defaults, accepted values, and lab examples.
-          - Rich \`physarum-maze --version\` identity with source commit, CI build ID, and \`lab-only\` policy.
-          - Explicit \`--policy-profile lab-only\` selection, enforced before LLM-assisted execution and shown at startup.
-          - \`RELEASE.md\` documents official and modified builds, SHA-256 verification, and the current signing limitation.
-          - Workspace and dashboard version updated to v0.5.5 from \`CARGO_PKG_VERSION\`.
-          - PF-6 Phase 2 validated with a real LLM: 3/3 targets colonized through SCP propagation and the mTLS back-channel.
+          - Adaptive runtime \`Q_ij → q_ema → D_ij\` scoring is integrated in \`physarum-maze\` through \`--scoring-mode auto|llm|dij\`.
+          - \`/paths\` exposes Gate K.1 negative-log path scoring with selected path and secondary conduits.
+          - Formal models now include bounded lineage-score multipliers and implementation-scope notes for the Phase 2 scoring target.
+          - AWS path-invariants lab assets validate seed bootstrap, dashboard exposure, and target-to-seed ICMP stimulus.
+          - Workspace and dashboard version updated to v0.5.6 from \`CARGO_PKG_VERSION\`.
+          - PF-6 Phase 2 release gate validated 3/3 targets colonized through SCP propagation and the mTLS back-channel.
 
           ### Download
 
