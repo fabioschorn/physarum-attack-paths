@@ -38,7 +38,8 @@ no eBPF implementation; later gates implemented and validated the design.
 | Payload-free security boundary | Remains the required observer contract |
 
 The historical “Stage 4 / future gate” and “future direction” sections below
-describe the sequence as it was planned, not unfinished work in v0.5.5.
+describe the sequence as it was planned, not unfinished work in the current
+release.
 
 ---
 
