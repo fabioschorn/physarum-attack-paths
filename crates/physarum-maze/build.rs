@@ -10,8 +10,9 @@ fn main() {
 
     println!("cargo:rerun-if-changed=data/files_exploits_rce.csv");
 
-    let csv_bytes = std::fs::read(csv_src)
-        .expect("data/files_exploits_rce.csv not found — place the filtered Exploit-DB CSV there before building");
+    let csv_bytes = std::fs::read(csv_src).expect(
+        "data/files_exploits_rce.csv not found — place the Exploit-DB CSV there before building",
+    );
 
     let compressed = zstd::encode_all(csv_bytes.as_slice(), 19)
         .expect("zstd compression of Exploit-DB CSV failed");
