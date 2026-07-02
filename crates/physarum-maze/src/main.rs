@@ -38,7 +38,7 @@ pub enum Mode {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum PolicyProfile {
-    /// Controlled lab policy; the only supported profile in v0.5.5.
+    /// Controlled lab policy; the only supported profile in v0.5.6.
     #[default]
     LabOnly,
 }
@@ -87,7 +87,7 @@ pub struct Cli {
     )]
     pub version: bool,
 
-    /// Active policy profile. v0.5.5 supports only "lab-only".
+    /// Active policy profile. v0.5.6 supports only "lab-only".
     #[arg(
         long,
         value_enum,

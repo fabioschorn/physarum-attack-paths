@@ -2,7 +2,7 @@
 
 Live reference for project status, lab inventory, evidence pipeline design, and planned evolution. The main `README.md` covers architecture, quick-start, and mathematical core.
 
-**Current release:** v0.5.5
+**Current release:** v0.5.6
 
 ---
 
@@ -38,7 +38,7 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Area | State |
 |---|---|
 | Rust workspace / protocol foundations | ✔ implemented |
-| Adaptive graph scoring | `physarum-maze` now integrates runtime D_ij scoring; Issue #201 is porting negative-log `/paths` and completing lab validation |
+| Adaptive graph scoring | ✔ `physarum-maze` integrates runtime D_ij scoring and Gate K.1 `/paths` — Issue #201 complete |
 | Packet and flow observation (`physarum-ebpf`, packet observers) | ✔ implemented for lab research |
 | Native scanner (`physarum-scan` / `physarum-scanner`) | ✔ implemented |
 | Structured sensing (`SensingProfile`, `SensingResult`, `PortScan`) | ✔ implemented |
@@ -54,7 +54,7 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | PF-6 Phase 2 — ephemeral-key SCP propagation, chain lineage | ✔ complete — PR #159 |
 | Issue #144 — Exploit-DB enrichment + `OgnlExec` proof, host-d validation | ✔ complete — PR #157; generic execution remains future work |
 | Issue #158 — Propagation bug fixes: lineage-b64, musl binary, SSH-hang | ✔ complete — PR #159 |
-| `physarum-maze` musl static binary (`x86_64-unknown-linux-musl`) | ✔ current release build — v0.5.5 |
+| `physarum-maze` musl static binary (`x86_64-unknown-linux-musl`) | ✔ current release build — v0.5.6 |
 | Gate N.0 — secure organism continuity threat model | ✔ design complete — PR #164 |
 | `physarum-maze --server`: live organism graph API + Canvas HTML frontend (Issue #161) | ✔ complete — PR #170 / v0.5.0 |
 | HTTP back-channel `POST /report-colonization` + Phase 1 D_ij emission (Issue #179) | ✔ complete — PR #181 |
@@ -66,7 +66,7 @@ The current project focus is the `physarum-maze` organism path: LLM-driven templ
 | Issue #189 / Gate N.2 subset — mTLS back-channel, ephemeral CA, per-agent client certs | ✔ complete — PR #194 / v0.5.4 |
 | Issue #190 — HTTPS browser dashboard, ephemeral self-signed cert | ✔ complete — PR #195 / v0.5.4 |
 | Issue #197 — release hygiene, rich build identity, structured help, policy-profile validation and release assets | ✔ complete — PRs #202–#207 / v0.5.5 |
-| Issue #201 — deterministic `Q_ij → q_ema → D_ij`, lineage-score model and `/paths` in `physarum-maze` | in progress — prerequisite for Gate N.3 |
+| Issue #201 — deterministic `Q_ij → q_ema → D_ij`, lineage-score model and `/paths` in `physarum-maze` | ✔ complete — v0.5.6; prerequisite satisfied for Gate N.3 |
 | Back-channel via SSH — eliminate HTTP exposure on seed (Issue #186, documented) | roadmap — no date |
 | Gate N.1 — Agent DNA: identity capsule design and bootstrap | planned — after Issue #187 |
 | Gate N.3 — Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 and Issue #201 |
@@ -224,7 +224,7 @@ Four independent hardening items shipped as a single release milestone. See [`Ge
 | Issue #189 / Gate N.2 subset | mTLS authenticated hop-to-seed reporting channel | ✔ done — PR #194 / v0.5.4 |
 | Issue #190 | HTTPS browser dashboard — ephemeral self-signed cert, `Physarum Attack Path` DN | ✔ done — PR #195 / v0.5.4 |
 | Issue #197 | Release hygiene: rich `--version`, structured `--help`, policy validation and release workflow/assets | ✔ done — PRs #202–#207 / v0.5.5 |
-| Issue #201 | Deterministic graph scoring, formal lineage-score bounds and `/paths` in `physarum-maze` | in progress — prerequisite for Gate N.3 |
+| Issue #201 | Deterministic graph scoring, formal lineage-score bounds and `/paths` in `physarum-maze` | ✔ done — v0.5.6; prerequisite satisfied for Gate N.3 |
 | Back-channel via SSH (#186) | Replace HTTP `/report-colonization` with SSH exec — seed exposes port 22 only | no date — see section below |
 | Gate N.1 | Agent DNA: identity capsule design and bootstrap | planned — after Issue #187 |
 | Gate N.3 | Lineage Ledger: per-entry Ed25519 signatures and hash chain | planned — after Gate N.2 and Issue #201 |
@@ -314,6 +314,28 @@ Artifact signing remains a future supply-chain improvement; the release workflow
 does not publish a signed checksum manifest. GitHub displays a SHA-256 digest for
 each uploaded asset, but independent cryptographic signatures are not yet
 available.
+
+---
+
+### v0.5.6 — deterministic graph scoring and release-gate validation (Issue #201, complete)
+
+The v0.5.6 release closes the Issue #201 Phase 2 graph-scoring milestone:
+
+- runtime `Q_ij → q_ema → D_ij` scoring is integrated in `physarum-maze` through
+  `--scoring-mode auto|llm|dij`;
+- lineage-score multiplier behaviour is formalised in
+  `formal/tla/PhysarumLineageScoreModel.tla`;
+- `GET /paths` exposes Gate K.1 negative-log path scoring, selected path, and
+  secondary conduits behind the same Basic Auth boundary as the dashboard;
+- AWS path-invariants lab assets validate seed bootstrap and target-to-seed
+  stimulus without expanding the Issue #201 scope into vulnerable AWS services;
+- PF-6 Phase 2 real-LLM release gate was rerun with the v0.5.6 lab image and
+  confirmed 3/3 colonizations, mTLS back-channel reports, adaptive edge scoring,
+  and `/paths` selection for the full seed → B → C → D chain.
+
+This satisfies the deterministic scoring prerequisite for Gate N.3. Gate N.3
+can now focus on signed lineage entries and hash-chain continuity rather than
+on replacing Phase 1 confidence-only conductivity.
 
 ---
 
